@@ -1,6 +1,6 @@
 /** Core data shapes shared by the server routes and the UI. */
 
-export type Role = "system" | "user" | "assistant";
+export type Role = "system" | "user" | "assistant" | "tool";
 
 export interface Message {
   id: string;
@@ -14,6 +14,15 @@ export interface Message {
   fellBackFrom?: string;
   /** Present when generation failed; content may be partial. */
   error?: string;
+  /** Tool rounds this assistant turn ran, for the UI trace and for replay. */
+  toolRounds?: ToolRound[];
+}
+
+/** One request/response cycle of tool use inside a single assistant turn. */
+export interface ToolRound {
+  round: number;
+  calls: { id: string; name: string; arguments: string }[];
+  results: { toolCallId: string; name: string; content: string; isError: boolean; ms: number }[];
 }
 
 export interface Chat {

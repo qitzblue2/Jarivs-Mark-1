@@ -25,6 +25,12 @@ export interface ProviderConfig {
 export interface WireMessage {
   role: Role;
   content: string;
+  /** Assistant turns that requested tools. */
+  tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[];
+  /** Required on `tool` messages, tying the result to its call. */
+  tool_call_id?: string;
+  /** Tool messages carry the tool name too, for providers that want it. */
+  name?: string;
 }
 
 export interface ChatRequest {
@@ -32,6 +38,8 @@ export interface ChatRequest {
   model: string;
   temperature?: number;
   signal?: AbortSignal;
+  /** OpenAI-shaped tool definitions. Omitted entirely when empty. */
+  tools?: unknown[];
 }
 
 export interface ModelInfo {

@@ -1,12 +1,14 @@
-# JARVIS Mark 1
+# JARVIS Mark 2
 
 A self-hosted AI workspace that runs on **free, fast inference**. Chat list on
-the left, conversation in the middle, live code canvas on the right.
+the left, conversation in the middle, live code canvas on the right — and it
+can now use tools mid-answer instead of only talking.
 
 - **Free to run.** No credit card, no trial clock, no hosting bill.
 - **Fast.** Groq and Cerebras are the two quickest inference providers going.
 - **Provider-agnostic.** Groq, Cerebras and GitHub Models ship in the box;
   adding another is one entry in a config object.
+- **Tool-using.** Calls tools mid-answer and shows you exactly what it ran.
 - **Yours.** Chats are plain JSON files on your disk. Nothing to sign into.
 
 ---
@@ -83,12 +85,41 @@ Model lists are fetched live from each provider, so a deprecated model never
 leaves you stuck (Groq retired its Llama 3.x IDs in June 2026 — a hardcoded
 list would have broken silently).
 
-## 4. Where your data lives
+## 4. Tools
+
+JARVIS can call tools while answering, rather than guessing. Every call is
+shown in an expandable trace under the reply — the tool name, the exact
+arguments, the raw result and how long it took. Nothing runs invisibly.
+
+Shipped so far: `calculate` (arithmetic) and `get_time` (the current date,
+which a language model cannot know on its own).
+
+How the loop works: the model may request tools, they run **server-side**,
+their results go back into the conversation, and the model answers with them.
+That repeats up to **5 rounds**, then tools are withheld so it has to conclude.
+
+Two things worth knowing:
+- **Each round is another API request.** A 3-round answer costs 3 requests
+  against your free-tier limit. The cap exists so a loop cannot drain a quota.
+- **Not every free model supports tools.** If one rejects them, the answer is
+  automatically retried without tools and the UI tells you.
+
+Turn the whole thing off in **Settings → Tool use**.
+
+Adding a tool is one file in `lib/tools/` plus a line in its registry — the
+same pattern as adding a model provider.
+
+> **A note on `calculate`:** it uses a hand-written expression parser, not
+> `eval`. The argument comes from a model, and `eval` on model output hands an
+> attacker the server. Any future tool that touches the network or filesystem
+> gets the same treatment.
+
+## 5. Where your data lives
 
 Chats are JSON files in `./data/chats/`, one per conversation. `data/` is
 gitignored. Back them up by copying the folder; delete one to delete the chat.
 
-## 5. Deploying
+## 6. Deploying
 
 It runs on Vercel's free tier as-is, with one caveat: **serverless filesystems
 are read-only**, so the file store can't persist there. The app detects this
@@ -98,7 +129,7 @@ is a four-method interface and `fs-store.ts` is the reference implementation.
 
 Set your keys as environment variables in the host's dashboard, not in a file.
 
-## 6. Layout
+## 7. Layout
 
 ```
 app/
@@ -106,12 +137,28 @@ app/
   api/models/       live model lists per provider
   api/chats/        chat CRUD
 lib/
+  agent.ts          the tool loop — call, run tools, feed back, repeat
   providers/        registry + one OpenAI-compatible adapter for all of them
+  tools/            tool definitions, registry and runner
   storage/          ChatStore interface, filesystem and memory drivers
   codeblocks.ts     fenced blocks -> canvas artifacts -> preview documents
   tokens.ts         context-window trimming
 components/         Workspace (state) + Sidebar / ChatPane / CodeCanvas
+test/               mock provider, unit tests, browser e2e
 ```
+
+## Testing
+
+```bash
+npm test            # unit tests — parsing, trimming, tool calls, calculator
+./test/start-mock.sh                       # fake provider on :8899
+GROQ_API_KEY=test JARVIS_GROQ_BASE_URL=http://localhost:8899/v1 npm run dev
+npm run test:e2e    # drives a real browser against the mock
+```
+
+The mock streams tool calls the way real providers do — `arguments` split
+mid-JSON across chunks — so the reassembly logic is genuinely exercised
+without spending any free-tier quota.
 
 ### Adding a provider
 

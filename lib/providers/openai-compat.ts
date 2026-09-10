@@ -1,6 +1,6 @@
 import { getProvider } from "./registry";
 import { ProviderError, type ChatRequest, type ModelInfo } from "./types";
-import { trimToBudget, truncateMiddle } from "@/lib/tokens";
+import { estimateTokens, trimToBudget, truncateMiddle } from "@/lib/tokens";
 
 /**
  * One adapter for every OpenAI-compatible provider (Groq, Cerebras, GitHub
@@ -75,6 +75,13 @@ export async function listModels(providerId: string, key: string): Promise<Model
 }
 
 /** Open a streaming completion. Returns the raw upstream SSE body. */
+/** True when the upstream 400 is specifically "this model has no tools". */
+export function isToolsUnsupported(err: unknown): boolean {
+  if (!(err instanceof ProviderError)) return false;
+  if (err.status !== 400 && err.status !== 404 && err.status !== 422) return false;
+  return /tool|function.?call/i.test(err.message);
+}
+
 export async function streamChat(
   providerId: string,
   key: string,
@@ -82,24 +89,38 @@ export async function streamChat(
 ): Promise<ReadableStream<Uint8Array>> {
   const p = getProvider(providerId);
 
-  // Fit the conversation to this provider's free-tier window.
+  // Fit the conversation to this provider's free-tier window, leaving room for
+  // the tool schemas we are about to send alongside it.
+  const toolBudget = req.tools?.length
+    ? estimateTokens(JSON.stringify(req.tools))
+    : 0;
+  const budget = Math.max(1000, p.maxContextTokens - toolBudget);
+
   const capped = req.messages.map((m) => ({
     ...m,
-    content: truncateMiddle(m.content, Math.floor(p.maxContextTokens * 0.6)),
+    content: truncateMiddle(m.content, Math.floor(budget * 0.6)),
   }));
-  const { messages } = trimToBudget(capped, p.maxContextTokens);
+  const { messages } = trimToBudget(capped, budget);
+
+  const body: Record<string, unknown> = {
+    model: req.model,
+    messages,
+    stream: true,
+    temperature: req.temperature ?? 0.7,
+    max_tokens: p.maxOutputTokens,
+  };
+
+  // Send `tools` only when there are some — an empty array upsets some providers.
+  if (req.tools && req.tools.length > 0) {
+    body.tools = req.tools;
+    body.tool_choice = "auto";
+  }
 
   const res = await fetch(`${p.baseUrl}/chat/completions`, {
     method: "POST",
     headers: authHeaders(key),
     signal: req.signal,
-    body: JSON.stringify({
-      model: req.model,
-      messages,
-      stream: true,
-      temperature: req.temperature ?? 0.7,
-      max_tokens: p.maxOutputTokens,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) throw await toProviderError(res, p.label);

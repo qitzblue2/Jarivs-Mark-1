@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, Code2, Menu, Sparkles } from "lucide-react";
+import { ArrowDown, Code2, Info, Menu, Sparkles, X } from "lucide-react";
 import Message from "./Message";
 import Composer from "./Composer";
 import ModelPicker, { type ProviderState } from "./ModelPicker";
@@ -27,6 +27,8 @@ interface Props {
   onToggleCanvas: () => void;
   canvasOpen: boolean;
   artifactCount: number;
+  notice: string | null;
+  onDismissNotice: () => void;
 }
 
 const STARTERS = [
@@ -41,7 +43,7 @@ export default function ChatPane(props: Props) {
     chat, streaming, streamingMessageId, input, onInputChange, onSend, onStop,
     onRegenerate, onEditMessage, onOpenInCanvas, providers, provider, model,
     onModelChange, onOpenSettings, onToggleSidebar, onToggleCanvas, canvasOpen,
-    artifactCount,
+    artifactCount, notice, onDismissNotice,
   } = props;
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -77,7 +79,7 @@ export default function ChatPane(props: Props) {
         </button>
 
         <h1 className="min-w-0 flex-1 truncate text-[13px] font-medium">
-          {chat?.title ?? "JARVIS Mark 1"}
+          {chat?.title ?? "JARVIS Mark 2"}
         </h1>
 
         <ModelPicker
@@ -104,6 +106,16 @@ export default function ChatPane(props: Props) {
         </button>
       </header>
 
+      {notice && (
+        <div className="flex items-start gap-2 border-b border-line-soft bg-warn/10 px-4 py-2 text-[12px] text-warn">
+          <Info size={13} className="mt-0.5 shrink-0" />
+          <span className="min-w-0 flex-1">{notice}</span>
+          <button onClick={onDismissNotice} className="shrink-0 hover:text-ink" title="Dismiss">
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
       <div ref={scroller} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-y-auto">
         {messages.length === 0 ? (
           <div className="flex h-full items-center justify-center p-6">
@@ -111,7 +123,7 @@ export default function ChatPane(props: Props) {
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-arc-dim/10 ring-1 ring-arc-dim/25">
                 <Sparkles size={20} className="text-arc" />
               </div>
-              <h2 className="mb-1 text-lg font-semibold">JARVIS Mark 1</h2>
+              <h2 className="mb-1 text-lg font-semibold">JARVIS Mark 2</h2>
               <p className="mb-5 text-[13px] text-ink-dim">
                 {anyKey
                   ? "Running on free, fast inference. Ask for code and it opens in the canvas."

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AlertTriangle, Check, Copy, Pencil, RefreshCw, X } from "lucide-react";
 import Markdown from "./Markdown";
+import ToolTrace from "./ToolTrace";
 import type { Message as MessageType } from "@/lib/types";
 
 interface Props {
@@ -109,6 +110,9 @@ export default function Message({
             </div>
           ) : (
             <>
+              {message.toolRounds && message.toolRounds.length > 0 && (
+                <ToolTrace rounds={message.toolRounds} pending={isStreaming} />
+              )}
               <Markdown
                 content={message.content}
                 onOpenInCanvas={
@@ -116,7 +120,9 @@ export default function Message({
                 }
               />
               {isStreaming && !message.content && (
-                <span className="streaming-caret text-ink-faint">Thinking</span>
+                <span className="streaming-caret text-ink-faint">
+                  {message.toolRounds?.length ? "Working" : "Thinking"}
+                </span>
               )}
             </>
           )}

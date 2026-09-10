@@ -8,7 +8,7 @@ import SettingsDialog, { DEFAULT_SETTINGS, type Settings } from "./SettingsDialo
 import type { ProviderState } from "./ModelPicker";
 import { consumeJarvisStream } from "@/lib/stream";
 import { artifactsFromMessage, artifactsFromMessages } from "@/lib/codeblocks";
-import { newId, type Chat, type ChatMeta, type Message } from "@/lib/types";
+import { newId, type Chat, type ChatMeta, type Message, type ToolRound } from "@/lib/types";
 
 const SETTINGS_KEY = "jarvis.settings.v1";
 const SELECTION_KEY = "jarvis.selection.v1";
@@ -37,6 +37,7 @@ export default function Workspace() {
 
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [canvasOpen, setCanvasOpen] = useState(false);
@@ -249,6 +250,7 @@ export default function Workspace() {
       let usedModel = model;
       let fellBackFrom: string | undefined;
       let errorMessage: string | undefined;
+      let toolRounds: ToolRound[] = [];
 
       // Groq streams fast enough that a setState per token is wasted work.
       let lastPaint = 0;
@@ -262,7 +264,14 @@ export default function Workspace() {
             ...current,
             messages: current.messages.map((m) =>
               m.id === assistantId
-                ? { ...m, content: acc, provider: usedProvider, model: usedModel, fellBackFrom }
+                ? {
+                    ...m,
+                    content: acc,
+                    provider: usedProvider,
+                    model: usedModel,
+                    fellBackFrom,
+                    toolRounds: toolRounds.length ? toolRounds : undefined,
+                  }
                 : m,
             ),
           };
@@ -280,6 +289,7 @@ export default function Workspace() {
             model,
             temperature: settings.temperature,
             persona: settings.persona,
+            useTools: settings.useTools,
             keys: settings.keys,
           }),
         });
@@ -295,6 +305,17 @@ export default function Workspace() {
           } else if (event.type === "token") {
             acc += event.value;
             paint();
+          } else if (event.type === "tool_start") {
+            // Show the call immediately; results fill in when the round ends.
+            toolRounds = [...toolRounds, { round: event.round, calls: event.calls, results: [] }];
+            paint(true);
+          } else if (event.type === "tool_end") {
+            toolRounds = toolRounds.map((r) =>
+              r.round === event.round ? { ...r, results: event.results } : r,
+            );
+            paint(true);
+          } else if (event.type === "tools_unsupported") {
+            setNotice(`${event.model} does not support tools — answered without them.`);
           } else if (event.type === "error") {
             errorMessage = event.message;
           }
@@ -316,6 +337,7 @@ export default function Workspace() {
         model: usedModel,
         fellBackFrom,
         error: errorMessage,
+        toolRounds: toolRounds.length ? toolRounds : undefined,
       };
 
       const settled: Chat = {
@@ -514,6 +536,8 @@ export default function Workspace() {
             onToggleCanvas={() => setCanvasOpen((v) => !v)}
             canvasOpen={canvasOpen}
             artifactCount={artifacts.length}
+            notice={notice}
+            onDismissNotice={() => setNotice(null)}
           />
         </div>
 

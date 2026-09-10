@@ -18,27 +18,50 @@ export function estimateMessagesTokens(
  * Drop the oldest turns until the conversation fits `budget`, always keeping
  * the system prompt and the most recent message. Without this, Cerebras' free
  * tier starts rejecting requests once a chat passes 8K tokens.
+ *
+ * Tool turns are trimmed as a unit: an assistant message carrying `tool_calls`
+ * and the `tool` results answering it are kept or dropped together. Splitting
+ * them leaves a tool result with no matching call, which providers reject with
+ * a 400 — a worse outcome than dropping one more turn of history.
  */
-export function trimToBudget<T extends { role: string; content: string }>(
-  messages: T[],
-  budget: number,
-): { messages: T[]; dropped: number } {
+export function trimToBudget<
+  T extends { role: string; content: string; tool_calls?: unknown[] },
+>(messages: T[], budget: number): { messages: T[]; dropped: number } {
   const system = messages.filter((m) => m.role === "system");
   const rest = messages.filter((m) => m.role !== "system");
 
-  let used = estimateMessagesTokens(system);
-  const kept: T[] = [];
+  // Group each assistant-with-tool_calls together with the tool results after it.
+  const groups: T[][] = [];
+  for (const message of rest) {
+    const previous = groups[groups.length - 1];
+    const continuesToolGroup =
+      message.role === "tool" &&
+      previous &&
+      (previous[0].role === "assistant" || previous[0].role === "tool");
 
-  // Walk backwards so the newest turns survive.
-  for (let i = rest.length - 1; i >= 0; i--) {
-    const cost = estimateTokens(rest[i].content) + 4;
-    // Always keep at least the latest message, even if it alone blows the budget.
-    if (used + cost > budget && kept.length > 0) break;
-    used += cost;
-    kept.unshift(rest[i]);
+    if (continuesToolGroup) previous.push(message);
+    else groups.push([message]);
   }
 
-  return { messages: [...system, ...kept], dropped: rest.length - kept.length };
+  let used = estimateMessagesTokens(system);
+  const kept: T[][] = [];
+
+  // Walk backwards so the newest turns survive.
+  for (let i = groups.length - 1; i >= 0; i--) {
+    const cost = estimateMessagesTokens(groups[i]);
+    // Always keep at least the latest group, even if it alone blows the budget.
+    if (used + cost > budget && kept.length > 0) break;
+    used += cost;
+    kept.unshift(groups[i]);
+  }
+
+  const flat = kept.flat();
+
+  // A leading orphan can still survive if the newest group itself starts with a
+  // tool result; the provider would reject that, so shed them.
+  while (flat.length > 1 && flat[0].role === "tool") flat.shift();
+
+  return { messages: [...system, ...flat], dropped: rest.length - flat.length };
 }
 
 /**

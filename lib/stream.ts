@@ -6,6 +6,12 @@
 export type JarvisEvent =
   | { type: "meta"; provider: string; model: string; fellBackFrom?: string }
   | { type: "token"; value: string }
+  /** A tool round is starting; `round` is 1-based. */
+  | { type: "tool_start"; round: number; calls: { id: string; name: string; arguments: string }[] }
+  /** That round's results came back. */
+  | { type: "tool_end"; round: number; results: { toolCallId: string; name: string; content: string; isError: boolean; ms: number }[] }
+  /** The model does not support tools; we retried without them. */
+  | { type: "tools_unsupported"; model: string }
   | { type: "done" }
   | { type: "error"; message: string; status?: number };
 
@@ -49,16 +55,91 @@ export async function* readSSE(
   }
 }
 
-/** Pull the incremental text out of an OpenAI-style chunk. */
-export function extractDelta(payload: string): string | null {
+/** One streamed fragment of a tool call, as OpenAI-compatible APIs emit them. */
+export interface ToolCallDelta {
+  index: number;
+  id?: string;
+  name?: string;
+  /** A slice of the JSON arguments string — NOT valid JSON on its own. */
+  arguments?: string;
+}
+
+export interface Chunk {
+  content: string | null;
+  toolCalls: ToolCallDelta[];
+  finishReason: string | null;
+}
+
+/** Pull text, tool-call fragments and the finish reason out of one SSE chunk. */
+export function extractChunk(payload: string): Chunk {
+  const empty: Chunk = { content: null, toolCalls: [], finishReason: null };
   try {
     const json = JSON.parse(payload);
-    const delta = json?.choices?.[0]?.delta;
-    if (typeof delta?.content === "string") return delta.content;
-    // Some providers emit reasoning separately; ignore it in Mark 1.
-    return null;
+    const choice = json?.choices?.[0];
+    const delta = choice?.delta;
+    if (!delta) return { ...empty, finishReason: choice?.finish_reason ?? null };
+
+    const toolCalls: ToolCallDelta[] = Array.isArray(delta.tool_calls)
+      ? delta.tool_calls.map((tc: Record<string, unknown>, i: number) => ({
+          index: typeof tc.index === "number" ? tc.index : i,
+          id: typeof tc.id === "string" ? tc.id : undefined,
+          name: (tc.function as { name?: string } | undefined)?.name,
+          arguments: (tc.function as { arguments?: string } | undefined)?.arguments,
+        }))
+      : [];
+
+    return {
+      content: typeof delta.content === "string" ? delta.content : null,
+      toolCalls,
+      finishReason: choice?.finish_reason ?? null,
+    };
   } catch {
-    return null;
+    return empty;
+  }
+}
+
+/** Kept for the text-only path and existing tests. */
+export function extractDelta(payload: string): string | null {
+  return extractChunk(payload).content;
+}
+
+/**
+ * Reassembles tool calls that arrive in fragments.
+ *
+ * Providers stream `arguments` as a JSON string split across arbitrary chunk
+ * boundaries — often mid-token, e.g. `{"expr` then `ession":"2+` then `2"}`.
+ * Fragments are keyed by `index`, since `id` and `name` typically appear only
+ * on the first fragment of each call. Parsing before the stream ends yields
+ * malformed JSON, so nothing is parsed here.
+ */
+export class ToolCallAccumulator {
+  private byIndex = new Map<number, { id: string; name: string; arguments: string }>();
+
+  add(deltas: ToolCallDelta[]): void {
+    for (const delta of deltas) {
+      const existing = this.byIndex.get(delta.index) ?? { id: "", name: "", arguments: "" };
+      this.byIndex.set(delta.index, {
+        id: delta.id ?? existing.id,
+        name: delta.name ?? existing.name,
+        arguments: existing.arguments + (delta.arguments ?? ""),
+      });
+    }
+  }
+
+  get isEmpty(): boolean {
+    return this.byIndex.size === 0;
+  }
+
+  /** Completed calls in index order. */
+  finish(): { id: string; name: string; arguments: string }[] {
+    return [...this.byIndex.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([index, call]) => ({
+        ...call,
+        // Some providers omit the id entirely; the loop still needs a stable one.
+        id: call.id || `call_${index}`,
+      }))
+      .filter((call) => call.name);
   }
 }
 

@@ -1,15 +1,18 @@
 {
-  "name": "jarvis-mark-1",
+  "name": "jarvis-mark-2",
   "version": "1.0.0",
   "private": true,
-  "description": "JARVIS Mark 1 — a self-hosted AI workspace running on free, fast inference.",
+  "description": "JARVIS Mark 2 \u2014 a self-hosted AI workspace running on free, fast inference.",
   "license": "GPL-3.0",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx test/unit.test.mts",
+    "test:e2e": "node test/e2e.mjs",
+    "mock": "node test/mock-provider.mjs"
   },
   "dependencies": {
     "next": "16.3.4",
@@ -27,6 +30,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "tailwindcss": "4.3.3",
-    "@tailwindcss/postcss": "4.3.3"
+    "@tailwindcss/postcss": "4.3.3",
+    "tsx": "4.23.13"
   }
 }

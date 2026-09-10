@@ -1,8 +1,9 @@
 import { NextRequest } from "next/server";
-import { streamChat } from "@/lib/providers/openai-compat";
+
 import { defaultProviderId, getProvider, resolveKey, PROVIDER_IDS } from "@/lib/providers/registry";
 import { ProviderError, type WireMessage } from "@/lib/providers/types";
-import { encodeEvent, extractDelta, readSSE, type JarvisEvent } from "@/lib/stream";
+import { encodeEvent, type JarvisEvent } from "@/lib/stream";
+import { runAgentTurn } from "@/lib/agent";
 import { DEFAULT_PERSONA } from "@/lib/persona";
 
 export const runtime = "nodejs";
@@ -15,6 +16,8 @@ interface ChatBody {
   model?: string;
   temperature?: number;
   persona?: string;
+  /** Set false to disable tool use for this turn. */
+  useTools?: boolean;
   /** Bring-your-own keys from Settings, keyed by provider id. */
   keys?: Record<string, string>;
 }
@@ -49,7 +52,7 @@ export async function POST(req: NextRequest) {
     return errorStream("Malformed request body.", 400);
   }
 
-  const { messages, model, temperature, persona, keys = {} } = body;
+  const { messages, model, temperature, persona, useTools, keys = {} } = body;
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return errorStream("No messages to send.", 400);
@@ -92,12 +95,20 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const upstream = await streamChat(providerId, key, {
-        messages: withPersona,
+      const turn = runAgentTurn(withPersona, {
+        providerId,
+        key,
         model: useModel,
         temperature,
         signal: req.signal,
+        useTools,
       });
+
+      // Pull the first event before responding: the agent's opening upstream
+      // call happens here, so an auth error or rate limit still lands in the
+      // catch below and can fall back to the next provider. Once we have
+      // returned a 200 stream, falling back is no longer possible.
+      const first = await turn.next();
 
       const fellBackFrom = providerId === primary ? undefined : primary;
 
@@ -107,11 +118,8 @@ export async function POST(req: NextRequest) {
           send({ type: "meta", provider: providerId, model: useModel, fellBackFrom });
 
           try {
-            for await (const payload of readSSE(upstream)) {
-              if (payload === "[DONE]") break;
-              const delta = extractDelta(payload);
-              if (delta) send({ type: "token", value: delta });
-            }
+            if (!first.done && first.value) send(first.value);
+            for await (const event of turn) send(event);
             send({ type: "done" });
           } catch (err) {
             // The client aborting is normal (Stop button), not an error.
@@ -123,7 +131,7 @@ export async function POST(req: NextRequest) {
           }
         },
         cancel() {
-          upstream.cancel().catch(() => {});
+          void turn.return(undefined);
         },
       });
 

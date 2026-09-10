@@ -8,6 +8,8 @@ import type { ProviderState } from "./ModelPicker";
 export interface Settings {
   persona: string;
   temperature: number;
+  /** Let the model call tools (calculator, clock, and later search). */
+  useTools: boolean;
   /** Bring-your-own keys, provider id → key. Stored in this browser only. */
   keys: Record<string, string>;
 }
@@ -15,6 +17,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   persona: DEFAULT_PERSONA,
   temperature: 0.7,
+  useTools: true,
   keys: {},
 };
 
@@ -145,6 +148,28 @@ export default function SettingsDialog({
               rows={8}
               className="w-full resize-y rounded-md border border-line bg-base px-2.5 py-2 font-mono text-[11.5px] leading-relaxed text-ink outline-none transition focus:border-arc-dim"
             />
+          </section>
+
+          <section>
+            <label className="flex cursor-pointer items-start gap-2.5">
+              <input
+                type="checkbox"
+                checked={draft.useTools}
+                onChange={(e) => setDraft((d) => ({ ...d, useTools: e.target.checked }))}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--color-arc)]"
+              />
+              <span className="min-w-0">
+                <span className="block text-[12px] font-semibold uppercase tracking-wide text-ink-dim">
+                  Tool use
+                </span>
+                <span className="mt-0.5 block text-[11px] leading-relaxed text-ink-faint">
+                  Let JARVIS run tools mid-answer. Each tool round is another
+                  request against your free-tier limit, capped at 5 per message.
+                  Not every free model supports tools; when one does not, the
+                  answer is retried without them.
+                </span>
+              </span>
+            </label>
           </section>
 
           <section>
