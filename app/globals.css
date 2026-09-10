@@ -1,0 +1,158 @@
+@import "tailwindcss";
+
+@theme {
+  /* Deep, low-glare workspace palette. */
+  --color-base: #0a0d13;
+  --color-panel: #0f131c;
+  --color-raised: #151b27;
+  --color-line: #202839;
+  --color-line-soft: #19202e;
+
+  --color-ink: #dbe3f0;
+  --color-ink-dim: #8e9bb3;
+  --color-ink-faint: #5d6880;
+
+  /* Arc-reactor cyan. */
+  --color-arc: #38bdf8;
+  --color-arc-dim: #0ea5e9;
+  --color-warn: #fbbf24;
+  --color-danger: #f87171;
+
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-base);
+  color: var(--color-ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbars that don't shout. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 99px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #2c3548;
+  background-clip: content-box;
+}
+
+/* --- Markdown ----------------------------------------------------------- */
+
+.prose-jarvis {
+  line-height: 1.7;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.prose-jarvis > * + * {
+  margin-top: 0.85em;
+}
+.prose-jarvis h1,
+.prose-jarvis h2,
+.prose-jarvis h3,
+.prose-jarvis h4 {
+  font-weight: 600;
+  line-height: 1.3;
+  margin-top: 1.4em;
+}
+.prose-jarvis h1 { font-size: 1.4rem; }
+.prose-jarvis h2 { font-size: 1.2rem; }
+.prose-jarvis h3 { font-size: 1.05rem; }
+.prose-jarvis a {
+  color: var(--color-arc);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prose-jarvis ul,
+.prose-jarvis ol {
+  padding-left: 1.4em;
+}
+.prose-jarvis ul { list-style: disc; }
+.prose-jarvis ol { list-style: decimal; }
+.prose-jarvis li + li { margin-top: 0.3em; }
+.prose-jarvis blockquote {
+  border-left: 3px solid var(--color-line);
+  padding-left: 0.9em;
+  color: var(--color-ink-dim);
+}
+.prose-jarvis :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--color-raised);
+  border: 1px solid var(--color-line-soft);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+.prose-jarvis hr {
+  border-color: var(--color-line);
+}
+.prose-jarvis table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+.prose-jarvis th,
+.prose-jarvis td {
+  border: 1px solid var(--color-line);
+  padding: 0.4em 0.7em;
+  text-align: left;
+}
+.prose-jarvis th {
+  background: var(--color-raised);
+  font-weight: 600;
+}
+
+/* highlight.js renders into pre > code; we own the frame around it. */
+.prose-jarvis pre {
+  margin: 0;
+}
+.prose-jarvis pre code.hljs {
+  background: transparent;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+/* Blinking caret while a reply streams in. */
+.streaming-caret::after {
+  content: "";
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--color-arc);
+  animation: caret 1s steps(2) infinite;
+}
+@keyframes caret {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

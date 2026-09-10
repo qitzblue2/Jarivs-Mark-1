@@ -1,0 +1,32 @@
+{
+  "name": "jarvis-mark-1",
+  "version": "1.0.0",
+  "private": true,
+  "description": "JARVIS Mark 1 — a self-hosted AI workspace running on free, fast inference.",
+  "license": "GPL-3.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "16.3.4",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
+    "rehype-highlight": "7.0.2",
+    "highlight.js": "11.12.0",
+    "lucide-react": "1.44.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "@types/node": "22.20.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "tailwindcss": "4.3.3",
+    "@tailwindcss/postcss": "4.3.3"
+  }
+}

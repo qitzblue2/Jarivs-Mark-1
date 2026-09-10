@@ -1,0 +1,69 @@
+/** Core data shapes shared by the server routes and the UI. */
+
+export type Role = "system" | "user" | "assistant";
+
+export interface Message {
+  id: string;
+  role: Role;
+  content: string;
+  createdAt: number;
+  /** Which provider/model produced this turn. Assistant messages only. */
+  provider?: string;
+  model?: string;
+  /** Set when the primary provider failed and we fell back to another one. */
+  fellBackFrom?: string;
+  /** Present when generation failed; content may be partial. */
+  error?: string;
+}
+
+export interface Chat {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  messages: Message[];
+  /** Remembers the provider/model this chat was last using. */
+  provider?: string;
+  model?: string;
+}
+
+/** Lightweight row for the sidebar — avoids shipping every message. */
+export interface ChatMeta {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  messageCount: number;
+}
+
+/** A fenced code block lifted out of a message and into the canvas. */
+export interface Artifact {
+  id: string;
+  lang: string;
+  filename: string;
+  code: string;
+  /** Message this block came from, so the canvas can follow the conversation. */
+  messageId: string;
+  previewable: boolean;
+}
+
+export function chatMeta(chat: Chat): ChatMeta {
+  return {
+    id: chat.id,
+    title: chat.title,
+    createdAt: chat.createdAt,
+    updatedAt: chat.updatedAt,
+    messageCount: chat.messages.length,
+  };
+}
+
+/** Chat ids are used as filenames, so keep them to a strict shape. */
+export function isValidChatId(id: string): boolean {
+  return /^[A-Za-z0-9_-]{1,128}$/.test(id);
+}
+
+export function newId(): string {
+  // randomUUID exists in Node 19+ and every browser we target.
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
