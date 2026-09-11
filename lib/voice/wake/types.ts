@@ -2,7 +2,11 @@
 export interface WakeWordDetector {
   /** Load models. Safe to call twice. */
   load(): Promise<void>;
-  /** Feed one 1280-sample 16 kHz frame; returns the current 0-1 score. */
+  /** Buffer a 1280-sample 16 kHz frame. Cheap; must never be skipped. */
+  append(frame: Float32Array): void;
+  /** Score the buffered window. May be skipped when inference falls behind. */
+  score(): Promise<number>;
+  /** Buffer then score, for callers that can keep up. */
   push(frame: Float32Array): Promise<number>;
   reset(): void;
   dispose(): void;
@@ -62,7 +66,8 @@ export class SilenceGate {
   private totalFrames = 0;
 
   constructor(
-    private speakingRms = 0.015,
+    /** Mutable: the session tunes it from the measured noise floor. */
+    public speakingRms = 0.012,
     /** Quiet frames before we call it done. 15 ≈ 1.2s at 80ms. */
     private hangoverFrames = 15,
     /** Hard stop so a noisy room can't record forever. */

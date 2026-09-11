@@ -1,13 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Mic, Repeat, X, Zap } from "lucide-react";
+import { Activity, Mic, Repeat, SlidersHorizontal, X, Zap } from "lucide-react";
 import VoiceOrb from "./VoiceOrb";
-import { DEFAULT_GREETING, VoiceSession, type VoiceState } from "@/lib/voice/session";
+import { DEFAULT_GREETING, VoiceSession, type VoiceDiagnostics, type VoiceState } from "@/lib/voice/session";
 
 interface Props {
   open: boolean;
   onClose: () => void;
+  /** Persist a new wake-word threshold chosen by calibration. */
+  onThresholdChange?: (value: number) => void;
   /** Sends the transcript through the normal chat path; returns the reply. */
   onQuestion: (text: string) => Promise<string>;
   greeting: string;
@@ -33,6 +35,7 @@ const LABELS: Record<VoiceState, string> = {
 
 export default function VoiceMode({
   open, onClose, onQuestion, greeting, ttsEngine, ttsVoice, threshold, apiKey, pushToTalk,
+  onThresholdChange,
 }: Props) {
   const [state, setState] = useState<VoiceState>("off");
   const [level, setLevel] = useState(0);
@@ -40,6 +43,9 @@ export default function VoiceMode({
   const [transcript, setTranscript] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [continuous, setContinuous] = useState(false);
+  const [diag, setDiag] = useState<VoiceDiagnostics | null>(null);
+  const [calibrating, setCalibrating] = useState(false);
+  const [calibrationResult, setCalibrationResult] = useState<string | null>(null);
 
   const session = useRef<VoiceSession | null>(null);
   // Kept in refs so the session and the key handler always see current values
@@ -75,6 +81,7 @@ export default function VoiceMode({
         },
         onLevel: setLevel,
         onScore: setScore,
+        onDiagnostics: setDiag,
         onTranscript: setTranscript,
         onQuestion: (text) => questionRef.current(text),
         onError: setNote,
@@ -132,6 +139,53 @@ export default function VoiceMode({
     return () => window.removeEventListener("keydown", onKey, true);
   }, [open]);
 
+  /**
+   * Listens for a few seconds and reports what it actually heard.
+   *
+   * This answers the two questions a silent wake word raises — is audio
+   * arriving at all, and is the model scoring my voice — without guessing at
+   * a sensitivity slider.
+   */
+  const calibrate = useCallback(() => {
+    const instance = session.current;
+    if (!instance) return;
+
+    setCalibrationResult(null);
+    setCalibrating(true);
+    instance.resetDiagnostics();
+
+    setTimeout(() => {
+      setCalibrating(false);
+      const current = instance.snapshot();
+
+      if (current.frames === 0) {
+        setCalibrationResult("No audio at all — the microphone isn't reaching the page.");
+        return;
+      }
+      if (current.peakLevel < 0.01) {
+        setCalibrationResult(
+          `Audio is arriving but it's very quiet (peak ${current.peakLevel.toFixed(3)}). ` +
+            "Turn up the input gain in your system sound settings.",
+        );
+        return;
+      }
+      if (current.peakScore < 0.05) {
+        setCalibrationResult(
+          `Heard you clearly (peak ${current.peakLevel.toFixed(2)}) but the wake word never ` +
+            "matched (best 0.00). Try saying \u201cHey JARVIS\u201d as two clear words, close to the mic.",
+        );
+        return;
+      }
+
+      // Sit just under the best score so the same delivery reliably fires.
+      const suggested = Math.max(0.1, Math.min(0.8, current.peakScore * 0.7));
+      onThresholdChange?.(Number(suggested.toFixed(2)));
+      setCalibrationResult(
+        `Best match ${current.peakScore.toFixed(2)} — sensitivity set to ${suggested.toFixed(2)}. Try it now.`,
+      );
+    }, 6000);
+  }, [onThresholdChange]);
+
   if (!open) return null;
 
   return (
@@ -164,16 +218,65 @@ export default function VoiceMode({
       <div className="mt-6 text-center">
         <div className="text-[15px] font-medium text-ink">{LABELS[state]}</div>
 
-        {state === "idle" && (
-          <div className="mt-2 flex items-center justify-center gap-2">
-            {/* Live confidence, so a mic that isn't working is obvious. */}
-            <div className="h-1 w-32 overflow-hidden rounded-full bg-line">
-              <div
-                className="h-full rounded-full bg-arc transition-all duration-100"
-                style={{ width: `${Math.min(100, (score / threshold) * 100)}%` }}
-              />
+        {(state === "idle" || state === "listening") && (
+          <div className="mx-auto mt-3 w-64 space-y-1.5">
+            {/* Input level first: if this bar is flat, it's the microphone,
+                not the model. That one distinction is the whole diagnosis. */}
+            <div className="flex items-center gap-2">
+              <Mic size={11} className="shrink-0 text-ink-faint" />
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-line">
+                <div
+                  className={`h-full rounded-full transition-all duration-75 ${
+                    level > 0.01 ? "bg-green-400" : "bg-ink-faint"
+                  }`}
+                  style={{ width: `${Math.min(100, level * 400)}%` }}
+                />
+              </div>
+              <span className="w-8 shrink-0 text-right font-mono text-[10px] text-ink-faint">
+                {level.toFixed(3)}
+              </span>
             </div>
-            <span className="font-mono text-[10px] text-ink-faint">{score.toFixed(2)}</span>
+
+            {state === "idle" && (
+              <div className="flex items-center gap-2">
+                <Activity size={11} className="shrink-0 text-ink-faint" />
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-line">
+                  <div
+                    className="h-full rounded-full bg-arc transition-all duration-100"
+                    style={{ width: `${Math.min(100, (score / threshold) * 100)}%` }}
+                  />
+                </div>
+                <span className="w-8 shrink-0 text-right font-mono text-[10px] text-ink-faint">
+                  {score.toFixed(2)}
+                </span>
+              </div>
+            )}
+
+            {diag && diag.frames > 0 && (
+              <div className="flex flex-wrap justify-center gap-x-2.5 gap-y-0.5 font-mono text-[9.5px] text-ink-faint">
+                {/* scored well below frames means inference can't keep up */}
+                <span>
+                  {state === "idle" ? `${diag.scored}/${diag.frames}` : diag.frames} frames
+                </span>
+                <span>peak {diag.peakLevel.toFixed(3)}</span>
+                <span>best {diag.peakScore.toFixed(2)}</span>
+              </div>
+            )}
+
+            {state === "idle" && (
+              <button
+                onClick={calibrate}
+                disabled={calibrating}
+                className="mx-auto flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-[11px] text-ink-dim transition hover:border-arc-dim/50 hover:text-arc disabled:opacity-50"
+              >
+                <SlidersHorizontal size={11} />
+                {calibrating ? "Listening… say \u201cHey JARVIS\u201d" : "Can't hear me? Calibrate"}
+              </button>
+            )}
+
+            {calibrationResult && (
+              <p className="text-center text-[11px] leading-relaxed text-arc">{calibrationResult}</p>
+            )}
           </div>
         )}
 

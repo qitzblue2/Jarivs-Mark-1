@@ -207,6 +207,47 @@ waiting for the wake word. **Settings → Voice** changes the greeting, the
 speech engine and voice, and the wake-word sensitivity — raise it if JARVIS
 wakes up on its own, lower it if it does not hear you.
 
+### When it can't hear you
+
+Open voice mode and look at the two bars under the orb — they separate the two
+possible faults in one glance:
+
+| What you see | What it means |
+|---|---|
+| **Input bar flat while you talk** | Audio isn't reaching the page. Wrong input device, muted mic, or permission denied. |
+| **Input bar moves, score stays 0.00** | The mic is fine; the wake word isn't matching your voice. Hit **Calibrate**. |
+| **Neither bar, an error message** | It will name the cause — permission, no device, or an insecure page. |
+
+**Calibrate** listens for six seconds while you say "Hey JARVIS", reports the
+best score it saw, and sets the sensitivity just under it. That is almost
+always the fix when the model can hear you but never triggers — the 0.5
+default is strict for some voices and microphones.
+
+Say it as **two clear words**, close to the mic. And if you just want to skip
+the wake word entirely, the microphone button records immediately.
+
+The readout also shows `N frames · N scored`. If `scored` lags far behind
+`frames`, this machine can't run inference fast enough to keep up — audio is
+still buffered continuously so detection keeps working, just less often.
+
+### Using it from another device
+
+`localhost` counts as a secure context, so the microphone works there with no
+certificate. Any other address does not — browsers silently withhold mic
+access over plain `http://`, which is why voice appears to do nothing when you
+open the app by its IP.
+
+```bash
+npm run dev:https      # self-signed cert, good for this machine
+```
+
+For a phone or another computer, a self-signed certificate won't be trusted.
+A free tunnel gives you a real HTTPS URL:
+
+```bash
+cloudflared tunnel --url http://localhost:3000
+```
+
 ### First-run setup
 
 Voice needs ~18MB of runtime assets (the ONNX runtime wasm and the wake-word

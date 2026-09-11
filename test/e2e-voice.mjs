@@ -17,7 +17,9 @@ const browser = await chromium.launch({
     "--use-fake-ui-for-media-stream",
     "--use-fake-device-for-media-stream",
     `--use-file-for-fake-audio-capture=${WAV}%noloop`,
-    "--autoplay-policy=no-user-gesture-required",
+    // Deliberately NOT --autoplay-policy=no-user-gesture-required: that flag
+    // makes audio start in conditions a real browser wouldn't, which is
+    // exactly how an audio-startup bug would slip through this suite.
   ],
 });
 const context = await browser.newContext({ permissions: ["microphone"] });
@@ -30,6 +32,17 @@ page.on("console", (m) => { if (m.type() === "error") errors.push(`console: ${m.
 // Capture everything spoken, and make speech instant.
 await page.addInitScript(() => {
   window.__spoken = [];
+  // Record the state every AudioContext is created in, and expose the last
+  // one so the test can assert audio is actually running.
+  const RealAudioContext = window.AudioContext;
+  window.__ctxStates = [];
+  window.AudioContext = class extends RealAudioContext {
+    constructor(...args) {
+      super(...args);
+      window.__ctxStates.push(this.state);
+      window.__lastCtx = this;
+    }
+  };
   // speechSynthesis is a read-only accessor — plain assignment is silently
   // ignored, leaving the native engine (which has no voices headless).
   Object.defineProperty(window, "speechSynthesis", {
@@ -61,6 +74,11 @@ check("voice mode opens and starts listening", true);
 const orb = await page.locator("div.fixed.inset-0.z-50").count();
 check("voice overlay rendered", orb === 1);
 
+// A suspended context runs no worklet, so no audio would ever arrive and the
+// session would sit in idle looking healthy.
+const ctxState = await page.evaluate(() => window.__lastCtx?.state);
+check("AudioContext is running, not suspended", ctxState === "running", String(ctxState));
+
 // The fake WAV goes quiet after ~1.2s, so the silence gate should close it.
 await page.waitForFunction(
   () => document.body.innerText.includes("what is two plus two"),
@@ -87,6 +105,43 @@ await page.locator('button[title^="Voice mode"]').click();
 // Reaching "Say \"Hey JARVIS\"" means all three ONNX models loaded in wasm.
 await page.getByText('Say "Hey JARVIS"').waitFor({ timeout: 60000 });
 check("wake-word models loaded and scoring in-browser", true);
+
+// The input meter must actually move: a flat meter means no audio is
+// reaching the page, which is the failure this suite previously missed.
+await page.waitForFunction(() => {
+  const el = [...document.querySelectorAll("span")].find((s) => /^\d\.\d{3}$/.test(s.textContent ?? ""));
+  return el && Number(el.textContent) > 0;
+}, { timeout: 20000 });
+check("microphone input registers on the level meter", true);
+
+// Frames must keep arriving even while inference runs, or the wake-word
+// window ends up full of holes and the model can never match.
+const readCounts = () =>
+  page.evaluate(() => {
+    const el = [...document.querySelectorAll("span")].find((s) =>
+      /\d+ frames/.test(s.textContent ?? ""),
+    );
+    const m = /(\d+)\/(\d+) frames/.exec(el?.textContent ?? "");
+    return m ? { scored: Number(m[1]), frames: Number(m[2]) } : { frames: 0, scored: 0 };
+  });
+
+await page.waitForFunction(() => {
+  const el = [...document.querySelectorAll("span")].find((s) =>
+    /\d+ frames/.test(s.textContent ?? ""),
+  );
+  return Number(/\d+\/(\d+) frames/.exec(el?.textContent ?? "")?.[1] ?? 0) > 40;
+}, { timeout: 25000 });
+
+const counts = await readCounts();
+check("audio frames buffered continuously", counts.frames > 40, `${counts.frames} frames`);
+// Every buffered frame should also get scored; a large gap means inference
+// is falling behind the 80ms frame interval.
+const ratio = counts.scored / Math.max(1, counts.frames);
+check(
+  "wake-word inference keeps up with the audio",
+  ratio > 0.8,
+  `${counts.scored}/${counts.frames} scored (${(ratio * 100).toFixed(0)}%)`,
+);
 
 // The live confidence readout proves frames are flowing through the models.
 await page.waitForFunction(() => {

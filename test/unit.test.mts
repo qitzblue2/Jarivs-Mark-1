@@ -273,5 +273,64 @@ console.log("\n--- wav encoding ---");
   eq("blob is typed as wav", blob.type, "audio/wav");
 }
 
+console.log("\n--- mic resampling (mirrors public/worklets/pcm-worklet.js) ---");
+{
+  const TARGET = 16000, FRAME = 1280;
+  // Same loop as the worklet. If these diverge, wake-word detection silently
+  // degrades to noise, so the maths is pinned here.
+  const runWorklet = (input: Float32Array, sampleRate: number) => {
+    const ratio = sampleRate / TARGET;
+    const buffer = new Float32Array(FRAME);
+    let filled = 0, position = 0;
+    const out: Float32Array[] = [];
+    for (let b = 0; b < input.length; b += 128) {
+      const channel = input.subarray(b, Math.min(b + 128, input.length));
+      while (position < channel.length) {
+        const index = Math.floor(position);
+        const frac = position - index;
+        const a = channel[index] ?? 0;
+        const c = channel[index + 1] ?? a;
+        buffer[filled++] = a + (c - a) * frac;
+        if (filled === FRAME) { out.push(buffer.slice()); filled = 0; }
+        position += ratio;
+      }
+      position -= channel.length;
+    }
+    return out;
+  };
+
+  for (const rate of [44100, 48000]) {
+    const input = new Float32Array(rate * 2);
+    for (let i = 0; i < input.length; i++) input[i] = Math.sin(2 * Math.PI * 1000 * (i / rate));
+    const frames = runWorklet(input, rate);
+    const total = frames.length * FRAME;
+    const flat = new Float32Array(total);
+    frames.forEach((f, i) => flat.set(f, i * FRAME));
+
+    let crossings = 0;
+    for (let i = 1; i < flat.length; i++) if ((flat[i - 1] < 0) !== (flat[i] < 0)) crossings++;
+    const hz = crossings / 2 / (total / TARGET);
+    let peak = 0;
+    for (const v of flat) peak = Math.max(peak, Math.abs(v));
+
+    eq(`${rate}Hz: duration preserved`, Math.abs(total / TARGET - 2) < 0.05, true);
+    eq(`${rate}Hz: 1kHz tone preserved`, Math.abs(hz - 1000) < 25, true);
+    eq(`${rate}Hz: amplitude preserved`, peak > 0.9, true);
+    eq(`${rate}Hz: frames are exactly ${FRAME} samples`, frames.every((f) => f.length === FRAME), true);
+  }
+}
+
+console.log("\n--- noise floor never disables hearing ---");
+{
+  // Regression: deriving the floor from the opening frames meant that if the
+  // user spoke immediately, the threshold landed above any reachable RMS and
+  // nothing was ever heard again.
+  const clamp = (floor: number) => Math.min(0.05, Math.max(0.006, floor * 3));
+  eq("loud opening cannot raise the gate out of reach", clamp(0.526), 0.05);
+  eq("silent room still gets a usable floor", clamp(0), 0.006);
+  eq("normal room scales sensibly", clamp(0.004), 0.012);
+  eq("threshold always reachable by speech", clamp(0.9) < 0.2, true);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

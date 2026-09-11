@@ -19,10 +19,25 @@ export const DEFAULT_GREETING = "Hey sir, how can I help you today?";
 /** Phrases that end a continuous conversation. */
 const STOP_WORDS = /^\s*(stop|goodbye|good bye|bye|that's all|thats all|exit|nevermind|never mind)\b/i;
 
+/** Live numbers so "it can't hear me" is answerable at a glance. */
+export interface VoiceDiagnostics {
+  /** Frames delivered by the audio thread. Zero means the mic isn't running. */
+  frames: number;
+  /** Frames actually scored. Far below `frames` means inference can't keep up. */
+  scored: number;
+  /** Loudest input seen, for comparison against the speaking threshold. */
+  peakLevel: number;
+  /** Best wake-word score seen, for choosing a threshold that works. */
+  peakScore: number;
+  /** Measured room noise, used as the speaking threshold's floor. */
+  noiseFloor: number;
+}
+
 export interface VoiceCallbacks {
   onState(state: VoiceState, detail?: string): void;
   onLevel(rms: number): void;
   onScore(score: number): void;
+  onDiagnostics(diagnostics: VoiceDiagnostics): void;
   onTranscript(text: string): void;
   /** Send to the model; resolves with the spoken-form reply. */
   onQuestion(text: string): Promise<string>;
@@ -61,6 +76,11 @@ export class VoiceSession {
 
   private state: VoiceState = "off";
   private frameIndex = 0;
+  private diagnostics: VoiceDiagnostics = {
+    frames: 0, scored: 0, peakLevel: 0, peakScore: 0, noiseFloor: 0,
+  };
+  /** Rolling RMS history (~4s) used to track the room's noise floor. */
+  private recentRms: number[] = [];
   private recording: Float32Array[] = [];
   private speakAbort: AbortController | null = null;
   /** Guards against overlapping async work when frames keep arriving. */
@@ -83,11 +103,41 @@ export class VoiceSession {
     this.callbacks.onState(state, detail);
   }
 
+  /** Returns a human-readable reason the mic can't be used, or null. */
+  private preflight(): string | null {
+    if (typeof window === "undefined") return "Voice only runs in a browser.";
+
+    // An insecure origin removes mediaDevices entirely, which otherwise
+    // surfaces as "Cannot read properties of undefined".
+    if (!window.isSecureContext) {
+      return (
+        `This page is not a secure context (${window.location.origin}), so the ` +
+        "browser blocks microphone access. Open it on http://localhost:3000, " +
+        "or serve it over HTTPS with `npm run dev:https`."
+      );
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      return "This browser doesn't expose microphone access on this page.";
+    }
+    return null;
+  }
+
   async start(): Promise<void> {
     if (this.context) return;
     this.setState("loading");
 
+    const blocked = this.preflight();
+    if (blocked) {
+      this.callbacks.onError(blocked);
+      this.setState("error", blocked);
+      return;
+    }
+
     try {
+      // Created before the await so it inherits the click that opened voice
+      // mode; resumed explicitly below in case the browser still suspends it.
+      this.context = new AudioContext();
+
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
@@ -97,8 +147,16 @@ export class VoiceSession {
         },
       });
 
-      this.context = new AudioContext();
       await this.context.audioWorklet.addModule("/worklets/pcm-worklet.js");
+
+      // A suspended context never runs the worklet, so no audio would ever
+      // arrive and the session would sit in `idle` looking fine.
+      if (this.context.state === "suspended") await this.context.resume();
+      if (this.context.state !== "running") {
+        throw new Error(
+          "The browser is holding audio suspended. Click the page, then try again.",
+        );
+      }
 
       // Wake-word models only matter when we're actually waiting for one.
       if (!this.config.pushToTalk) await this.detector.load();
@@ -117,10 +175,15 @@ export class VoiceSession {
       if (this.config.pushToTalk) this.beginListening();
       else this.setState("idle");
     } catch (err) {
+      const error = err as Error;
       const message =
-        (err as Error)?.name === "NotAllowedError"
-          ? "Microphone permission denied. Allow mic access to use voice."
-          : `Could not start voice: ${(err as Error).message}`;
+        error?.name === "NotAllowedError"
+          ? "Microphone permission denied. Click the padlock in the address bar and allow the mic, then reopen voice mode."
+          : error?.name === "NotFoundError"
+            ? "No microphone found. Plug one in or pick one in your system sound settings."
+            : error?.name === "NotReadableError"
+              ? "Your microphone is in use by another app. Close it and try again."
+              : `Could not start voice: ${error.message}`;
       this.callbacks.onError(message);
       this.setState("error", message);
       await this.stop();
@@ -155,6 +218,47 @@ export class VoiceSession {
     getTts(this.config.ttsEngine).cancel();
   }
 
+  /**
+   * Track the room's noise floor from a rolling window.
+   *
+   * Must be the QUIETEST recent audio, not an average of the first frames:
+   * sampling the opening second assumes the user waits in silence, and if
+   * they start talking straight away the "floor" becomes their voice and the
+   * threshold lands above anything reachable — at which point nothing is ever
+   * heard again. The result is clamped so a pathological measurement can't
+   * disable speech detection either way.
+   */
+  private trackNoiseFloor(rms: number): void {
+    this.recentRms.push(rms);
+    if (this.recentRms.length > 50) this.recentRms.shift();
+    if (this.recentRms.length < 12) return;
+
+    const sorted = [...this.recentRms].sort((a, b) => a - b);
+    const floor = sorted[Math.floor(sorted.length * 0.2)];
+    this.diagnostics.noiseFloor = floor;
+
+    // Comfortably above the noise, but always within a range that can
+    // actually be crossed by a normal speaking voice.
+    this.silenceGate.speakingRms = Math.min(0.05, Math.max(0.006, floor * 3));
+  }
+
+  private emitDiagnostics(): void {
+    this.callbacks.onDiagnostics({ ...this.diagnostics });
+  }
+
+  /** Current diagnostics, for the calibration flow to read back. */
+  snapshot(): VoiceDiagnostics {
+    return { ...this.diagnostics };
+  }
+
+  /** Reset peak counters, for the calibration flow. */
+  resetDiagnostics(): void {
+    this.diagnostics = {
+      ...this.diagnostics, frames: 0, scored: 0, peakLevel: 0, peakScore: 0,
+    };
+    this.emitDiagnostics();
+  }
+
   private beginListening(): void {
     this.recording = [];
     this.silenceGate.reset();
@@ -165,20 +269,38 @@ export class VoiceSession {
     this.frameIndex++;
     this.callbacks.onLevel(rms);
 
+    this.diagnostics.frames++;
+    if (rms > this.diagnostics.peakLevel) this.diagnostics.peakLevel = rms;
+
+    this.trackNoiseFloor(rms);
+
     if (this.state === "idle") {
-      if (this.busy) return;
+      // Buffering is cheap and must happen for EVERY frame: skipping it
+      // would leave gaps in the window and the wake word would never match.
+      this.detector.append(samples);
+
+      // Scoring is what may fall behind, and skipping it is harmless.
+      if (this.busy) {
+        this.emitDiagnostics();
+        return;
+      }
       this.busy = true;
       try {
-        const score = await this.detector.push(samples);
+        const score = await this.detector.score();
+        this.diagnostics.scored++;
+        if (score > this.diagnostics.peakScore) this.diagnostics.peakScore = score;
         this.callbacks.onScore(score);
+        this.emitDiagnostics();
         if (this.wakeGate.accept(score, this.frameIndex)) await this.onWake();
       } catch {
-        // A dropped frame is not worth surfacing; the next one will score.
+        // One failed inference is not worth surfacing; the next frame scores.
       } finally {
         this.busy = false;
       }
       return;
     }
+
+    this.emitDiagnostics();
 
     if (this.state === "listening") {
       this.recording.push(samples);

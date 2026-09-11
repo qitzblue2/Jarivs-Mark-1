@@ -15,7 +15,8 @@
     "mock": "node test/mock-provider.mjs",
     "setup:voice": "node scripts/setup-voice.mjs",
     "postinstall": "node scripts/setup-voice.mjs",
-    "test:voice": "node test/e2e-voice.mjs"
+    "test:voice": "node test/e2e-voice.mjs",
+    "dev:https": "next dev --experimental-https"
   },
   "dependencies": {
     "highlight.js": "11.12.0",

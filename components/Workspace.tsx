@@ -626,6 +626,7 @@ export default function Workspace() {
         threshold={settings.wakeThreshold}
         apiKey={settings.keys.groq}
         pushToTalk={pushToTalk}
+        onThresholdChange={(value) => saveSettings({ ...settings, wakeThreshold: value })}
       />
 
       <SettingsDialog

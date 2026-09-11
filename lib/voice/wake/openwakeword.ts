@@ -96,17 +96,33 @@ export class OpenWakeWord implements WakeWordDetector {
     }
   }
 
-  async push(frame: Float32Array): Promise<number> {
-    if (!this.melModel || !this.embModel || !this.wakeModel || !ort) return 0;
-    const { Tensor } = ort;
-
-    // Slide the raw window left and append the new frame.
+  /**
+   * Add a frame to the rolling window.
+   *
+   * Deliberately separate from scoring. Inference in wasm can take longer
+   * than the 80ms frame interval, and if a slow inference caused the caller
+   * to drop frames, the window would end up holding chopped audio —
+   * "hey jar…vis" — which the model will never recognise. Buffering is cheap
+   * and must never be skipped; only `score()` may be.
+   */
+  append(frame: Float32Array): void {
     this.audio.copyWithin(0, frame.length);
     this.audio.set(frame, WINDOW_SAMPLES - frame.length);
     this.primed = Math.min(this.primed + frame.length, WINDOW_SAMPLES);
+  }
+
+  /** True once enough audio has accumulated to score meaningfully. */
+  get isPrimed(): boolean {
+    return this.primed >= WINDOW_SAMPLES;
+  }
+
+  /** Score whatever is currently in the window. */
+  async score(): Promise<number> {
+    if (!this.melModel || !this.embModel || !this.wakeModel || !ort) return 0;
+    const { Tensor } = ort;
 
     // Don't score on a half-empty buffer — it produces phantom detections.
-    if (this.primed < WINDOW_SAMPLES) return 0;
+    if (!this.isPrimed) return 0;
 
     const melOut = await this.melModel.run({
       input: new Tensor("float32", this.audio, [1, WINDOW_SAMPLES]),
@@ -134,6 +150,13 @@ export class OpenWakeWord implements WakeWordDetector {
       "x.1": new Tensor("float32", stacked, [1, EMBEDDING_WINDOW, EMBEDDING_DIM]),
     });
     return (Object.values(scoreOut)[0].data as Float32Array)[0];
+  }
+
+  /** Convenience: buffer then score. Callers that may fall behind should
+   *  use append() and score() separately so audio is never lost. */
+  async push(frame: Float32Array): Promise<number> {
+    this.append(frame);
+    return this.score();
   }
 
   reset(): void {
