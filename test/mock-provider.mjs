@@ -85,7 +85,9 @@ function streamToolCall(res, { id, name, args }, done) {
 const server = http.createServer((req, res) => {
   const auth = req.headers.authorization || "";
 
-  if (!auth.startsWith("Bearer ")) {
+  if (req.url.startsWith("/search")) {
+    // fall through to the handler below; SearXNG needs no auth
+  } else if (!auth.startsWith("Bearer ")) {
     res.writeHead(401, { "Content-Type": "application/json" });
     return res.end(JSON.stringify({ error: { message: "Missing API key" } }));
   }
@@ -93,6 +95,18 @@ const server = http.createServer((req, res) => {
   if (auth === "Bearer RATELIMITED") {
     res.writeHead(429, { "Content-Type": "application/json" });
     return res.end(JSON.stringify({ error: { message: "Rate limit reached" } }));
+  }
+
+  // Stands in for a SearXNG instance: point SEARXNG_URL at http://localhost:8899
+  if (req.url.startsWith("/search")) {
+    process.stdout.write(`[mock] search ${req.url}\n`);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({
+      results: [
+        { title: "Groq LPU architecture", url: "https://groq.com/lpu", content: "The LPU is a deterministic processor built for inference." },
+        { title: "Cerebras wafer-scale", url: "https://cerebras.ai/wse", content: "A single wafer holds the whole model." },
+      ],
+    }));
   }
 
   if (req.url.endsWith("/models")) {
@@ -138,6 +152,14 @@ const server = http.createServer((req, res) => {
       };
 
       // Ask for a tool the first time round, then answer using its result.
+      if (parsed.tools?.length && /search|look ?up|latest|news/i.test(prompt) && !alreadyRanTool) {
+        return streamToolCall(
+          res,
+          { id: "call_search1", name: "web_search", args: { query: "groq lpu", count: 2 } },
+          finish,
+        );
+      }
+
       if (parsed.tools?.length && /calculat|multiply|\d\s*[*+/-]\s*\d/i.test(prompt) && !alreadyRanTool) {
         return streamToolCall(
           res,

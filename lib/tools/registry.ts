@@ -1,9 +1,13 @@
 import { calculateTool } from "./calculate";
+import { fetchUrlTool } from "./fetch-url";
+import { webSearchTool } from "./web-search";
 import type { Tool } from "./types";
 
 /** Every tool JARVIS can reach. Mark 2 phases add to this list. */
 const ALL: Tool[] = [
   calculateTool,
+  webSearchTool,
+  fetchUrlTool,
   {
     name: "get_time",
     description:

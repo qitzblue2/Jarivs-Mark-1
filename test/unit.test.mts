@@ -4,6 +4,10 @@ import { trimToBudget, truncateMiddle, estimateTokens } from "../lib/tokens";
 import { ToolCallAccumulator, extractChunk } from "../lib/stream";
 import { evaluate } from "../lib/tools/calculate";
 import { runToolCall } from "../lib/tools/run";
+import { isBlockedAddress, assertUrlAllowed } from "../lib/tools/net-guard";
+import { parseDuckDuckGoHtml } from "../lib/tools/search/duckduckgo";
+import { htmlToText } from "../lib/tools/html-text";
+import { tidy } from "../lib/tools/search/types";
 
 let pass = 0;
 let fail = 0;
@@ -124,6 +128,73 @@ const clock = await runToolCall({ id: "5", name: "get_time", arguments: '{"timez
 eq("get_time works", clock.isError, false);
 const badTz = await runToolCall({ id: "6", name: "get_time", arguments: '{"timezone":"Mars/Olympus"}' }, {});
 eq("bad timezone is an error result", badTz.isError, true);
+
+console.log("\n--- SSRF guard ---");
+// A model picks the URL and this server makes the request, with API keys in
+// the same environment. Each of these is a real escalation if it gets through.
+for (const ip of [
+  "127.0.0.1", "127.1.2.3", "0.0.0.0", "10.1.2.3", "172.16.0.1", "172.31.255.255",
+  "192.168.1.1", "169.254.169.254", "100.64.0.1", "224.0.0.1", "240.0.0.1",
+  "::1", "::", "fe80::1", "fd00::1", "fc00::1", "::ffff:127.0.0.1", "::ffff:10.0.0.1",
+]) {
+  eq(`blocks ${ip}`, isBlockedAddress(ip), true);
+}
+for (const ip of ["8.8.8.8", "1.1.1.1", "93.184.216.34", "172.32.0.1", "11.0.0.1", "2606:4700::1111"]) {
+  eq(`allows ${ip}`, isBlockedAddress(ip), false);
+}
+
+const blockedUrl = async (name: string, url: string) => {
+  try {
+    await assertUrlAllowed(url);
+    fail++;
+    console.log(`FAIL ${name}\n     ${url} was allowed`);
+  } catch {
+    pass++;
+    console.log(`ok   ${name}`);
+  }
+};
+await blockedUrl("blocks cloud metadata URL", "http://169.254.169.254/latest/meta-data/");
+await blockedUrl("blocks localhost URL", "http://localhost:3000/api/chats");
+await blockedUrl("blocks loopback IP URL", "http://127.0.0.1:8899/v1/models");
+await blockedUrl("blocks file: scheme", "file:///etc/passwd");
+await blockedUrl("blocks gopher: scheme", "gopher://evil.com/");
+await blockedUrl("blocks .internal host", "http://foo.internal/");
+await blockedUrl("blocks bracketed ::1", "http://[::1]:3000/");
+await blockedUrl("blocks garbage input", "not a url");
+
+console.log("\n--- search parsing ---");
+// Shaped like a real DuckDuckGo HTML response, links wrapped in /l/?uddg=
+const ddgFixture = `
+<div class="result results_links">
+  <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgroq.com%2Flpu&rut=x">Groq <b>LPU</b> Inference</a>
+  <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgroq.com%2Flpu">The LPU delivers <b>fast</b> inference &amp; low latency.</a>
+</div>
+<div class="result results_links">
+  <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Fb">Second &quot;Result&quot;</a>
+  <a class="result__snippet" href="#">Another snippet</a>
+</div>`;
+const ddg = parseDuckDuckGoHtml(ddgFixture, 5);
+eq("ddg parses both results", ddg.length, 2);
+eq("ddg unwraps the redirect", ddg[0].url, "https://groq.com/lpu");
+eq("ddg strips bold from titles", ddg[0].title, "Groq LPU Inference");
+eq("ddg decodes entities in snippets", ddg[0].snippet, "The LPU delivers fast inference & low latency.");
+eq("ddg decodes quotes in titles", ddg[1].title, 'Second "Result"');
+eq("ddg honours the count cap", parseDuckDuckGoHtml(ddgFixture, 1).length, 1);
+eq("ddg survives empty html", parseDuckDuckGoHtml("<html></html>", 5), []);
+eq("tidy collapses whitespace", tidy("  a\n\n  b  "), "a b");
+eq("tidy clips long text", tidy("x".repeat(400)).length, 300);
+
+console.log("\n--- html to text ---");
+const page = htmlToText(`<html><head><title>My &amp; Page</title>
+<style>.a{color:red}</style><script>alert(1)</script></head>
+<body><nav>skip me</nav><h1>Heading</h1><p>First para.</p>
+<ul><li>one</li><li>two</li></ul><footer>footer junk</footer></body></html>`);
+eq("extracts title", page.title, "My & Page");
+eq("drops script contents", page.text.includes("alert"), false);
+eq("drops style contents", page.text.includes("color:red"), false);
+eq("drops nav and footer", /skip me|footer junk/.test(page.text), false);
+eq("keeps prose", page.text.includes("First para."), true);
+eq("marks list items", page.text.includes("• one"), true);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

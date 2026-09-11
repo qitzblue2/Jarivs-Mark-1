@@ -91,8 +91,30 @@ JARVIS can call tools while answering, rather than guessing. Every call is
 shown in an expandable trace under the reply — the tool name, the exact
 arguments, the raw result and how long it took. Nothing runs invisibly.
 
-Shipped so far: `calculate` (arithmetic) and `get_time` (the current date,
-which a language model cannot know on its own).
+Shipped so far:
+
+| Tool | What it does |
+|---|---|
+| `web_search` | Searches the web for current information |
+| `fetch_url` | Reads a page in full, as text |
+| `calculate` | Arithmetic, via a real parser |
+| `get_time` | The current date, which a model cannot know on its own |
+
+### Search backends
+
+Tried best-first, so search works with **no configuration at all** and gets
+better if you add a key:
+
+| Backend | Setup | Notes |
+|---|---|---|
+| **Tavily** | `TAVILY_API_KEY` — 1,000/mo free, no card | Best quality: returns extracted content, not raw links |
+| **SearXNG** | `SEARXNG_URL` — no key | Private, self-hostable. See the caveat below. |
+| **DuckDuckGo** | Nothing | Works immediately. Unofficial scrape, so it can break. |
+
+> **SearXNG caveat:** most *public* instances disable the JSON API, so you will
+> usually get a 403 unless you run your own:
+> `docker run -d -p 8080:8080 searxng/searxng`, then enable `json` under
+> `search.formats` in its `settings.yml`.
 
 How the loop works: the model may request tools, they run **server-side**,
 their results go back into the conversation, and the model answers with them.
@@ -109,10 +131,22 @@ Turn the whole thing off in **Settings → Tool use**.
 Adding a tool is one file in `lib/tools/` plus a line in its registry — the
 same pattern as adding a model provider.
 
-> **A note on `calculate`:** it uses a hand-written expression parser, not
-> `eval`. The argument comes from a model, and `eval` on model output hands an
-> attacker the server. Any future tool that touches the network or filesystem
-> gets the same treatment.
+### Why the network tools are locked down
+
+`fetch_url` lets a *language model* choose a URL that *your server* then
+requests — with your API keys sitting in the same environment. Unguarded, that
+is a confused-deputy hole: `http://169.254.169.254/` would hand over cloud
+credentials, and `http://localhost:3000/api/chats` would read your own private
+conversations back to the model.
+
+So `lib/tools/net-guard.ts` resolves DNS and rejects loopback, private ranges,
+link-local (which is where cloud metadata lives), CGNAT and multicast; allows
+only http and https; follows redirects **manually, re-checking every hop**
+(a public host answering `302 Location: http://169.254.169.254/` is the
+standard bypass); and caps body size, timeout and redirect count.
+
+`calculate` gets the same treatment for the same reason: it uses a hand-written
+shunting-yard parser, never `eval`, because the expression comes from a model.
 
 ## 5. Where your data lives
 
