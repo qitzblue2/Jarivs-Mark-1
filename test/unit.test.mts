@@ -8,6 +8,9 @@ import { isBlockedAddress, assertUrlAllowed } from "../lib/tools/net-guard";
 import { parseDuckDuckGoHtml } from "../lib/tools/search/duckduckgo";
 import { htmlToText } from "../lib/tools/html-text";
 import { tidy } from "../lib/tools/search/types";
+import { WakeGate, SilenceGate } from "../lib/voice/wake/types";
+import { forSpeech } from "../lib/voice/tts/types";
+import { encodeWav, durationOf } from "../lib/voice/wav";
 
 let pass = 0;
 let fail = 0;
@@ -195,6 +198,80 @@ eq("drops style contents", page.text.includes("color:red"), false);
 eq("drops nav and footer", /skip me|footer junk/.test(page.text), false);
 eq("keeps prose", page.text.includes("First para."), true);
 eq("marks list items", page.text.includes("• one"), true);
+
+console.log("\n--- wake gate ---");
+// One "hey jarvis" must fire once, not once per frame above threshold.
+{
+  const gate = new WakeGate(0.5, 2, 25);
+  let frame = 0;
+  const fires: number[] = [];
+  // 10 frames of confident detection in a row.
+  for (let i = 0; i < 10; i++) if (gate.accept(0.9, ++frame)) fires.push(frame);
+  eq("sustained detection fires exactly once", fires.length, 1);
+  eq("fires on the 2nd frame (patience)", fires[0], 2);
+
+  // Still inside the cooldown window.
+  let duringCooldown = 0;
+  for (let i = 0; i < 15; i++) if (gate.accept(0.9, ++frame)) duringCooldown++;
+  eq("cooldown suppresses re-fire", duringCooldown, 0);
+
+  // Past the cooldown it can fire again.
+  frame += 30;
+  let after = 0;
+  for (let i = 0; i < 5; i++) if (gate.accept(0.9, ++frame)) after++;
+  eq("fires again after cooldown", after, 1);
+}
+{
+  const gate = new WakeGate(0.5, 2, 25);
+  let frame = 0;
+  let fired = 0;
+  // A single blip over threshold is noise, not a wake word.
+  for (const score of [0.9, 0.1, 0.9, 0.2, 0.8, 0.1]) if (gate.accept(score, ++frame)) fired++;
+  eq("isolated spikes never fire", fired, 0);
+  eq("sub-threshold never fires", new WakeGate(0.5).accept(0.49, 1), false);
+}
+
+console.log("\n--- silence gate ---");
+{
+  const gate = new SilenceGate(0.015, 15, 190, 90);
+  let verdict = "listening";
+  for (let i = 0; i < 20; i++) verdict = gate.push(0.08);   // speaking
+  eq("still listening while speaking", verdict, "listening");
+  for (let i = 0; i < 14; i++) verdict = gate.push(0.001);  // brief pause
+  eq("a short pause is not the end", verdict, "listening");
+  verdict = gate.push(0.001);
+  eq("done after the hangover elapses", verdict, "done");
+}
+{
+  const gate = new SilenceGate(0.015, 15, 190, 90);
+  let verdict = "listening";
+  for (let i = 0; i < 90; i++) verdict = gate.push(0.001); // never speaks
+  eq("times out when nobody speaks", verdict, "timeout");
+}
+{
+  const gate = new SilenceGate(0.015, 15, 190, 90);
+  let verdict = "listening";
+  for (let i = 0; i < 190; i++) verdict = gate.push(0.09);  // never stops
+  eq("hard cap ends an endless utterance", verdict, "done");
+}
+
+console.log("\n--- speech text ---");
+eq("code blocks are not read aloud", forSpeech("Try this:\n```js\nlet x=1\n```\nDone."), "Try this: (code shown on screen) Done.");
+eq("markdown emphasis stripped", forSpeech("This is **bold** and *italic*"), "This is bold and italic");
+eq("links read as their text", forSpeech("See [the docs](https://example.com)"), "See the docs");
+eq("headings stripped", forSpeech("# Title\nBody"), "Title Body");
+eq("bullets stripped", forSpeech("- one\n- two"), "one two");
+eq("long answers get clipped", forSpeech(`${"This is a sentence. ".repeat(200)}`).length < 1300, true);
+eq("clipped answers point at the screen", forSpeech("word ".repeat(500)).endsWith("the rest is on screen."), true);
+
+console.log("\n--- wav encoding ---");
+{
+  const frames = [new Float32Array(1280).fill(0.5), new Float32Array(1280).fill(-0.5)];
+  const blob = encodeWav(frames, 16000);
+  eq("wav size = 44 byte header + 16-bit samples", blob.size, 44 + 2560 * 2);
+  eq("duration computed from frames", durationOf(frames, 16000), 0.16);
+  eq("blob is typed as wav", blob.type, "audio/wav");
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

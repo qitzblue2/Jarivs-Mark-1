@@ -109,6 +109,18 @@ const server = http.createServer((req, res) => {
     }));
   }
 
+  // Stands in for Groq's Whisper endpoint.
+  if (req.url.endsWith("/audio/transcriptions")) {
+    let size = 0;
+    req.on("data", (c) => (size += c.length));
+    req.on("end", () => {
+      process.stdout.write(`[mock] transcribe ${size} bytes\n`);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ text: "what is two plus two" }));
+    });
+    return;
+  }
+
   if (req.url.endsWith("/models")) {
     res.writeHead(200, { "Content-Type": "application/json" });
     return res.end(JSON.stringify({

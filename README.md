@@ -1,4 +1,4 @@
-# JARVIS Mark 2
+# JARVIS Mark 3
 
 A self-hosted AI workspace that runs on **free, fast inference**. Chat list on
 the left, conversation in the middle, live code canvas on the right — and it
@@ -9,6 +9,7 @@ can now use tools mid-answer instead of only talking.
 - **Provider-agnostic.** Groq, Cerebras and GitHub Models ship in the box;
   adding another is one entry in a config object.
 - **Tool-using.** Calls tools mid-answer and shows you exactly what it ran.
+- **Voice.** Say "Hey JARVIS" and talk to it. Wake word runs on your machine.
 - **Yours.** Chats are plain JSON files on your disk. Nothing to sign into.
 
 ---
@@ -148,12 +149,77 @@ standard bypass); and caps body size, timeout and redirect count.
 `calculate` gets the same treatment for the same reason: it uses a hand-written
 shunting-yard parser, never `eval`, because the expression comes from a model.
 
-## 5. Where your data lives
+## 5. Voice
+
+Press the waveform button (or **Ctrl/Cmd+J**), say **"Hey JARVIS"**, and it
+answers *"Hey sir, how can I help you today?"* — then listens for your question,
+answers it out loud, and shows the full reply on screen.
+
+The mic button next to it skips the wake word and just records, for when you
+don't feel like talking to your computer in front of people.
+
+### The pipeline
+
+```
+mic → local ONNX wake word → greeting → record until you stop
+    → Groq Whisper → the normal chat path → reply → spoken back
+```
+
+Spoken questions go through the *same* path as typed ones, so they save into
+the same chats and can use tools — ask it to search the web out loud and it
+will.
+
+### Why the wake word runs locally
+
+An always-on wake word means an always-on microphone. Chrome implements the
+Web Speech API by **streaming your microphone to Google's servers**, so an
+assistant built on it would upload your room continuously.
+
+Instead the detection runs in your browser with openWakeWord's pretrained
+`hey_jarvis` model (~200k training clips) on the ONNX runtime. Your audio
+never leaves your machine until the wake word fires — only the question after
+it is sent, and only to Groq for transcription.
+
+It also dodges a compatibility trap: Web Speech *recognition* is disabled in
+Firefox, but `speechSynthesis` is not. Doing detection with ONNX and
+transcription with Whisper means voice works in Firefox too.
+
+### What it costs
+
+| Piece | Where it runs | Cost |
+|---|---|---|
+| Wake word | Your browser | Free, forever, offline |
+| Speech to text | Groq Whisper | Free — 2,000/day |
+| Speech out (default) | Your browser | Free, offline |
+| Speech out (optional) | Groq Orpheus | Free tier, sounds better |
+
+### Controls
+
+| | |
+|---|---|
+| Enter voice mode | `Ctrl/Cmd+J`, or the waveform button |
+| End the conversation | Say "stop" or "goodbye", or press `Esc` |
+| Interrupt it talking | Start talking, or press `Space` |
+| Continuous vs single | Toggle at the top-left of voice mode |
+
+Continuous keeps listening after each answer; single-question goes back to
+waiting for the wake word. **Settings → Voice** changes the greeting, the
+speech engine and voice, and the wake-word sensitivity — raise it if JARVIS
+wakes up on its own, lower it if it does not hear you.
+
+### First-run setup
+
+Voice needs ~18MB of runtime assets (the ONNX runtime wasm and the wake-word
+models). `npm install` fetches them automatically via `scripts/setup-voice.mjs`.
+If that was offline, run `npm run setup:voice`. They are deliberately not in
+git. Everything except voice works without them.
+
+## 6. Where your data lives
 
 Chats are JSON files in `./data/chats/`, one per conversation. `data/` is
 gitignored. Back them up by copying the folder; delete one to delete the chat.
 
-## 6. Deploying
+## 7. Deploying
 
 It runs on Vercel's free tier as-is, with one caveat: **serverless filesystems
 are read-only**, so the file store can't persist there. The app detects this
@@ -163,7 +229,7 @@ is a four-method interface and `fs-store.ts` is the reference implementation.
 
 Set your keys as environment variables in the host's dashboard, not in a file.
 
-## 7. Layout
+## 8. Layout
 
 ```
 app/
@@ -172,6 +238,7 @@ app/
   api/chats/        chat CRUD
 lib/
   agent.ts          the tool loop — call, run tools, feed back, repeat
+  voice/            wake word (local ONNX), speech to text, speech out
   providers/        registry + one OpenAI-compatible adapter for all of them
   tools/            tool definitions, registry and runner
   storage/          ChatStore interface, filesystem and memory drivers
@@ -184,10 +251,11 @@ test/               mock provider, unit tests, browser e2e
 ## Testing
 
 ```bash
-npm test            # unit tests — parsing, trimming, tool calls, calculator
+npm test            # unit tests — parsing, trimming, tools, SSRF, voice gates
 ./test/start-mock.sh                       # fake provider on :8899
 GROQ_API_KEY=test JARVIS_GROQ_BASE_URL=http://localhost:8899/v1 npm run dev
 npm run test:e2e    # drives a real browser against the mock
+npm run test:voice  # voice mode, with a WAV standing in for a microphone
 ```
 
 The mock streams tool calls the way real providers do — `arguments` split

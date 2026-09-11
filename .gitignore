@@ -28,3 +28,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .vercel
+
+# Voice runtime assets — fetched by scripts/setup-voice.mjs on postinstall.
+# 14MB of wasm and 3.6MB of models don't belong in the repo.
+public/ort/
+public/models/wake/

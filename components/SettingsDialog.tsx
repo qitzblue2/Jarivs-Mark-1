@@ -3,13 +3,21 @@
 import { useEffect, useState } from "react";
 import { ExternalLink, KeyRound, RotateCcw, X } from "lucide-react";
 import { DEFAULT_PERSONA } from "@/lib/persona";
+import { DEFAULT_GREETING } from "@/lib/voice/session";
+import { ttsEngines, getTts } from "@/lib/voice/tts";
 import type { ProviderState } from "./ModelPicker";
 
 export interface Settings {
   persona: string;
   temperature: number;
-  /** Let the model call tools (calculator, clock, and later search). */
+  /** Let the model call tools (calculator, clock, search). */
   useTools: boolean;
+  /** Spoken when the wake word fires. */
+  greeting: string;
+  ttsEngine: string;
+  ttsVoice?: string;
+  /** Wake-word confidence needed to fire. Raise it if it triggers on its own. */
+  wakeThreshold: number;
   /** Bring-your-own keys, provider id → key. Stored in this browser only. */
   keys: Record<string, string>;
 }
@@ -18,6 +26,9 @@ export const DEFAULT_SETTINGS: Settings = {
   persona: DEFAULT_PERSONA,
   temperature: 0.7,
   useTools: true,
+  greeting: DEFAULT_GREETING,
+  ttsEngine: "browser",
+  wakeThreshold: 0.5,
   keys: {},
 };
 
@@ -39,10 +50,26 @@ export default function SettingsDialog({
   onClose,
 }: Props) {
   const [draft, setDraft] = useState<Settings>(settings);
+  const [voices, setVoices] = useState<{ id: string; label: string }[]>([]);
 
   useEffect(() => {
     if (open) setDraft(settings);
   }, [open, settings]);
+
+  // Voice lists are engine-specific and load asynchronously in Chrome.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void getTts(draft.ttsEngine)
+      .voices()
+      .then((list) => {
+        if (!cancelled) setVoices(list);
+      })
+      .catch(() => setVoices([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [open, draft.ttsEngine]);
 
   useEffect(() => {
     if (!open) return;
@@ -170,6 +197,92 @@ export default function SettingsDialog({
                 </span>
               </span>
             </label>
+          </section>
+
+          <section className="space-y-2.5">
+            <h3 className="text-[12px] font-semibold uppercase tracking-wide text-ink-dim">
+              Voice
+            </h3>
+
+            <div>
+              <label className="mb-1 block text-[11.5px] text-ink-dim" htmlFor="greeting">
+                Greeting — spoken when it hears &ldquo;Hey JARVIS&rdquo;
+              </label>
+              <input
+                id="greeting"
+                value={draft.greeting}
+                onChange={(e) => setDraft((d) => ({ ...d, greeting: e.target.value }))}
+                className="w-full rounded-md border border-line bg-base px-2.5 py-1.5 text-[12px] text-ink outline-none transition focus:border-arc-dim"
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <label className="mb-1 block text-[11.5px] text-ink-dim" htmlFor="tts">
+                  Speech engine
+                </label>
+                <select
+                  id="tts"
+                  value={draft.ttsEngine}
+                  onChange={(e) => setDraft((d) => ({ ...d, ttsEngine: e.target.value, ttsVoice: undefined }))}
+                  className="w-full rounded-md border border-line bg-base px-2 py-1.5 text-[12px] text-ink outline-none focus:border-arc-dim"
+                >
+                  {ttsEngines().map((e) => (
+                    <option key={e.id} value={e.id}>{e.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex-1">
+                <label className="mb-1 block text-[11.5px] text-ink-dim" htmlFor="voice">
+                  Voice
+                </label>
+                <select
+                  id="voice"
+                  value={draft.ttsVoice ?? ""}
+                  onChange={(e) => setDraft((d) => ({ ...d, ttsVoice: e.target.value || undefined }))}
+                  className="w-full rounded-md border border-line bg-base px-2 py-1.5 text-[12px] text-ink outline-none focus:border-arc-dim"
+                >
+                  <option value="">Default</option>
+                  {voices.map((v) => (
+                    <option key={v.id} value={v.id}>{v.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                void getTts(draft.ttsEngine)
+                  .speak(draft.greeting || DEFAULT_GREETING, { voice: draft.ttsVoice })
+                  .catch(() => {});
+              }}
+              className="rounded-md border border-line px-2.5 py-1 text-[11.5px] text-ink-dim transition hover:border-arc-dim/50 hover:text-arc"
+            >
+              Test voice
+            </button>
+
+            <div>
+              <div className="mb-1 flex items-center justify-between">
+                <label className="text-[11.5px] text-ink-dim" htmlFor="threshold">
+                  Wake-word sensitivity
+                </label>
+                <span className="font-mono text-[11px] text-arc">{draft.wakeThreshold.toFixed(2)}</span>
+              </div>
+              <input
+                id="threshold"
+                type="range"
+                min={0.2}
+                max={0.9}
+                step={0.05}
+                value={draft.wakeThreshold}
+                onChange={(e) => setDraft((d) => ({ ...d, wakeThreshold: Number(e.target.value) }))}
+                className="w-full accent-[var(--color-arc)]"
+              />
+              <p className="text-[10.5px] text-ink-faint">
+                Lower catches your voice more easily; raise it if JARVIS wakes on its own.
+              </p>
+            </div>
           </section>
 
           <section>

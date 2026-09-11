@@ -3,7 +3,7 @@ import { fetchUrlTool } from "./fetch-url";
 import { webSearchTool } from "./web-search";
 import type { Tool } from "./types";
 
-/** Every tool JARVIS can reach. Mark 2 phases add to this list. */
+/** Every tool JARVIS can reach. Adding one is a file plus a line here. */
 const ALL: Tool[] = [
   calculateTool,
   webSearchTool,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, Code2, Info, Menu, Sparkles, X } from "lucide-react";
+import { ArrowDown, AudioLines, Code2, Info, Menu, Mic, Sparkles, X } from "lucide-react";
 import Message from "./Message";
 import Composer from "./Composer";
 import ModelPicker, { type ProviderState } from "./ModelPicker";
@@ -29,6 +29,8 @@ interface Props {
   artifactCount: number;
   notice: string | null;
   onDismissNotice: () => void;
+  /** true = push-to-talk (record now); false = wake-word voice mode. */
+  onStartVoice: (pushToTalk: boolean) => void;
 }
 
 const STARTERS = [
@@ -43,7 +45,7 @@ export default function ChatPane(props: Props) {
     chat, streaming, streamingMessageId, input, onInputChange, onSend, onStop,
     onRegenerate, onEditMessage, onOpenInCanvas, providers, provider, model,
     onModelChange, onOpenSettings, onToggleSidebar, onToggleCanvas, canvasOpen,
-    artifactCount, notice, onDismissNotice,
+    artifactCount, notice, onDismissNotice, onStartVoice,
   } = props;
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -79,7 +81,7 @@ export default function ChatPane(props: Props) {
         </button>
 
         <h1 className="min-w-0 flex-1 truncate text-[13px] font-medium">
-          {chat?.title ?? "JARVIS Mark 2"}
+          {chat?.title ?? "JARVIS Mark 3"}
         </h1>
 
         <ModelPicker
@@ -89,6 +91,22 @@ export default function ChatPane(props: Props) {
           onChange={onModelChange}
           onOpenSettings={onOpenSettings}
         />
+
+        <button
+          onClick={() => onStartVoice(true)}
+          className="rounded-md p-1.5 text-ink-faint transition hover:bg-raised hover:text-ink"
+          title="Speak a question"
+        >
+          <Mic size={16} />
+        </button>
+
+        <button
+          onClick={() => onStartVoice(false)}
+          className="rounded-md p-1.5 text-ink-faint transition hover:bg-raised hover:text-arc"
+          title={'Voice mode — say "Hey JARVIS" (Ctrl/Cmd+J)'}
+        >
+          <AudioLines size={16} />
+        </button>
 
         <button
           onClick={onToggleCanvas}
@@ -123,7 +141,7 @@ export default function ChatPane(props: Props) {
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-arc-dim/10 ring-1 ring-arc-dim/25">
                 <Sparkles size={20} className="text-arc" />
               </div>
-              <h2 className="mb-1 text-lg font-semibold">JARVIS Mark 2</h2>
+              <h2 className="mb-1 text-lg font-semibold">JARVIS Mark 3</h2>
               <p className="mb-5 text-[13px] text-ink-dim">
                 {anyKey
                   ? "Running on free, fast inference. Ask for code and it opens in the canvas."

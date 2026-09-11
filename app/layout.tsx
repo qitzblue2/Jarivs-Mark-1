@@ -3,7 +3,7 @@ import "highlight.js/styles/github-dark.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "JARVIS Mark 2",
+  title: "JARVIS Mark 3",
   description: "A self-hosted AI workspace running on free, fast inference.",
 };
 

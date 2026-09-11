@@ -5,6 +5,7 @@ import Sidebar from "./Sidebar";
 import ChatPane from "./ChatPane";
 import CodeCanvas from "./CodeCanvas";
 import SettingsDialog, { DEFAULT_SETTINGS, type Settings } from "./SettingsDialog";
+import VoiceMode from "./VoiceMode";
 import type { ProviderState } from "./ModelPicker";
 import { consumeJarvisStream } from "@/lib/stream";
 import { artifactsFromMessage, artifactsFromMessages } from "@/lib/codeblocks";
@@ -38,6 +39,8 @@ export default function Workspace() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [pushToTalk, setPushToTalk] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [canvasOpen, setCanvasOpen] = useState(false);
@@ -227,7 +230,7 @@ export default function Workspace() {
    * should see, already including the new user turn.
    */
   const runTurn = useCallback(
-    async (target: Chat, history: Message[]) => {
+    async (target: Chat, history: Message[]): Promise<string> => {
       const assistantId = newId();
       const assistant: Message = {
         id: assistantId,
@@ -357,6 +360,9 @@ export default function Workspace() {
         setActiveArtifactId(produced[produced.length - 1].id);
         setCanvasOpen(true);
       }
+
+      // Returned so voice mode can speak the answer it just produced.
+      return errorMessage ? `Sorry — ${errorMessage}` : acc;
     },
     [provider, model, settings, persist],
   );
@@ -392,6 +398,36 @@ export default function Workspace() {
     abortRef.current?.abort();
     abortRef.current = null;
   }
+
+  /**
+   * A spoken question goes through the same runTurn as a typed one, so voice
+   * conversations save to the same chats and can use tools.
+   */
+  const askByVoice = useCallback(
+    async (text: string): Promise<string> => {
+      let target = chat;
+      if (!target) {
+        target = await createChat();
+        if (!target) return "I could not start a chat.";
+      }
+
+      const userMessage: Message = {
+        id: newId(),
+        role: "user",
+        content: text,
+        createdAt: Date.now(),
+      };
+
+      const history = [...target.messages, userMessage];
+      const titled: Chat =
+        target.title === "New chat" || target.messages.length === 0
+          ? { ...target, title: deriveTitle(text) }
+          : target;
+
+      return runTurn(titled, history);
+    },
+    [chat, createChat, runTurn],
+  );
 
   /** Drop the last assistant turn and ask again. */
   async function regenerate(messageId: string) {
@@ -467,6 +503,12 @@ export default function Workspace() {
         newChat();
       }
       if (e.key === "Escape" && canvasOpen) setCanvasOpen(false);
+      // Cmd/Ctrl+J drops straight into voice mode.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        setPushToTalk(false);
+        setVoiceOpen(true);
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -538,6 +580,10 @@ export default function Workspace() {
             artifactCount={artifacts.length}
             notice={notice}
             onDismissNotice={() => setNotice(null)}
+            onStartVoice={(talk) => {
+              setPushToTalk(talk);
+              setVoiceOpen(true);
+            }}
           />
         </div>
 
@@ -569,6 +615,18 @@ export default function Workspace() {
           </>
         )}
       </main>
+
+      <VoiceMode
+        open={voiceOpen}
+        onClose={() => setVoiceOpen(false)}
+        onQuestion={askByVoice}
+        greeting={settings.greeting}
+        ttsEngine={settings.ttsEngine}
+        ttsVoice={settings.ttsVoice}
+        threshold={settings.wakeThreshold}
+        apiKey={settings.keys.groq}
+        pushToTalk={pushToTalk}
+      />
 
       <SettingsDialog
         open={settingsOpen}
