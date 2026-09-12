@@ -4,6 +4,7 @@ import { runToolCalls } from "@/lib/tools/run";
 import { allTools } from "@/lib/tools/registry";
 import { toWireTool } from "@/lib/tools/types";
 import { extractChunk, readSSE, ToolCallAccumulator, type JarvisEvent } from "@/lib/stream";
+import { denyAll } from "@/lib/tools/fs/approval";
 
 /**
  * Cap on tool rounds per user turn.
@@ -95,7 +96,40 @@ export async function* runAgentTurn(
 
     yield { type: "tool_start", round, calls };
 
-    const results = await runToolCalls(calls, { signal });
+    /**
+     * Approval requests arrive while runToolCalls is awaiting, so they are
+     * queued here and drained as they appear. A generator can't yield from
+     * inside a callback, so the callback pushes and the drain loop yields.
+     */
+    const queue: JarvisEvent[] = [];
+    const resultsPromise = runToolCalls(calls, {
+      signal,
+      onApprovalRequest: (request) => {
+        queue.push({
+          type: "approval_request",
+          id: request.id,
+          kind: request.kind,
+          summary: request.summary,
+          detail: request.detail,
+          path: request.path,
+        });
+      },
+    });
+
+    let settled = false;
+    void resultsPromise.then(() => {
+      settled = true;
+    });
+
+    // Pump the queue until the tools finish, so an approval card reaches the
+    // browser while the tool is still waiting for the answer.
+    while (!settled) {
+      while (queue.length > 0) yield queue.shift()!;
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    while (queue.length > 0) yield queue.shift()!;
+
+    const results = await resultsPromise;
 
     yield { type: "tool_end", round, results };
 

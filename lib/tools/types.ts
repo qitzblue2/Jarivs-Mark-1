@@ -20,6 +20,11 @@ export interface Tool {
 
 export interface ToolContext {
   signal?: AbortSignal;
+  /**
+   * Called when a tool needs the user to approve something before it runs.
+   * The agent loop wires this to the SSE stream so the UI can show a card.
+   */
+  onApprovalRequest?: (request: import("./fs/approval").ApprovalRequest) => void;
 }
 
 /** One tool call requested by the model, once its streamed fragments are whole. */

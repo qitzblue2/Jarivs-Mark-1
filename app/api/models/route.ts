@@ -3,6 +3,8 @@ import { listModels } from "@/lib/providers/openai-compat";
 import { PROVIDERS, PROVIDER_IDS, defaultProviderId, hasServerKey, resolveKey } from "@/lib/providers/registry";
 import { ProviderError } from "@/lib/providers/types";
 import { storageDriver } from "@/lib/storage";
+import { computerAccessEnabled } from "@/lib/tools/fs/workspace";
+import { authConfigured, openNetwork, requiresAuth } from "@/lib/auth/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,8 +60,23 @@ export async function GET(req: NextRequest) {
     }),
   );
 
+  const local = !requiresAuth(req.headers.get("host"));
+
   return Response.json(
-    { providers, defaultProvider: defaultProviderId(), storage: storageDriver() },
+    {
+      providers,
+      defaultProvider: defaultProviderId(),
+      storage: storageDriver(),
+      security: {
+        computerAccess: computerAccessEnabled(),
+        authConfigured: authConfigured(),
+        local,
+        openNetwork: openNetwork(),
+        // Filesystem + shell reachable from off-machine is the one
+        // combination worth shouting about.
+        exposedWithComputerAccess: !local && computerAccessEnabled(),
+      },
+    },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

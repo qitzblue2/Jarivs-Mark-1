@@ -64,7 +64,7 @@ await page.addInitScript(() => {
 });
 
 await page.goto("http://localhost:3000", { waitUntil: "networkidle" });
-check("app loads", (await page.title()) === "JARVIS Mark 3");
+check("app loads", (await page.title()) === "JARVIS Mark 4");
 
 // --- push-to-talk: skips the wake word, records, transcribes, answers ---
 await page.locator('button[title="Speak a question"]').click();

@@ -175,6 +175,22 @@ const server = http.createServer((req, res) => {
       };
 
       // Ask for a tool the first time round, then answer using its result.
+      if (parsed.tools?.length && /write.*file|create.*file/i.test(prompt) && !alreadyRanTool) {
+        return streamToolCall(
+          res,
+          { id: "call_write1", name: "write_file", args: { path: "notes/hello.txt", content: "written by jarvis" } },
+          finish,
+        );
+      }
+
+      if (parsed.tools?.length && /run (a )?command|execute/i.test(prompt) && !alreadyRanTool) {
+        return streamToolCall(
+          res,
+          { id: "call_cmd1", name: "run_command", args: { command: "echo hello && env | grep -c API_KEY", reason: "demonstrate" } },
+          finish,
+        );
+      }
+
       if (parsed.tools?.length && /search|look ?up|latest|news/i.test(prompt) && !alreadyRanTool) {
         return streamToolCall(
           res,

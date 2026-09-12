@@ -33,3 +33,6 @@ yarn-error.log*
 # 14MB of wasm and 3.6MB of models don't belong in the repo.
 public/ort/
 public/models/wake/
+
+# JARVIS scratch space for the filesystem tools.
+workspace/

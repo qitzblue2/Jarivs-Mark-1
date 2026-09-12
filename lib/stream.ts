@@ -12,6 +12,15 @@ export type JarvisEvent =
   | { type: "tool_end"; round: number; results: { toolCallId: string; name: string; content: string; isError: boolean; ms: number }[] }
   /** The model does not support tools; we retried without them. */
   | { type: "tools_unsupported"; model: string }
+  /** A tool needs the user to approve something before it can run. */
+  | {
+      type: "approval_request";
+      id: string;
+      kind: "write" | "command";
+      summary: string;
+      detail?: string;
+      path?: string;
+    }
   | { type: "done" }
   | { type: "error"; message: string; status?: number };
 

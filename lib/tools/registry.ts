@@ -1,6 +1,9 @@
 import { calculateTool } from "./calculate";
 import { fetchUrlTool } from "./fetch-url";
 import { forgetTool, recallTool, rememberTool } from "./remember";
+import { listFilesTool, readFileTool, writeFileTool } from "./fs/files";
+import { runCommandTool } from "./fs/exec";
+import { computerAccessEnabled } from "./fs/workspace";
 import { webSearchTool } from "./web-search";
 import type { Tool } from "./types";
 
@@ -41,12 +44,20 @@ const ALL: Tool[] = [
   },
 ];
 
-const BY_NAME = new Map(ALL.map((t) => [t.name, t]));
+/**
+ * Filesystem and command tools, behind an env-var gate.
+ *
+ * Gated by JARVIS_ALLOW_COMPUTER rather than a UI setting on purpose: a
+ * setting could be flipped by anything with a session, and these tools are
+ * the ones that can change the machine. When the gate is off they are not
+ * registered at all — the model is never even told they exist.
+ */
+const COMPUTER: Tool[] = [listFilesTool, readFileTool, writeFileTool, runCommandTool];
 
 export function allTools(): Tool[] {
-  return ALL;
+  return computerAccessEnabled() ? [...ALL, ...COMPUTER] : ALL;
 }
 
 export function getTool(name: string): Tool | undefined {
-  return BY_NAME.get(name);
+  return allTools().find((tool) => tool.name === name);
 }

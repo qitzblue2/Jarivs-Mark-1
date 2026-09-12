@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ShieldAlert } from "lucide-react";
 import Sidebar from "./Sidebar";
 import ChatPane from "./ChatPane";
 import CodeCanvas from "./CodeCanvas";
 import SettingsDialog, { DEFAULT_SETTINGS, type Settings } from "./SettingsDialog";
 import VoiceMode from "./VoiceMode";
+import type { PendingApproval } from "./ApprovalCard";
 import type { ProviderState } from "./ModelPicker";
 import { consumeJarvisStream } from "@/lib/stream";
 import { artifactsFromMessage, artifactsFromMessages } from "@/lib/codeblocks";
@@ -28,6 +30,7 @@ export default function Workspace() {
   const [chat, setChat] = useState<Chat | null>(null);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState<Attachment[]>([]);
+  const [approvals, setApprovals] = useState<PendingApproval[]>([]);
 
   const [streaming, setStreaming] = useState(false);
   const [streamingId, setStreamingId] = useState<string | null>(null);
@@ -37,6 +40,10 @@ export default function Workspace() {
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
   const [storage, setStorage] = useState("fs");
+  const [security, setSecurity] = useState<{
+    computerAccess: boolean;
+    exposedWithComputerAccess: boolean;
+  } | null>(null);
 
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -86,6 +93,7 @@ export default function Workspace() {
       const list: ProviderState[] = data.providers ?? [];
       setProviders(list);
       setStorage(data.storage ?? "fs");
+      setSecurity(data.security ?? null);
 
       // Restore the last selection when it's still valid, else pick the first
       // provider that actually has a key and a model.
@@ -323,6 +331,11 @@ export default function Workspace() {
               r.round === event.round ? { ...r, results: event.results } : r,
             );
             paint(true);
+          } else if (event.type === "approval_request") {
+            setApprovals((prev) => [
+              ...prev,
+              { id: event.id, kind: event.kind, summary: event.summary, detail: event.detail, path: event.path },
+            ]);
           } else if (event.type === "tools_unsupported") {
             setNotice(`${event.model} does not support tools — answered without them.`);
           } else if (event.type === "error") {
@@ -337,6 +350,8 @@ export default function Workspace() {
         abortRef.current = null;
         setStreaming(false);
         setStreamingId(null);
+        // Any card still on screen belongs to a turn that has ended.
+        setApprovals([]);
       }
 
       const finalMessage: Message = {
@@ -530,7 +545,18 @@ export default function Workspace() {
   const showCanvas = canvasOpen;
 
   return (
-    <div className="flex h-dvh w-full overflow-hidden">
+    <div className="flex h-dvh w-full flex-col overflow-hidden">
+      {security?.exposedWithComputerAccess && (
+        <div className="flex items-center gap-2 border-b border-danger/40 bg-danger/15 px-3 py-1.5 text-[11.5px] text-danger">
+          <ShieldAlert size={13} className="shrink-0" />
+          <span className="min-w-0 flex-1">
+            This JARVIS is reachable from outside this machine <strong>and</strong> has
+            filesystem and shell access enabled. Anyone with the password can run
+            commands here.
+          </span>
+        </div>
+      )}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* Sidebar: fixed column on desktop, overlay drawer on small screens. */}
       <div className="hidden w-[260px] shrink-0 lg:block">
         <Sidebar
@@ -593,6 +619,8 @@ export default function Workspace() {
             artifactCount={artifacts.length}
             notice={notice}
             onDismissNotice={() => setNotice(null)}
+            approvals={approvals}
+            onApprovalSettled={(id) => setApprovals((prev) => prev.filter((a) => a.id !== id))}
             attachments={pending}
             onAttach={(added) => setPending((prev) => [...prev, ...added])}
             onRemoveAttachment={(id) => setPending((prev) => prev.filter((a) => a.id !== id))}
@@ -645,6 +673,8 @@ export default function Workspace() {
         pushToTalk={pushToTalk}
         onThresholdChange={(value) => saveSettings({ ...settings, wakeThreshold: value })}
       />
+
+      </div>
 
       <SettingsDialog
         open={settingsOpen}

@@ -7,6 +7,7 @@ import { attachmentsToText, MAX_IMAGES } from "@/lib/attachments";
 import type { Attachment } from "@/lib/types";
 import { encodeEvent, type JarvisEvent } from "@/lib/stream";
 import { runAgentTurn } from "@/lib/agent";
+import { denyAll } from "@/lib/tools/fs/approval";
 import { DEFAULT_PERSONA } from "@/lib/persona";
 import { forPrompt, getMemory } from "@/lib/memory";
 
@@ -203,6 +204,9 @@ export async function POST(req: NextRequest) {
           }
         },
         cancel() {
+          // Deny anything still waiting, or a killed turn leaves a tool
+          // parked on a promise nobody will ever answer.
+          denyAll();
           void turn.return(undefined);
         },
       });

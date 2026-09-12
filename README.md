@@ -1,4 +1,4 @@
-# JARVIS Mark 3
+# JARVIS Mark 4
 
 A self-hosted AI workspace that runs on **free, fast inference**. Chat list on
 the left, conversation in the middle, live code canvas on the right — and it
@@ -101,6 +101,8 @@ Shipped so far:
 | `calculate` | Arithmetic, via a real parser |
 | `get_time` | The current date, which a model cannot know on its own |
 | `remember` / `recall` / `forget` | Durable memory across conversations |
+| `list_files` / `read_file` / `write_file` | Files in the workspace — writes need your approval |
+| `run_command` | Shell commands in the workspace — needs your approval |
 
 ### Search backends
 
@@ -292,12 +294,67 @@ models). `npm install` fetches them automatically via `scripts/setup-voice.mjs`.
 If that was offline, run `npm run setup:voice`. They are deliberately not in
 git. Everything except voice works without them.
 
-## 8. Where your data lives
+## 8. Letting JARVIS use your computer
+
+Off by default. Turn it on with `JARVIS_ALLOW_COMPUTER=1` — an environment
+variable, not a setting, so nothing with a browser session can enable it.
+
+When on, JARVIS can list, read and write files in `./workspace` and run
+commands there. Three layers stand between the model and your machine:
+
+**Containment.** Every path is resolved with `realpath` and re-checked for
+containment *afterwards*. That catches `../` traversal and the subtler case a
+string-prefix check misses: a symlink inside the workspace pointing out of it.
+Tested against both, plus absolute paths, null bytes, and a sibling directory
+sharing the root's name prefix.
+
+**Approval.** Writes and commands don't execute. You get a card showing the
+exact command or the full file content, and nothing happens until you approve.
+No answer within five minutes counts as a denial — failing open would mean a
+forgotten tab quietly approving things.
+
+**A scrubbed environment.** Commands run with every API key removed. Without
+that, `env` hands out your Groq, Cerebras and Tavily keys, which is worse than
+anything it could do to a file. Verified: `env | grep -c API_KEY` returns 0.
+
+Reads are unattended. A handful of catastrophic commands (`rm -rf /`, `mkfs`,
+fork bombs) are refused outright even with approval.
+
+## 9. Reaching it from your phone
+
+`npm run dev` listens on **localhost only**. That is deliberate, and it is the
+actual security boundary — `Host` and `X-Forwarded-For` are both set by the
+client and pass straight through, so any "is this request local?" check built
+on headers can be spoofed by anything on your network. Binding to loopback
+can't be.
+
+To reach JARVIS from elsewhere, tunnel it:
+
+```bash
+npm run dev                                    # terminal 1
+cloudflared tunnel --url http://localhost:3000 # terminal 2
+```
+
+You get a real HTTPS URL, which also makes voice work — the microphone needs
+a secure context, and `localhost` only counts as one on the machine itself.
+
+A tunnel rewrites the Host header, so JARVIS then **requires
+`JARVIS_PASSWORD`**. With none set it refuses to serve rather than defaulting
+to open. If you deliberately widen the bind with `npm run dev:lan`, a password
+is mandatory for every request, loopback-looking or not.
+
+**Why not just deploy it?** Vercel's free tier kills a function after 10
+seconds, and a five-round tool conversation blows straight past that. The
+filesystem tools also only make sense on the machine that has your files. One
+local instance behind a tunnel has no timeout, needs no cloud database, and
+keeps your chats in the JSON files they already live in.
+
+## 10. Where your data lives
 
 Chats are JSON files in `./data/chats/`, one per conversation. `data/` is
 gitignored. Back them up by copying the folder; delete one to delete the chat.
 
-## 9. Deploying
+## 11. Deploying
 
 It runs on Vercel's free tier as-is, with one caveat: **serverless filesystems
 are read-only**, so the file store can't persist there. The app detects this
@@ -307,7 +364,7 @@ is a four-method interface and `fs-store.ts` is the reference implementation.
 
 Set your keys as environment variables in the host's dashboard, not in a file.
 
-## 10. Layout
+## 12. Layout
 
 ```
 app/
@@ -316,7 +373,9 @@ app/
   api/chats/        chat CRUD
 lib/
   agent.ts          the tool loop — call, run tools, feed back, repeat
+  auth/             password session, signed cookie
   memory/           durable facts, relevance scoring, prompt injection
+  tools/fs/         workspace containment, approval gate, file and shell tools
   voice/            wake word (local ONNX), speech to text, speech out
   providers/        registry + one OpenAI-compatible adapter for all of them
   tools/            tool definitions, registry and runner
@@ -330,7 +389,7 @@ test/               mock provider, unit tests, browser e2e
 ## Testing
 
 ```bash
-npm test            # unit tests — parsing, trimming, tools, SSRF, voice gates
+npm test            # unit + containment/auth suites
 ./test/start-mock.sh                       # fake provider on :8899
 GROQ_API_KEY=test JARVIS_GROQ_BASE_URL=http://localhost:8899/v1 npm run dev
 npm run test:e2e    # drives a real browser against the mock

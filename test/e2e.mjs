@@ -19,7 +19,7 @@ const check = (label, ok, extra = "") =>
   console.log(`${ok ? "ok  " : "FAIL"} ${label}${extra ? ` — ${extra}` : ""}`);
 
 await page.goto("http://localhost:3000", { waitUntil: "networkidle" });
-check("page loads", (await page.title()) === "JARVIS Mark 3", await page.title());
+check("page loads", (await page.title()) === "JARVIS Mark 4", await page.title());
 
 await page.locator("header button", { hasText: /mock-/ }).first().waitFor({ timeout: 10000 });
 check("model picker populated from live /models", true);

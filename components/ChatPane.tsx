@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowDown, AudioLines, Code2, Info, Menu, Mic, Sparkles, X } from "lucide-react";
 import Message from "./Message";
 import Composer from "./Composer";
+import ApprovalCard, { type PendingApproval } from "./ApprovalCard";
 import ModelPicker, { type ProviderState } from "./ModelPicker";
 import type { Attachment, Chat } from "@/lib/types";
 
@@ -35,6 +36,8 @@ interface Props {
   onAttach: (attachments: Attachment[]) => void;
   onRemoveAttachment: (id: string) => void;
   onAttachError: (message: string) => void;
+  approvals: PendingApproval[];
+  onApprovalSettled: (id: string) => void;
 }
 
 const STARTERS = [
@@ -51,6 +54,7 @@ export default function ChatPane(props: Props) {
     onModelChange, onOpenSettings, onToggleSidebar, onToggleCanvas, canvasOpen,
     artifactCount, notice, onDismissNotice, onStartVoice,
     attachments, onAttach, onRemoveAttachment, onAttachError,
+    approvals, onApprovalSettled,
   } = props;
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -86,7 +90,7 @@ export default function ChatPane(props: Props) {
         </button>
 
         <h1 className="min-w-0 flex-1 truncate text-[13px] font-medium">
-          {chat?.title ?? "JARVIS Mark 3"}
+          {chat?.title ?? "JARVIS Mark 4"}
         </h1>
 
         <ModelPicker
@@ -146,7 +150,7 @@ export default function ChatPane(props: Props) {
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-arc-dim/10 ring-1 ring-arc-dim/25">
                 <Sparkles size={20} className="text-arc" />
               </div>
-              <h2 className="mb-1 text-lg font-semibold">JARVIS Mark 3</h2>
+              <h2 className="mb-1 text-lg font-semibold">JARVIS Mark 4</h2>
               <p className="mb-5 text-[13px] text-ink-dim">
                 {anyKey
                   ? "Running on free, fast inference. Ask for code and it opens in the canvas."
@@ -195,6 +199,19 @@ export default function ChatPane(props: Props) {
                 onOpenInCanvas={onOpenInCanvas}
               />
             ))}
+            {approvals.length > 0 && (
+              <div className="px-4 sm:px-6">
+                <div className="mx-auto max-w-3xl">
+                  {approvals.map((approval) => (
+                    <ApprovalCard
+                      key={approval.id}
+                      approval={approval}
+                      onSettled={onApprovalSettled}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="h-4" />
           </>
         )}
