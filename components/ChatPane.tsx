@@ -5,7 +5,7 @@ import { ArrowDown, AudioLines, Code2, Info, Menu, Mic, Sparkles, X } from "luci
 import Message from "./Message";
 import Composer from "./Composer";
 import ModelPicker, { type ProviderState } from "./ModelPicker";
-import type { Chat } from "@/lib/types";
+import type { Attachment, Chat } from "@/lib/types";
 
 interface Props {
   chat: Chat | null;
@@ -31,6 +31,10 @@ interface Props {
   onDismissNotice: () => void;
   /** true = push-to-talk (record now); false = wake-word voice mode. */
   onStartVoice: (pushToTalk: boolean) => void;
+  attachments: Attachment[];
+  onAttach: (attachments: Attachment[]) => void;
+  onRemoveAttachment: (id: string) => void;
+  onAttachError: (message: string) => void;
 }
 
 const STARTERS = [
@@ -46,6 +50,7 @@ export default function ChatPane(props: Props) {
     onRegenerate, onEditMessage, onOpenInCanvas, providers, provider, model,
     onModelChange, onOpenSettings, onToggleSidebar, onToggleCanvas, canvasOpen,
     artifactCount, notice, onDismissNotice, onStartVoice,
+    attachments, onAttach, onRemoveAttachment, onAttachError,
   } = props;
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -217,6 +222,10 @@ export default function ChatPane(props: Props) {
         onSend={onSend}
         onStop={onStop}
         streaming={streaming}
+        attachments={attachments}
+        onAttach={onAttach}
+        onRemoveAttachment={onRemoveAttachment}
+        onAttachError={onAttachError}
         disabled={!anyKey}
         placeholder={anyKey ? "Ask JARVIS anything…" : "Add an API key in Settings to start"}
       />

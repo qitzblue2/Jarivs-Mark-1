@@ -6,6 +6,7 @@ import { DEFAULT_PERSONA } from "@/lib/persona";
 import { DEFAULT_GREETING } from "@/lib/voice/session";
 import { ttsEngines, getTts } from "@/lib/voice/tts";
 import type { ProviderState } from "./ModelPicker";
+import MemoryEditor from "./MemoryEditor";
 
 export interface Settings {
   persona: string;
@@ -198,6 +199,8 @@ export default function SettingsDialog({
               </span>
             </label>
           </section>
+
+          <MemoryEditor open={open} />
 
           <section className="space-y-2.5">
             <h3 className="text-[12px] font-semibold uppercase tracking-wide text-ink-dim">

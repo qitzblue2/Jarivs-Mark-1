@@ -2,10 +2,32 @@
 
 export type Role = "system" | "user" | "assistant" | "tool";
 
+/**
+ * A file the user attached to a message.
+ *
+ * Text-bearing files carry `text`; images carry a `dataUrl`. Added ALONGSIDE
+ * Message.content rather than turning content into a parts array, so every
+ * chat written by Mark 1-3 still parses.
+ */
+export interface Attachment {
+  id: string;
+  kind: "text" | "image";
+  name: string;
+  mime: string;
+  size: number;
+  /** Extracted text, for text/code/PDF. */
+  text?: string;
+  /** base64 data URL, for images. */
+  dataUrl?: string;
+  /** Set when extraction partially failed, shown in the UI. */
+  note?: string;
+}
+
 export interface Message {
   id: string;
   role: Role;
   content: string;
+  attachments?: Attachment[];
   createdAt: number;
   /** Which provider/model produced this turn. Assistant messages only. */
   provider?: string;

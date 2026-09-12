@@ -11,6 +11,12 @@ import { tidy } from "../lib/tools/search/types";
 import { WakeGate, SilenceGate } from "../lib/voice/wake/types";
 import { forSpeech } from "../lib/voice/tts/types";
 import { encodeWav, durationOf } from "../lib/voice/wav";
+import { rank, forPrompt } from "../lib/memory/relevance";
+import type { MemoryEntry } from "../lib/memory/types";
+import { attachmentsToText, lighten, formatSize, MAX_IMAGES } from "../lib/attachments";
+import { supportsVision } from "../lib/providers/registry";
+import { textOf } from "../lib/tokens";
+import type { Attachment } from "../lib/types";
 
 let pass = 0;
 let fail = 0;
@@ -331,6 +337,76 @@ console.log("\n--- noise floor never disables hearing ---");
   eq("normal room scales sensibly", clamp(0.004), 0.012);
   eq("threshold always reachable by speech", clamp(0.9) < 0.2, true);
 }
+
+console.log("\n--- memory relevance ---");
+{
+  const now = Date.now();
+  const mem = (id: string, text: string, tags: string[] = [], ageDays = 0): MemoryEntry => ({
+    id, text, tags, createdAt: now - ageDays * 86400000, updatedAt: now - ageDays * 86400000,
+  });
+
+  const entries = [
+    mem("1", "Prefers TypeScript over JavaScript", ["preference"]),
+    mem("2", "Is building a voice assistant called JARVIS", ["project"]),
+    mem("3", "Name is Blue", ["always"]),
+    mem("4", "Dislikes tabs, uses two-space indentation", ["preference"]),
+  ];
+
+  eq("finds the on-topic memory", rank(entries, "should I use typescript?")[0].id, "1");
+  eq("finds a project memory", rank(entries, "how is the jarvis build going")[0].id, "2");
+  eq("ignores unrelated memories", rank(entries, "what is the capital of France"), []);
+  eq("stop words alone match nothing", rank(entries, "what is the of and"), []);
+
+  // "always" must survive even when the query has nothing to do with it.
+  const chosen = forPrompt(entries, "what is the weather tomorrow");
+  eq("always-tagged memory is pinned regardless of query", chosen.map((e) => e.id), ["3"]);
+
+  const both = forPrompt(entries, "typescript indentation");
+  eq("pinned plus relevant are both included", both.some((e) => e.id === "3") && both.some((e) => e.id === "1"), true);
+
+  // Budget must be respected, and the pinned entry must win the space.
+  const many = Array.from({ length: 60 }, (_, i) => mem(`x${i}`, `Fact number ${i} about typescript code`, []));
+  const budgeted = forPrompt([...many, mem("pin", "Name is Blue", ["always"])], "typescript", 120);
+  const cost = budgeted.reduce((n, e) => n + Math.ceil(e.text.length / 4) + 4, 0);
+  eq("prompt injection respects its token budget", cost <= 120, true);
+  eq("pinned entry survives a tight budget", budgeted.some((e) => e.id === "pin"), true);
+
+  // Recency is a nudge, not an override.
+  const aged = [mem("old", "Uses Vim keybindings", [], 60), mem("new", "Uses Vim keybindings", [], 0)];
+  eq("recent memory outranks an identical older one", rank(aged, "vim keybindings")[0].id, "new");
+}
+
+console.log("\n--- attachments ---");
+{
+  const txt: Attachment = { id: "t", kind: "text", name: "notes.md", mime: "text/markdown", size: 12, text: "hello world" };
+  const img: Attachment = { id: "i", kind: "image", name: "a.png", mime: "image/png", size: 99, dataUrl: "data:image/png;base64,AAA" };
+
+  const rendered = attachmentsToText([txt]);
+  eq("text attachment names the file", rendered.includes("notes.md"), true);
+  eq("text attachment includes the body", rendered.includes("hello world"), true);
+  eq("image renders as a placeholder line", attachmentsToText([img]), "[Attached image: a.png]");
+
+  // Base64 images must not persist into later turns: they would exhaust both
+  // the context window and the 1,000/day vision quota.
+  eq("lighten drops the image payload", lighten(img).dataUrl, undefined);
+  eq("lighten keeps the image metadata", lighten(img).name, "a.png");
+  eq("lighten leaves text attachments alone", lighten(txt).text, "hello world");
+
+  eq("byte sizes format", [formatSize(512), formatSize(2048), formatSize(3 * 1024 * 1024)], ["512 B", "2 KB", "3.0 MB"]);
+  eq("image cap matches the provider limit", MAX_IMAGES, 3);
+}
+
+console.log("\n--- vision capability ---");
+eq("groq qwen3.6 is a vision model", supportsVision("groq", "qwen/qwen3.6-27b"), true);
+eq("groq gpt-oss is not", supportsVision("groq", "openai/gpt-oss-120b"), false);
+eq("cerebras has no vision models", supportsVision("cerebras", "qwen/qwen3.6-27b"), false);
+eq("unknown provider is not vision", supportsVision("nope", "qwen3.6"), false);
+
+console.log("\n--- multimodal token accounting ---");
+eq("textOf passes strings through", textOf("hello"), "hello");
+eq("textOf joins text parts", textOf([{ type: "text", text: "a" }, { type: "text", text: "b" }]), "a b");
+// An image must cost roughly its real token price or trimming will overflow.
+eq("textOf prices an image at ~2048 tokens", Math.round(textOf([{ type: "image_url", image_url: { url: "x" } }]).length / 4), 2048);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

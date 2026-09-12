@@ -1,3 +1,18 @@
+/** Flatten multimodal content to text for measurement purposes. */
+export function textOf(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => {
+      const p = part as { type?: string; text?: string };
+      // Groq bills an image at ~2048 tokens; stand in with equivalent chars
+      // so the budget accounts for it.
+      if (p.type === "image_url") return "x".repeat(2048 * 4);
+      return p.text ?? "";
+    })
+    .join(" ");
+}
+
 /**
  * Cheap token estimation. Real tokenizers are per-model and cost a dependency
  * we don't need — ~4 characters per token is close enough to keep requests
@@ -8,10 +23,10 @@ export function estimateTokens(text: string): number {
 }
 
 export function estimateMessagesTokens(
-  messages: { role: string; content: string }[],
+  messages: { role: string; content: unknown }[],
 ): number {
   // ~4 tokens of per-message framing overhead.
-  return messages.reduce((sum, m) => sum + estimateTokens(m.content) + 4, 0);
+  return messages.reduce((sum, m) => sum + estimateTokens(textOf(m.content)) + 4, 0);
 }
 
 /**
@@ -25,7 +40,7 @@ export function estimateMessagesTokens(
  * a 400 — a worse outcome than dropping one more turn of history.
  */
 export function trimToBudget<
-  T extends { role: string; content: string; tool_calls?: unknown[] },
+  T extends { role: string; content: unknown; tool_calls?: unknown[] },
 >(messages: T[], budget: number): { messages: T[]; dropped: number } {
   const system = messages.filter((m) => m.role === "system");
   const rest = messages.filter((m) => m.role !== "system");

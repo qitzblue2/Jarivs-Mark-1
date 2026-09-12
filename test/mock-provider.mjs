@@ -143,8 +143,19 @@ const server = http.createServer((req, res) => {
       const prompt = String(lastUser?.content ?? "");
       const alreadyRanTool = messages.some((m) => m.role === "tool");
 
+      // Report the content shape so multimodal wiring can be verified.
+      const latest = [...messages].reverse().find((m) => m.role === "user");
+      const shape = Array.isArray(latest?.content)
+        ? `parts[${latest.content.map((p) => (p.type === "image_url" ? "image" : "text")).join(",")}]`
+        : `string(${String(latest?.content ?? "").length})`;
+
+      const system = messages.find((m) => m.role === "system")?.content ?? "";
+      const memoryLines = /What you remember about this user:\n([\s\S]*?)\n\n/.exec(system);
       process.stdout.write(
-        `[mock] model=${parsed.model} msgs=${messages.length} tools=${parsed.tools?.length ?? 0} toolResults=${alreadyRanTool}\n`,
+        `[mock] model=${parsed.model} msgs=${messages.length} tools=${parsed.tools?.length ?? 0} toolResults=${alreadyRanTool}` +
+          ` content=${shape}` +
+          (memoryLines ? ` memory=[${memoryLines[1].replace(/\n/g, " | ").trim()}]` : " memory=none") +
+          `\n`,
       );
 
       // A model that rejects the tools parameter, for the degradation path.

@@ -1,5 +1,6 @@
 import { calculateTool } from "./calculate";
 import { fetchUrlTool } from "./fetch-url";
+import { forgetTool, recallTool, rememberTool } from "./remember";
 import { webSearchTool } from "./web-search";
 import type { Tool } from "./types";
 
@@ -8,6 +9,9 @@ const ALL: Tool[] = [
   calculateTool,
   webSearchTool,
   fetchUrlTool,
+  rememberTool,
+  recallTool,
+  forgetTool,
   {
     name: "get_time",
     description:

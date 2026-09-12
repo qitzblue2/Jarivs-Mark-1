@@ -15,6 +15,9 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     maxContextTokens: 96_000,
     maxOutputTokens: 8192,
     note: "Free, no card. ~30 req/min. Very fast, big context.",
+    // qwen3.6-27b takes text and images: max 3 images, 2048 tokens each,
+    // and only 1,000 requests/day on the free tier.
+    visionModels: ["qwen3.6", "qwen3.8", "vision", "llava", "scout", "maverick"],
   },
   cerebras: {
     id: "cerebras",
@@ -54,6 +57,14 @@ export function getProvider(id: string): ProviderConfig {
   const p = PROVIDERS[id];
   if (!p) throw new Error(`Unknown provider: ${id}`);
   return { ...p, baseUrl: baseUrlFor(p) };
+}
+
+/** True when this model can accept image input. */
+export function supportsVision(providerId: string, model: string): boolean {
+  const patterns = PROVIDERS[providerId]?.visionModels;
+  if (!patterns || patterns.length === 0) return false;
+  const id = model.toLowerCase();
+  return patterns.some((pattern) => id.includes(pattern.toLowerCase()));
 }
 
 export function defaultProviderId(): string {

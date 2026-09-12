@@ -19,12 +19,23 @@ export interface ProviderConfig {
   maxOutputTokens: number;
   /** Short note shown in the model picker. */
   note: string;
+  /**
+   * Models on this provider that accept images, matched as substrings.
+   * Empty means no vision support.
+   */
+  visionModels?: string[];
 }
 
 /** Minimal message shape sent upstream. */
+/** OpenAI multimodal content part. */
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export interface WireMessage {
   role: Role;
-  content: string;
+  /** A parts array is used only when a turn carries images. */
+  content: string | ContentPart[];
   /** Assistant turns that requested tools. */
   tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[];
   /** Required on `tool` messages, tying the result to its call. */

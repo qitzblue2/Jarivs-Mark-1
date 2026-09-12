@@ -98,7 +98,12 @@ export async function streamChat(
 
   const capped = req.messages.map((m) => ({
     ...m,
-    content: truncateMiddle(m.content, Math.floor(budget * 0.6)),
+    // Only plain-text turns get truncated; a parts array carries images that
+    // must survive intact or the request stops making sense.
+    content:
+      typeof m.content === "string"
+        ? truncateMiddle(m.content, Math.floor(budget * 0.6))
+        : m.content,
   }));
   const { messages } = trimToBudget(capped, budget);
 

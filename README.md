@@ -100,6 +100,7 @@ Shipped so far:
 | `fetch_url` | Reads a page in full, as text |
 | `calculate` | Arithmetic, via a real parser |
 | `get_time` | The current date, which a model cannot know on its own |
+| `remember` / `recall` / `forget` | Durable memory across conversations |
 
 ### Search backends
 
@@ -149,7 +150,43 @@ standard bypass); and caps body size, timeout and redirect count.
 `calculate` gets the same treatment for the same reason: it uses a hand-written
 shunting-yard parser, never `eval`, because the expression comes from a model.
 
-## 5. Voice
+## 5. Memory
+
+JARVIS keeps facts between conversations — your name, your preferences, what
+you're working on. It decides what's worth storing, and you can see and edit
+all of it in **Settings → Memory**.
+
+Everything lives in `data/memory.json`, one readable file. Memory you can't
+inspect is memory you can't trust, so hand-editing and deleting are
+first-class rather than hidden.
+
+Relevant entries are injected into the system prompt each turn, scored by
+keyword overlap and recency inside a token budget. Tag an entry `always` and
+it's present in every conversation regardless of topic — that's how something
+like your name stays available. No embeddings: for a few hundred personal
+facts, keyword matching is accurate enough, costs nothing, and you can see
+exactly why something was recalled.
+
+## 6. Attachments
+
+Drag a file onto the composer, paste a screenshot, or use the clip button.
+
+| Type | What happens |
+|---|---|
+| **Images** | Sent to a vision model. Groq's is `qwen/qwen3.6-27b`. |
+| **PDFs** | Text extracted server-side via `unpdf`. Scans need OCR and will say so. |
+| **Text & code** | Read inline, truncated to fit the context window. |
+
+Two limits worth knowing, both from Groq's free tier: **max 3 images per
+message**, and **1,000 vision requests/day** — the tightest quota in the app.
+Attaching an image while on a non-vision model doesn't fail; the image is
+described in text instead, and you're offered a one-click switch.
+
+Images are dropped from a conversation after the turn they arrive in. Keeping
+base64 payloads in every subsequent request would exhaust both the context
+window and that daily quota.
+
+## 7. Voice
 
 Press the waveform button (or **Ctrl/Cmd+J**), say **"Hey JARVIS"**, and it
 answers *"Hey sir, how can I help you today?"* — then listens for your question,
@@ -255,12 +292,12 @@ models). `npm install` fetches them automatically via `scripts/setup-voice.mjs`.
 If that was offline, run `npm run setup:voice`. They are deliberately not in
 git. Everything except voice works without them.
 
-## 6. Where your data lives
+## 8. Where your data lives
 
 Chats are JSON files in `./data/chats/`, one per conversation. `data/` is
 gitignored. Back them up by copying the folder; delete one to delete the chat.
 
-## 7. Deploying
+## 9. Deploying
 
 It runs on Vercel's free tier as-is, with one caveat: **serverless filesystems
 are read-only**, so the file store can't persist there. The app detects this
@@ -270,7 +307,7 @@ is a four-method interface and `fs-store.ts` is the reference implementation.
 
 Set your keys as environment variables in the host's dashboard, not in a file.
 
-## 8. Layout
+## 10. Layout
 
 ```
 app/
@@ -279,6 +316,7 @@ app/
   api/chats/        chat CRUD
 lib/
   agent.ts          the tool loop — call, run tools, feed back, repeat
+  memory/           durable facts, relevance scoring, prompt injection
   voice/            wake word (local ONNX), speech to text, speech out
   providers/        registry + one OpenAI-compatible adapter for all of them
   tools/            tool definitions, registry and runner

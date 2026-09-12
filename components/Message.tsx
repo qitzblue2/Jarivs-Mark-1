@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AlertTriangle, Check, Copy, Pencil, RefreshCw, X } from "lucide-react";
 import Markdown from "./Markdown";
 import ToolTrace from "./ToolTrace";
+import Attachments from "./Attachments";
 import type { Message as MessageType } from "@/lib/types";
 
 interface Props {
@@ -105,8 +106,13 @@ export default function Message({
           )}
 
           {isUser ? (
-            <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed">
-              {message.content}
+            <div>
+              {message.attachments && message.attachments.length > 0 && (
+                <Attachments attachments={message.attachments} />
+              )}
+              <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed">
+                {message.content}
+              </div>
             </div>
           ) : (
             <>

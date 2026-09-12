@@ -9,7 +9,8 @@ import VoiceMode from "./VoiceMode";
 import type { ProviderState } from "./ModelPicker";
 import { consumeJarvisStream } from "@/lib/stream";
 import { artifactsFromMessage, artifactsFromMessages } from "@/lib/codeblocks";
-import { newId, type Chat, type ChatMeta, type Message, type ToolRound } from "@/lib/types";
+import { newId, type Attachment, type Chat, type ChatMeta, type Message, type ToolRound } from "@/lib/types";
+import { lighten } from "@/lib/attachments";
 
 const SETTINGS_KEY = "jarvis.settings.v1";
 const SELECTION_KEY = "jarvis.selection.v1";
@@ -26,6 +27,7 @@ export default function Workspace() {
   const [chats, setChats] = useState<ChatMeta[]>([]);
   const [chat, setChat] = useState<Chat | null>(null);
   const [input, setInput] = useState("");
+  const [pending, setPending] = useState<Attachment[]>([]);
 
   const [streaming, setStreaming] = useState(false);
   const [streamingId, setStreamingId] = useState<string | null>(null);
@@ -287,7 +289,11 @@ export default function Workspace() {
           signal: controller.signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            messages: history.map((m) => ({ role: m.role, content: m.content })),
+            messages: history.map((m) => ({
+              role: m.role,
+              content: m.content,
+              attachments: m.attachments,
+            })),
             provider,
             model,
             temperature: settings.temperature,
@@ -345,7 +351,12 @@ export default function Workspace() {
 
       const settled: Chat = {
         ...target,
-        messages: [...history, finalMessage],
+        messages: [
+          ...history.map((m) =>
+            m.attachments ? { ...m, attachments: m.attachments.map(lighten) } : m,
+          ),
+          finalMessage,
+        ],
         provider: usedProvider,
         model: usedModel,
         updatedAt: Date.now(),
@@ -369,7 +380,7 @@ export default function Workspace() {
 
   async function send() {
     const text = input.trim();
-    if (!text || streaming) return;
+    if ((!text && pending.length === 0) || streaming) return;
 
     let target = chat;
     if (!target) {
@@ -382,15 +393,17 @@ export default function Workspace() {
       role: "user",
       content: text,
       createdAt: Date.now(),
+      attachments: pending.length > 0 ? pending : undefined,
     };
 
     const history = [...target.messages, userMessage];
     const titled: Chat =
       target.title === "New chat" || target.messages.length === 0
-        ? { ...target, title: deriveTitle(text) }
+        ? { ...target, title: deriveTitle(text || pending[0]?.name || "Attachment") }
         : target;
 
     setInput("");
+    setPending([]);
     await runTurn(titled, history);
   }
 
@@ -580,6 +593,10 @@ export default function Workspace() {
             artifactCount={artifacts.length}
             notice={notice}
             onDismissNotice={() => setNotice(null)}
+            attachments={pending}
+            onAttach={(added) => setPending((prev) => [...prev, ...added])}
+            onRemoveAttachment={(id) => setPending((prev) => prev.filter((a) => a.id !== id))}
+            onAttachError={setNotice}
             onStartVoice={(talk) => {
               setPushToTalk(talk);
               setVoiceOpen(true);

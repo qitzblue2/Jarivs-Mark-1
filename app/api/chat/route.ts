@@ -1,17 +1,28 @@
 import { NextRequest } from "next/server";
 
 import { defaultProviderId, getProvider, resolveKey, PROVIDER_IDS } from "@/lib/providers/registry";
-import { ProviderError, type WireMessage } from "@/lib/providers/types";
+import { ProviderError, type ContentPart, type WireMessage } from "@/lib/providers/types";
+import { supportsVision } from "@/lib/providers/registry";
+import { attachmentsToText, MAX_IMAGES } from "@/lib/attachments";
+import type { Attachment } from "@/lib/types";
 import { encodeEvent, type JarvisEvent } from "@/lib/stream";
 import { runAgentTurn } from "@/lib/agent";
 import { DEFAULT_PERSONA } from "@/lib/persona";
+import { forPrompt, getMemory } from "@/lib/memory";
 
 export const runtime = "nodejs";
 // This route streams; never let a CDN or the router cache it.
 export const dynamic = "force-dynamic";
 
+/** What the client sends: plain messages plus any attachments per turn. */
+interface IncomingMessage {
+  role: WireMessage["role"];
+  content: string;
+  attachments?: Attachment[];
+}
+
 interface ChatBody {
-  messages: WireMessage[];
+  messages: IncomingMessage[];
   provider?: string;
   model?: string;
   temperature?: number;
@@ -62,10 +73,61 @@ export async function POST(req: NextRequest) {
     ? body.provider
     : defaultProviderId();
 
+  /**
+   * Turn attachments into wire content.
+   *
+   * Text-bearing files are folded into the prompt. Images become multimodal
+   * parts, but only when the target model actually accepts them — otherwise
+   * they are described in text so the model can at least say it can't see
+   * them, instead of the provider rejecting the whole request.
+   */
+  const toWire = (message: IncomingMessage, visionOk: boolean): WireMessage => {
+    const attachments = message.attachments ?? [];
+    if (attachments.length === 0) return { role: message.role, content: message.content };
+
+    const textual = attachments.filter((a) => a.kind === "text");
+    const images = attachments.filter((a) => a.kind === "image" && a.dataUrl);
+
+    const textBlock = [message.content, attachmentsToText([...textual, ...(visionOk ? [] : images)])]
+      .filter(Boolean)
+      .join("\n\n");
+
+    if (!visionOk || images.length === 0) {
+      return { role: message.role, content: textBlock };
+    }
+
+    const parts: ContentPart[] = [{ type: "text", text: textBlock }];
+    for (const image of images.slice(0, MAX_IMAGES)) {
+      parts.push({ type: "image_url", image_url: { url: image.dataUrl! } });
+    }
+    return { role: message.role, content: parts };
+  };
+
+  // Relevant memories join the system prompt. Done server-side so every
+  // entry point gets them — typed chat, voice, and any future client.
+  let memoryBlock = "";
+  try {
+    const entries = await getMemory().list();
+    if (entries.length > 0) {
+      // Score against the recent conversation, not just the last line, so a
+      // follow-up like "what about the other one?" still recalls usefully.
+      const query = messages.slice(-3).map((m) => m.content).join(" ");
+      const chosen = forPrompt(entries, query);
+      if (chosen.length > 0) {
+        memoryBlock =
+          "\n\nWhat you remember about this user:\n" +
+          chosen.map((e) => `- ${e.text}`).join("\n") +
+          "\n\nUse these when relevant. Don't recite them unprompted, and don't " +
+          "claim to remember anything that isn't listed.";
+      }
+    }
+  } catch {
+    // Memory is an enhancement; a read failure must not break the chat.
+  }
+
   // Prepend the persona unless the caller already supplied a system turn.
-  const withPersona: WireMessage[] = messages[0]?.role === "system"
-    ? messages
-    : [{ role: "system", content: persona?.trim() || DEFAULT_PERSONA }, ...messages];
+  const systemPrompt = (persona?.trim() || DEFAULT_PERSONA) + memoryBlock;
+  const hasImages = messages.some((m) => m.attachments?.some((a) => a.kind === "image"));
 
   // Try the chosen provider, then any other provider that has a key. Two free
   // keys are only worth having if a rate limit on one rolls over to the other.
@@ -94,8 +156,18 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
+    // Vision support is per provider AND per model, so the conversation is
+    // built inside the fallback loop rather than once up front.
+    const visionOk = hasImages && supportsVision(providerId, useModel);
+    const wire: WireMessage[] = messages[0]?.role === "system"
+      ? messages.map((m) => toWire(m, visionOk))
+      : [
+          { role: "system", content: systemPrompt },
+          ...messages.map((m) => toWire(m, visionOk)),
+        ];
+
     try {
-      const turn = runAgentTurn(withPersona, {
+      const turn = runAgentTurn(wire, {
         providerId,
         key,
         model: useModel,
