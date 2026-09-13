@@ -39,3 +39,6 @@ workspace/
 
 # Silero VAD assets, fetched by scripts/setup-voice.mjs.
 public/vad/
+
+# Device-mode speech binaries, fetched by scripts/setup-device.mjs.
+vendor/

@@ -31,7 +31,7 @@ export default function LoginPage() {
         setError(data?.error ?? "Could not sign in.");
         return;
       }
-      // Full reload so the middleware sees the new cookie.
+      // Full reload so the proxy sees the new cookie.
       const next = new URLSearchParams(window.location.search).get("next");
       window.location.href = next && next.startsWith("/") ? next : "/";
     } catch {

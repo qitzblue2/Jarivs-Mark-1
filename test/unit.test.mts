@@ -9,6 +9,8 @@ import { parseDuckDuckGoHtml } from "../lib/tools/search/duckduckgo";
 import { htmlToText } from "../lib/tools/html-text";
 import { tidy } from "../lib/tools/search/types";
 import { WakeGate, SilenceGate } from "../lib/voice/wake/types";
+import { SpeechSegmenter } from "../lib/voice/device/segment";
+import { isNoise } from "../lib/voice/phrases";
 import { forSpeech } from "../lib/voice/tts/types";
 import { SentenceSplitter, splitSentences } from "../lib/voice/tts/sentences";
 import { Speaker } from "../lib/voice/tts/speaker";
@@ -563,6 +565,86 @@ console.log("\n--- speaker queue ---");
   cancelled.cancel();
   await new Promise((r) => setTimeout(r, 40));
   eq("cancel stops the queue", c.spoken.length < 3, true);
+}
+
+console.log("\n--- speech segmenter ---");
+{
+  /** One 32ms window, carrying its index so the audio can be identified. */
+  const win = (value: number) => Float32Array.from([value, value]);
+
+  const feed = (
+    segmenter: SpeechSegmenter,
+    probabilities: number[],
+  ): ReturnType<SpeechSegmenter["push"]>[] =>
+    probabilities.map((p, i) => segmenter.push(p, win(i)));
+
+  {
+    // Quiet, then a clear utterance, then enough silence to end the turn.
+    const segmenter = new SpeechSegmenter({ redemptionWindows: 5, minSpeechWindows: 3, preSpeechWindows: 2 });
+    const events = feed(segmenter, [0, 0, 0, 0.9, 0.9, 0.9, 0.9, 0, 0, 0, 0, 0]);
+    eq("fires start once", events.filter((e) => e.type === "start").length, 1);
+    const ended = events.find((e) => e.type === "end");
+    eq("ends after the redemption window", ended !== undefined, true);
+    // 2 pre-roll + 4 speech + 5 quiet = 11 collected, less (5 - 4) trimmed.
+    eq("keeps the pre-roll", ended?.type === "end" ? ended.audio[0] : -1, 1);
+  }
+
+  {
+    // A cough: loud enough to start, too short to mean anything.
+    const segmenter = new SpeechSegmenter({ redemptionWindows: 3, minSpeechWindows: 5 });
+    const events = feed(segmenter, [0.9, 0.9, 0, 0, 0]);
+    eq("discards a blip", events.some((e) => e.type === "discard"), true);
+    eq("a blip is not a turn", events.some((e) => e.type === "end"), false);
+  }
+
+  {
+    // A pause mid-sentence must not end the turn.
+    const segmenter = new SpeechSegmenter({ redemptionWindows: 6, minSpeechWindows: 2 });
+    const events = feed(segmenter, [0.9, 0.9, 0, 0, 0, 0.9, 0.9, 0.1, 0.1]);
+    eq("a mid-sentence pause keeps the floor", events.some((e) => e.type === "end"), false);
+    eq("still speaking after the pause", segmenter.isSpeaking, true);
+  }
+
+  {
+    // Hysteresis: probabilities between the two thresholds hold the turn open.
+    const segmenter = new SpeechSegmenter({
+      positiveThreshold: 0.6, negativeThreshold: 0.3, redemptionWindows: 3, minSpeechWindows: 2,
+    });
+    feed(segmenter, [0.7, 0.7]);
+    const events = feed(segmenter, [0.4, 0.4, 0.4, 0.4]);
+    eq("marginal frames don't end the turn", events.some((e) => e.type === "end"), false);
+    eq("marginal frames don't start one either", new SpeechSegmenter({ positiveThreshold: 0.6 }).push(0.4, win(0)).type, "none");
+  }
+
+  {
+    // A television is never done talking; the cap has to end it.
+    const segmenter = new SpeechSegmenter({ maxSpeechWindows: 6, minSpeechWindows: 2, redemptionWindows: 99 });
+    const events = feed(segmenter, [0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]);
+    const ended = events.find((e) => e.type === "end");
+    eq("caps a turn that never stops", ended?.type === "end" ? ended.capped : false, true);
+    eq("a capped turn keeps every window", ended?.type === "end" ? ended.windows : 0, 6);
+  }
+
+  {
+    // Stopping mid-word must still hand back what was heard.
+    const segmenter = new SpeechSegmenter({ redemptionWindows: 4, minSpeechWindows: 2 });
+    feed(segmenter, [0.9, 0.9, 0.9]);
+    eq("flush ends an open turn", segmenter.flush().type, "end");
+    eq("flush on silence does nothing", new SpeechSegmenter().flush().type, "none");
+  }
+}
+
+console.log("\n--- room noise ---");
+{
+  eq("real question survives", isNoise("what is the weather today"), false);
+  eq("empty is noise", isNoise("   "), true);
+  eq("filler is noise", isNoise("uh"), true);
+  eq("acknowledgement alone is noise", isNoise("okay."), true);
+  eq("whisper silence token is noise", isNoise("[BLANK_AUDIO]"), true);
+  eq("whisper subtitle hallucination is noise", isNoise("Thanks for watching!"), true);
+  eq("punctuation only is noise", isNoise("..."), true);
+  eq("short real word survives", isNoise("hello"), false);
+  eq("okay with a question survives", isNoise("okay what time is it"), false);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

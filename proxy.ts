@@ -15,7 +15,7 @@ export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico|login|api/auth|models/|ort/|worklets/).*)"],
 };
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   if (!requiresAuth(req.headers.get("host"))) return NextResponse.next();
 
   if (!authConfigured()) {

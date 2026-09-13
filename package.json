@@ -18,7 +18,9 @@
     "test:voice": "node test/e2e-voice.mjs",
     "dev:https": "next dev --experimental-https -H 127.0.0.1",
     "dev:lan": "JARVIS_OPEN_NETWORK=1 next dev -H 0.0.0.0",
-    "start:lan": "JARVIS_OPEN_NETWORK=1 next start -H 0.0.0.0"
+    "start:lan": "JARVIS_OPEN_NETWORK=1 next start -H 0.0.0.0",
+    "setup:device": "node scripts/setup-device.mjs",
+    "test:device": "tsx test/device.test.mts"
   },
   "dependencies": {
     "@ricky0123/vad-web": "^0.0.31",
@@ -26,6 +28,7 @@
     "kokoro-js": "^1.2.1",
     "lucide-react": "1.44.0",
     "next": "16.3.4",
+    "onnxruntime-node": "^1.23.0",
     "onnxruntime-web": "^1.29.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",

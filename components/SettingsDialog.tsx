@@ -7,6 +7,7 @@ import { DEFAULT_GREETING } from "@/lib/voice/session";
 import { ttsEngines, getTts, kokoroEngine, QUALITY_OPTIONS, type KokoroQuality } from "@/lib/voice/tts";
 import type { ProviderState } from "./ModelPicker";
 import MemoryEditor from "./MemoryEditor";
+import DevicePanel from "./DevicePanel";
 
 export interface Settings {
   persona: string;
@@ -347,6 +348,18 @@ export default function SettingsDialog({
                 Lower catches your voice more easily; raise it if JARVIS wakes on its own.
               </p>
             </div>
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-[12px] font-semibold uppercase tracking-wide text-ink-dim">
+              This machine
+            </h3>
+            <p className="text-[11px] leading-relaxed text-ink-faint">
+              Voice can also run on the server instead of in this page — the microphone and
+              speaker attached to the machine JARVIS is running on. That is the mode for a Pi in
+              a room.
+            </p>
+            {open && <DevicePanel />}
           </section>
 
           <section>

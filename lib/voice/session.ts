@@ -4,6 +4,7 @@ import { transcribe } from "./stt";
 import { forSpeech, getTts } from "./tts";
 import { Speaker } from "./tts/speaker";
 import { SileroVad } from "./vad";
+import { STOP_WORDS } from "./phrases";
 
 export type VoiceState =
   | "off"
@@ -16,10 +17,7 @@ export type VoiceState =
   | "speaking"
   | "error";
 
-export const DEFAULT_GREETING = "Hey sir, how can I help you today?";
-
-/** Phrases that end a continuous conversation. */
-const STOP_WORDS = /^\s*(stop|goodbye|good bye|bye|that's all|thats all|exit|nevermind|never mind)\b/i;
+export { DEFAULT_GREETING, STOP_WORDS } from "./phrases";
 
 /** Live numbers so "it can't hear me" is answerable at a glance. */
 export interface VoiceDiagnostics {

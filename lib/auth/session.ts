@@ -6,7 +6,7 @@
  * JARVIS exposed through a tunnel, with filesystem and shell tools available,
  * cannot be driven by whoever finds the URL.
  *
- * Uses Web Crypto so it works in Next middleware (edge runtime) as well as
+ * Uses Web Crypto so it works in the Next proxy (edge runtime) as well as
  * in route handlers.
  */
 
