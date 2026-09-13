@@ -7,8 +7,11 @@
  * exact greeting can be asserted.
  */
 import { chromium } from "/opt/node22/lib/node_modules/playwright/index.mjs";
+import { ensureSpeechFixture } from "./fixtures.mjs";
 
-const WAV = process.env.FAKE_AUDIO ?? "/tmp/speech.wav";
+// Real recorded speech, not tones: Silero VAD correctly refuses to treat
+// synthetic audio as a voice, so a tone would never end a turn.
+const WAV = process.env.FAKE_AUDIO ?? (await ensureSpeechFixture());
 const check = (label, ok, extra = "") =>
   console.log(`${ok ? "ok  " : "FAIL"} ${label}${extra ? ` — ${extra}` : ""}`);
 
@@ -64,7 +67,18 @@ await page.addInitScript(() => {
 });
 
 await page.goto("http://localhost:3000", { waitUntil: "networkidle" });
-check("app loads", (await page.title()) === "JARVIS Mark 4");
+check("app loads", (await page.title()) === "JARVIS Mark 5");
+
+// Pin the speech engine for determinism; Kokoro's own fallback is asserted
+// separately below.
+await page.evaluate(() => {
+  const stored = JSON.parse(localStorage.getItem("jarvis.settings.v1") ?? "{}");
+  localStorage.setItem(
+    "jarvis.settings.v1",
+    JSON.stringify({ ...stored, ttsEngine: "browser" }),
+  );
+});
+await page.reload({ waitUntil: "networkidle" });
 
 // --- push-to-talk: skips the wake word, records, transcribes, answers ---
 await page.locator('button[title="Speak a question"]').click();
@@ -81,14 +95,36 @@ check("AudioContext is running, not suspended", ctxState === "running", String(c
 
 // The fake WAV goes quiet after ~1.2s, so the silence gate should close it.
 await page.waitForFunction(
-  () => document.body.innerText.includes("what is two plus two"),
+  () => document.body.innerText.includes("give me a long answer"),
   { timeout: 30000 },
 );
 check("audio captured, uploaded and transcribed", true);
 
 await page.waitForFunction(() => (window.__spoken ?? []).length > 0, { timeout: 30000 });
-const spoken = await page.evaluate(() => window.__spoken);
-check("JARVIS spoke the answer", spoken.length > 0, JSON.stringify(spoken).slice(0, 90));
+
+// The reported bug: long replies sometimes produced no speech at all, because
+// the text was clipped to 1,200 chars and handed over as one oversized
+// utterance that Chrome silently drops. Speech is now chunked per sentence.
+await page.waitForFunction(() => (window.__spoken ?? []).length > 5, { timeout: 40000 });
+await page.waitForTimeout(2500);
+
+const spoken = await page.evaluate(() =>
+  (window.__spoken ?? []).map((s) => (typeof s === "string" ? s : s.text)),
+);
+check("JARVIS spoke the answer", spoken.length > 0);
+check("a long reply is chunked, not one utterance", spoken.length > 10, `${spoken.length} chunks`);
+check(
+  "no chunk is long enough for the engine to drop",
+  Math.max(...spoken.map((s) => s.length)) < 300,
+  `longest ${Math.max(...spoken.map((s) => s.length))} chars`,
+);
+check(
+  "nothing was truncated away",
+  !spoken.join(" ").includes("the rest is on screen"),
+);
+// Every sentence the model produced must actually be spoken.
+const sentenceCount = spoken.join(" ").match(/This is sentence number/g)?.length ?? 0;
+check("all 40 sentences reached the speaker", sentenceCount === 40, `${sentenceCount}/40`);
 
 await page.screenshot({ path: "/tmp/mark3-voice.png" });
 

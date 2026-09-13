@@ -90,7 +90,7 @@ export default function ChatPane(props: Props) {
         </button>
 
         <h1 className="min-w-0 flex-1 truncate text-[13px] font-medium">
-          {chat?.title ?? "JARVIS Mark 4"}
+          {chat?.title ?? "JARVIS Mark 5"}
         </h1>
 
         <ModelPicker
@@ -150,7 +150,7 @@ export default function ChatPane(props: Props) {
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-arc-dim/10 ring-1 ring-arc-dim/25">
                 <Sparkles size={20} className="text-arc" />
               </div>
-              <h2 className="mb-1 text-lg font-semibold">JARVIS Mark 4</h2>
+              <h2 className="mb-1 text-lg font-semibold">JARVIS Mark 5</h2>
               <p className="mb-5 text-[13px] text-ink-dim">
                 {anyKey
                   ? "Running on free, fast inference. Ask for code and it opens in the canvas."

@@ -2,6 +2,8 @@ import { OpenWakeWord } from "./wake/openwakeword";
 import { SilenceGate, WakeGate } from "./wake/types";
 import { transcribe } from "./stt";
 import { forSpeech, getTts } from "./tts";
+import { Speaker } from "./tts/speaker";
+import { SileroVad } from "./vad";
 
 export type VoiceState =
   | "off"
@@ -31,6 +33,8 @@ export interface VoiceDiagnostics {
   peakScore: number;
   /** Measured room noise, used as the speaking threshold's floor. */
   noiseFloor: number;
+  /** Live speech probability from Silero, 0-1. */
+  speechProbability: number;
 }
 
 export interface VoiceCallbacks {
@@ -39,8 +43,12 @@ export interface VoiceCallbacks {
   onScore(score: number): void;
   onDiagnostics(diagnostics: VoiceDiagnostics): void;
   onTranscript(text: string): void;
-  /** Send to the model; resolves with the spoken-form reply. */
-  onQuestion(text: string): Promise<string>;
+  /**
+   * Send to the model. `onToken` is called as the reply streams, so speech
+   * can start before generation finishes; the promise resolves with the
+   * full reply.
+   */
+  onQuestion(text: string, onToken: (chunk: string) => void): Promise<string>;
   onError(message: string): void;
 }
 
@@ -52,6 +60,8 @@ export interface VoiceConfig {
   continuous: boolean;
   /** Skip the wake word; go straight to listening (the mic button). */
   pushToTalk?: boolean;
+  /** Speech-probability threshold for turn taking. */
+  vadThreshold?: number;
   threshold: number;
   apiKey?: string;
 }
@@ -71,18 +81,22 @@ export class VoiceSession {
   private node: AudioWorkletNode | null = null;
 
   private detector = new OpenWakeWord();
+  private vad = new SileroVad();
+  /** False if the VAD model can't load; the loudness gate then takes over. */
+  private useVad = true;
   private wakeGate: WakeGate;
   private silenceGate = new SilenceGate();
 
   private state: VoiceState = "off";
   private frameIndex = 0;
   private diagnostics: VoiceDiagnostics = {
-    frames: 0, scored: 0, peakLevel: 0, peakScore: 0, noiseFloor: 0,
+    frames: 0, scored: 0, peakLevel: 0, peakScore: 0, noiseFloor: 0, speechProbability: 0,
   };
   /** Rolling RMS history (~4s) used to track the room's noise floor. */
   private recentRms: number[] = [];
   private recording: Float32Array[] = [];
   private speakAbort: AbortController | null = null;
+  private speaker: Speaker | null = null;
   /** Guards against overlapping async work when frames keep arriving. */
   private busy = false;
 
@@ -172,6 +186,27 @@ export class VoiceSession {
       // Terminate the graph without routing mic audio to the speakers.
       this.node.connect(this.context.destination);
 
+      // Neural turn-taking, with the loudness gate as the fallback if the
+      // model is unavailable.
+      try {
+        await this.vad.start(
+          {
+            onSpeechStart: () => this.onSpeechStart(),
+            onSpeechEnd: (audio) => void this.onSpeechEnd(audio),
+            onFrame: (probability) => {
+              this.diagnostics.speechProbability = probability;
+            },
+            onError: () => {},
+          },
+          { threshold: this.config.vadThreshold ?? 0.5 },
+        );
+      } catch {
+        this.useVad = false;
+        this.callbacks.onError(
+          "Neural speech detection unavailable — falling back to volume-based turn taking.",
+        );
+      }
+
       if (this.config.pushToTalk) this.beginListening();
       else this.setState("idle");
     } catch (err) {
@@ -192,6 +227,8 @@ export class VoiceSession {
   }
 
   async stop(): Promise<void> {
+    this.speaker?.cancel();
+    this.speaker = null;
     this.speakAbort?.abort();
     this.speakAbort = null;
     getTts(this.config.ttsEngine).cancel();
@@ -206,6 +243,7 @@ export class VoiceSession {
     await this.context?.close().catch(() => {});
     this.context = null;
 
+    this.vad.destroy();
     this.detector.dispose();
     this.recording = [];
     this.busy = false;
@@ -214,6 +252,7 @@ export class VoiceSession {
 
   /** Barge-in: stop talking and listen again. */
   interrupt(): void {
+    this.speaker?.cancel();
     this.speakAbort?.abort();
     getTts(this.config.ttsEngine).cancel();
   }
@@ -240,6 +279,27 @@ export class VoiceSession {
     // Comfortably above the noise, but always within a range that can
     // actually be crossed by a normal speaking voice.
     this.silenceGate.speakingRms = Math.min(0.05, Math.max(0.006, floor * 3));
+  }
+
+  /**
+   * Real speech began.
+   *
+   * Doubles as barge-in: hearing actual speech while JARVIS talks stops it,
+   * where the old volume check would also trigger on a door slam.
+   */
+  private onSpeechStart(): void {
+    if (this.state === "speaking" || this.state === "greeting") this.interrupt();
+  }
+
+  /** Silero says the speaker has stopped; transcribe what it captured. */
+  private async onSpeechEnd(audio: Float32Array): Promise<void> {
+    if (!this.useVad) return;
+    if (this.state !== "listening") return;
+
+    // Silero hands back the whole utterance with pre-speech padding, so its
+    // capture is used directly rather than our own frame buffer.
+    this.recording = [audio];
+    await this.onUtteranceComplete();
   }
 
   private emitDiagnostics(): void {
@@ -303,6 +363,10 @@ export class VoiceSession {
     this.emitDiagnostics();
 
     if (this.state === "listening") {
+      // With Silero driving, end-of-turn comes from onSpeechEnd; the volume
+      // gate would otherwise cut in early and fight it.
+      if (this.useVad) return;
+
       this.recording.push(samples);
       const verdict = this.silenceGate.push(rms);
       if (verdict === "done") await this.onUtteranceComplete();
@@ -312,7 +376,7 @@ export class VoiceSession {
 
     // While greeting/thinking/speaking, a loud frame means the user is
     // talking over JARVIS — stop and listen.
-    if ((this.state === "speaking" || this.state === "greeting") && rms > 0.06) {
+    if (!this.useVad && (this.state === "speaking" || this.state === "greeting") && rms > 0.06) {
       this.interrupt();
     }
   }
@@ -342,10 +406,42 @@ export class VoiceSession {
       }
 
       this.setState("thinking");
-      const reply = await this.callbacks.onQuestion(text);
+
+      // Speech starts on the first complete sentence rather than after the
+      // whole reply, which is both why it feels responsive and why long
+      // answers no longer get swallowed by a single oversized utterance.
+      const speaker = this.freshSpeaker();
+      let pushed = 0;
+      let switchedToSpeaking = false;
+
+      /**
+       * Clean the CUMULATIVE text and push only the new tail.
+       *
+       * Cleaning each delta separately does not work: forSpeech trims, so the
+       * space between two streamed tokens is deleted and words run together
+       * ("sentence " + "number" became "sentencenumber").
+       */
+      const feed = (soFar: string) => {
+        const cleaned = forSpeech(soFar);
+        const fresh = cleaned.slice(pushed);
+        if (!fresh) return;
+        pushed = cleaned.length;
+
+        if (!switchedToSpeaking) {
+          switchedToSpeaking = true;
+          this.setState("speaking");
+        }
+        speaker.push(fresh);
+      };
+
+      const reply = await this.callbacks.onQuestion(text, feed);
+
+      // Covers a non-streaming caller, and any tail the last event missed.
+      feed(reply);
+      speaker.end();
 
       this.setState("speaking");
-      await this.say(forSpeech(reply));
+      await speaker.wait();
       this.afterTurn();
     } catch (err) {
       if ((err as Error)?.name === "AbortError") return this.afterTurn();
@@ -369,24 +465,27 @@ export class VoiceSession {
     else this.setState("idle");
   }
 
+  /** Speak a complete phrase and wait for it. */
   private async say(text: string): Promise<void> {
     if (!text) return;
-    this.speakAbort?.abort();
-    const controller = new AbortController();
-    this.speakAbort = controller;
+    const speaker = this.freshSpeaker();
+    speaker.say(text);
+    await speaker.wait();
+  }
 
-    try {
-      await getTts(this.config.ttsEngine).speak(text, {
-        voice: this.config.ttsVoice,
-        signal: controller.signal,
-      });
-    } catch (err) {
-      if ((err as Error)?.name !== "AbortError") {
-        // Never let a TTS failure strand the conversation.
-        this.callbacks.onError(`Speech failed: ${(err as Error).message}`);
-      }
-    } finally {
-      if (this.speakAbort === controller) this.speakAbort = null;
-    }
+  /**
+   * A Speaker for one turn.
+   *
+   * Rebuilt each time so a cancelled turn can't leave the queue poisoned, and
+   * so an engine changed in Settings mid-session takes effect immediately.
+   */
+  private freshSpeaker(): Speaker {
+    this.speaker?.cancel();
+    this.speaker = new Speaker(
+      getTts(this.config.ttsEngine),
+      { voice: this.config.ttsVoice },
+      (message) => this.callbacks.onError(`Speech failed: ${message}`),
+    );
+    return this.speaker;
   }
 }

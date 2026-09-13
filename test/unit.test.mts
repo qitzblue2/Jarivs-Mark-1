@@ -10,6 +10,8 @@ import { htmlToText } from "../lib/tools/html-text";
 import { tidy } from "../lib/tools/search/types";
 import { WakeGate, SilenceGate } from "../lib/voice/wake/types";
 import { forSpeech } from "../lib/voice/tts/types";
+import { SentenceSplitter, splitSentences } from "../lib/voice/tts/sentences";
+import { Speaker } from "../lib/voice/tts/speaker";
 import { encodeWav, durationOf } from "../lib/voice/wav";
 import { rank, forPrompt } from "../lib/memory/relevance";
 import type { MemoryEntry } from "../lib/memory/types";
@@ -267,8 +269,11 @@ eq("markdown emphasis stripped", forSpeech("This is **bold** and *italic*"), "Th
 eq("links read as their text", forSpeech("See [the docs](https://example.com)"), "See the docs");
 eq("headings stripped", forSpeech("# Title\nBody"), "Title Body");
 eq("bullets stripped", forSpeech("- one\n- two"), "one two");
-eq("long answers get clipped", forSpeech(`${"This is a sentence. ".repeat(200)}`).length < 1300, true);
-eq("clipped answers point at the screen", forSpeech("word ".repeat(500)).endsWith("the rest is on screen."), true);
+// These two used to assert that long answers were CLIPPED, which is exactly
+// the bug that made long replies go unspoken. The correct behaviour is that
+// nothing is dropped — Speaker chunks it instead.
+eq("long answers are not clipped", forSpeech(`${"This is a sentence. ".repeat(200)}`).length > 3000, true);
+eq("no truncation marker is appended", forSpeech("word ".repeat(500)).includes("the rest is on screen"), false);
 
 console.log("\n--- wav encoding ---");
 {
@@ -407,6 +412,109 @@ eq("textOf passes strings through", textOf("hello"), "hello");
 eq("textOf joins text parts", textOf([{ type: "text", text: "a" }, { type: "text", text: "b" }]), "a b");
 // An image must cost roughly its real token price or trimming will overflow.
 eq("textOf prices an image at ~2048 tokens", Math.round(textOf([{ type: "image_url", image_url: { url: "x" } }]).length / 4), 2048);
+
+console.log("\n--- long replies are spoken in full (regression) ---");
+{
+  // The reported bug: long answers sometimes produced no speech at all.
+  // Three causes — a 1,200-char clip, a 60s watchdog, and Chrome silently
+  // dropping oversized utterances — all fixed by chunking. These assertions
+  // fail against the old code.
+  const long = Array.from({ length: 60 }, (_, i) =>
+    `This is sentence number ${i + 1}, containing enough words to resemble a real paragraph of explanation.`,
+  ).join(" ");
+
+  const spoken = forSpeech(long);
+  eq("nothing is truncated", spoken.includes("the rest is on screen"), false);
+  eq("the whole reply survives", spoken.length, long.length);
+
+  const chunks = splitSentences(spoken);
+  eq("it is broken into many chunks", chunks.length > 20, true);
+  // Chrome drops long utterances silently; keep every chunk well clear.
+  eq("no chunk is anywhere near the engine limit", Math.max(...chunks.map((c) => c.length)) < 300, true);
+  eq(
+    "chunks rejoin to the original text",
+    chunks.join(" ").replace(/\s+/g, " ").trim(),
+    long.replace(/\s+/g, " ").trim(),
+  );
+}
+
+console.log("\n--- sentence boundaries ---");
+eq("splits on a full stop", splitSentences("The first thing happened here. The second thing happened later.").length, 2);
+eq("does not split inside a decimal", splitSentences("Pi is roughly 3.14 and that is the value we use.").length, 1);
+eq("does not split on an abbreviation", splitSentences("Ask Dr. Banner about the gamma readings before lunch.").length, 1);
+eq("splits once after an ellipsis", splitSentences("Well... I suppose that could work out fine. Let us try it now.").length, 2);
+eq("keeps a closing quote with its sentence", splitSentences('He said "this is completely fine." And then he left the room.')[0].endsWith('"'), true);
+eq("handles a question mark", splitSentences("Is that the right approach here? I believe that it probably is.").length, 2);
+eq("a run-on sentence is still broken up", splitSentences(`${"and then more words ".repeat(40)}`).length > 1, true);
+
+console.log("\n--- streaming splitter ---");
+{
+  const splitter = new SentenceSplitter();
+  eq("holds back an incomplete sentence", splitter.push("This is the beginning of"), []);
+  eq("still holding", splitter.push(" a sentence that has not"), []);
+  const released = splitter.push(" ended yet but now it has. ");
+  eq("releases once the sentence completes", released.length, 1);
+  eq("flush releases the trailing fragment", new SentenceSplitter().push("no terminator here") .length === 0 && true, true);
+
+  const tail = new SentenceSplitter();
+  tail.push("A reply that never terminates");
+  eq("an unterminated final sentence is still spoken", tail.flush(), ["A reply that never terminates"]);
+}
+
+console.log("\n--- speaker queue ---");
+{
+  const makeStub = () => {
+    const spoken: string[] = [];
+    return {
+      spoken,
+      engine: {
+        id: "stub", label: "Stub", isAvailable: () => true,
+        voices: async () => [], cancel() {},
+        async speak(text: string) { spoken.push(text); await new Promise((r) => setTimeout(r, 2)); },
+      },
+    };
+  };
+
+  const a = makeStub();
+  const speaker = new Speaker(a.engine as never);
+  speaker.say("First sentence goes out first here. Second sentence follows it after.");
+  await speaker.wait();
+  eq("chunks are spoken in order", a.spoken.length >= 2 && a.spoken[0].startsWith("First"), true);
+
+  // Speech must begin before generation ends — the point of streaming.
+  const b = makeStub();
+  const streamer = new Speaker(b.engine as never);
+  const words = "This first sentence is quite long and complete. ".repeat(6).split(" ");
+  let startedAt = -1;
+  for (let i = 0; i < words.length; i++) {
+    streamer.push(words[i] + " ");
+    if (startedAt === -1 && b.spoken.length > 0) startedAt = i;
+  }
+  streamer.end();
+  await streamer.wait();
+  eq("speech starts before the reply finishes", startedAt > -1 && startedAt < words.length / 2, true);
+
+  // A failing chunk must not silence the rest of the answer.
+  const errors: string[] = [];
+  let calls = 0;
+  const flaky = {
+    id: "flaky", label: "Flaky", isAvailable: () => true, voices: async () => [], cancel() {},
+    async speak() { calls++; if (calls === 1) throw new Error("engine hiccup"); },
+  };
+  const resilient = new Speaker(flaky as never, {}, (m) => errors.push(m));
+  resilient.say("First sentence here will fail loudly. Second sentence should still be spoken.");
+  await resilient.wait();
+  eq("a failed chunk is reported", errors.length, 1);
+  eq("and later chunks still play", calls >= 2, true);
+
+  // Cancel must drop everything queued, for barge-in.
+  const c = makeStub();
+  const cancelled = new Speaker(c.engine as never);
+  cancelled.say("One sentence to speak aloud now. Two sentence to speak aloud now. Three sentence here now.");
+  cancelled.cancel();
+  await new Promise((r) => setTimeout(r, 40));
+  eq("cancel stops the queue", c.spoken.length < 3, true);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

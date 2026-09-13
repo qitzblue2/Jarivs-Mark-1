@@ -58,7 +58,7 @@ export default function Sidebar({
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold tracking-wide">JARVIS</div>
-          <div className="text-[10px] uppercase tracking-widest text-ink-faint">Mark 4</div>
+          <div className="text-[10px] uppercase tracking-widest text-ink-faint">Mark 5</div>
         </div>
         <button
           onClick={onOpenSettings}

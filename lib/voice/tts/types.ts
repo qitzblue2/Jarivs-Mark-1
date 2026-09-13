@@ -19,8 +19,13 @@ export interface TtsEngine {
  * Strip markdown so it isn't read aloud as punctuation soup, and drop code
  * blocks entirely — nobody wants a function read to them character by
  * character. The canvas already shows the code.
+ *
+ * No length limit. There used to be a 1,200-character clip here, which threw
+ * away most of any long answer before it reached the engine. It existed only
+ * because a single long utterance was unreliable; speech is now chunked into
+ * sentences by Speaker, so length is no longer a problem to solve here.
  */
-export function forSpeech(markdown: string, maxChars = 1200): string {
+export function forSpeech(markdown: string, maxChars = Infinity): string {
   let text = markdown
     .replace(/```[\s\S]*?```/g, " (code shown on screen) ")
     .replace(/`([^`]+)`/g, "$1")

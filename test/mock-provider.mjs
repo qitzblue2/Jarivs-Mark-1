@@ -35,6 +35,11 @@ const CODE_REPLY = `Here's a bouncing ball.
 
 That runs standalone in any browser.`;
 
+/** A long answer, for testing that nothing is dropped and speech streams. */
+const LONG_REPLY = Array.from({ length: 40 }, (_, i) =>
+  `This is sentence number ${i + 1}, long enough to look like a real paragraph of explanation.`,
+).join(" ");
+
 const sse = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
 /** Stream text in small chunks, deliberately splitting mid-word. */
@@ -116,7 +121,7 @@ const server = http.createServer((req, res) => {
     req.on("end", () => {
       process.stdout.write(`[mock] transcribe ${size} bytes\n`);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ text: "what is two plus two" }));
+      res.end(JSON.stringify({ text: "give me a long answer" }));
     });
     return;
   }
@@ -205,6 +210,10 @@ const server = http.createServer((req, res) => {
           { id: "call_abc123", name: "calculate", args: { expression: "(2+3)*sqrt(16)" } },
           finish,
         );
+      }
+
+      if (/long answer|explain at length/i.test(prompt)) {
+        return streamText(res, LONG_REPLY, finish);
       }
 
       if (alreadyRanTool) {

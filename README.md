@@ -1,4 +1,4 @@
-# JARVIS Mark 4
+# JARVIS Mark 5
 
 A self-hosted AI workspace that runs on **free, fast inference**. Chat list on
 the left, conversation in the middle, live code canvas on the right — and it
@@ -197,11 +197,48 @@ answers it out loud, and shows the full reply on screen.
 The mic button next to it skips the wake word and just records, for when you
 don't feel like talking to your computer in front of people.
 
+### The voice
+
+**Kokoro** is the default — an 82M-parameter Apache-2.0 model that runs
+entirely in your browser, on WebGPU where available. It sounds close to a
+cloud service and costs nothing, forever: open weights, no account, no key,
+nothing that phones home, and it keeps working offline.
+
+The trade is a **one-time ~86MB download** on first use, cached by the browser
+afterwards. You'll see the progress while it happens. If it fails for any
+reason, speech falls back to the browser voice and tells you why — losing the
+nicer voice is annoying, losing voice entirely is a broken feature.
+
+Eleven voices, American and British, in **Settings → Voice**, with a Test
+button.
+
+### It speaks while it thinks
+
+Replies are spoken sentence by sentence as they are generated, so JARVIS
+starts talking about a second in rather than after the whole answer is
+written.
+
+That also fixed a real bug: **long replies used to go unspoken entirely.**
+Three things caused it — the text was clipped at 1,200 characters, a watchdog
+gave up after 60 seconds, and Chrome silently drops oversized utterances. All
+three are gone now that speech is chunked per sentence, and there's a
+regression test asserting a 40-sentence reply is spoken in full.
+
+### It knows when you've stopped talking
+
+Turn-taking uses **Silero VAD**, a neural speech detector (MIT, ~2MB, local),
+rather than a loudness threshold. A threshold can't tell a voice from a fan,
+so a noisy room kept it listening and a pause mid-sentence read as "done".
+
+It also means **barge-in only triggers on actual speech** — talk over JARVIS
+and it stops immediately, but a door slam no longer interrupts it.
+
 ### The pipeline
 
 ```
-mic → local ONNX wake word → greeting → record until you stop
-    → Groq Whisper → the normal chat path → reply → spoken back
+mic → local ONNX wake word → greeting → Silero VAD hears you finish
+    → Groq Whisper → the normal chat path → reply streams
+    → spoken sentence by sentence as it arrives, locally by Kokoro
 ```
 
 Spoken questions go through the *same* path as typed ones, so they save into
@@ -229,8 +266,9 @@ transcription with Whisper means voice works in Firefox too.
 |---|---|---|
 | Wake word | Your browser | Free, forever, offline |
 | Speech to text | Groq Whisper | Free — 2,000/day |
-| Speech out (default) | Your browser | Free, offline |
-| Speech out (optional) | Groq Orpheus | Free tier, sounds better |
+| **Speech out (default)** | **Kokoro, your browser** | **Free forever, offline** |
+| Speech out (instant) | Your browser | Free, no download, robotic |
+| Speech out (optional) | Groq | Free tier |
 
 ### Controls
 
@@ -289,8 +327,10 @@ cloudflared tunnel --url http://localhost:3000
 
 ### First-run setup
 
-Voice needs ~18MB of runtime assets (the ONNX runtime wasm and the wake-word
-models). `npm install` fetches them automatically via `scripts/setup-voice.mjs`.
+Voice needs ~20MB of runtime assets (the ONNX runtime wasm, the wake-word
+models and the speech detector). `npm install` fetches them automatically via
+`scripts/setup-voice.mjs`. Kokoro's ~86MB of weights download separately on
+first use and are cached by the browser.
 If that was offline, run `npm run setup:voice`. They are deliberately not in
 git. Everything except voice works without them.
 

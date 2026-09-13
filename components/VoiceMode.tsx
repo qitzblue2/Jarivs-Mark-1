@@ -4,14 +4,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, Mic, Repeat, SlidersHorizontal, X, Zap } from "lucide-react";
 import VoiceOrb from "./VoiceOrb";
 import { DEFAULT_GREETING, VoiceSession, type VoiceDiagnostics, type VoiceState } from "@/lib/voice/session";
+import { kokoroEngine } from "@/lib/voice/tts";
 
 interface Props {
   open: boolean;
   onClose: () => void;
   /** Persist a new wake-word threshold chosen by calibration. */
   onThresholdChange?: (value: number) => void;
-  /** Sends the transcript through the normal chat path; returns the reply. */
-  onQuestion: (text: string) => Promise<string>;
+  /**
+   * Sends the transcript through the normal chat path. `onToken` receives the
+   * cumulative reply as it streams so speech can begin before it finishes.
+   */
+  onQuestion: (text: string, onToken: (soFar: string) => void) => Promise<string>;
   greeting: string;
   ttsEngine: string;
   ttsVoice?: string;
@@ -61,6 +65,16 @@ export default function VoiceMode({
     onClose();
   }, [onClose]);
 
+  // Surface the one-time voice-model download, and any fallback to the
+  // browser voice, rather than leaving a silent pause unexplained.
+  useEffect(() => {
+    if (!open) return;
+    kokoroEngine.onNotice = (message) => setNote(message || null);
+    return () => {
+      kokoroEngine.onNotice = undefined;
+    };
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
 
@@ -83,7 +97,7 @@ export default function VoiceMode({
         onScore: setScore,
         onDiagnostics: setDiag,
         onTranscript: setTranscript,
-        onQuestion: (text) => questionRef.current(text),
+        onQuestion: (text, onToken) => questionRef.current(text, onToken),
         onError: setNote,
       },
     );

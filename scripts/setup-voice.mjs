@@ -24,6 +24,15 @@ const MODELS = ["melspectrogram.onnx", "embedding_model.onnx", "hey_jarvis_v0.1.
 // The wasm-only build; the default entry would need the 28MB JSEP binary.
 const ORT_FILES = ["ort-wasm-simd-threaded.wasm", "ort-wasm-simd-threaded.mjs"];
 
+// Silero VAD ships its model and worklet inside the package; serving them
+// locally keeps voice working offline and independent of any CDN.
+const VAD_DIR = path.join(ROOT, "public", "vad");
+const VAD_FILES = [
+  "silero_vad_v5.onnx",
+  "silero_vad_legacy.onnx",
+  "vad.worklet.bundle.min.js",
+];
+
 const exists = (p) => access(p).then(() => true).catch(() => false);
 
 async function download(url, target) {
@@ -48,6 +57,18 @@ async function main() {
     if (!(await exists(to))) await copyFile(from, to);
   }
   console.log("voice: onnx runtime ready");
+
+  await mkdir(VAD_DIR, { recursive: true });
+  for (const file of VAD_FILES) {
+    const from = path.join(ROOT, "node_modules", "@ricky0123", "vad-web", "dist", file);
+    const to = path.join(VAD_DIR, file);
+    if (!(await exists(from))) {
+      console.warn(`voice: ${file} missing from @ricky0123/vad-web — turn-taking falls back to the loudness gate`);
+      continue;
+    }
+    if (!(await exists(to))) await copyFile(from, to);
+  }
+  console.log("voice: speech detection ready");
 
   for (const model of MODELS) {
     const how = await download(`${RELEASE}/${model}`, path.join(MODEL_DIR, model));

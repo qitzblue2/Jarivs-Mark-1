@@ -36,3 +36,6 @@ public/models/wake/
 
 # JARVIS scratch space for the filesystem tools.
 workspace/
+
+# Silero VAD assets, fetched by scripts/setup-voice.mjs.
+public/vad/

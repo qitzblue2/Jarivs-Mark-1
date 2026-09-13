@@ -240,7 +240,12 @@ export default function Workspace() {
    * should see, already including the new user turn.
    */
   const runTurn = useCallback(
-    async (target: Chat, history: Message[]): Promise<string> => {
+    async (
+      target: Chat,
+      history: Message[],
+      /** Called with the cumulative reply as it streams, for voice mode. */
+      onProgress?: (soFar: string) => void,
+    ): Promise<string> => {
       const assistantId = newId();
       const assistant: Message = {
         id: assistantId,
@@ -321,6 +326,7 @@ export default function Workspace() {
             paint(true);
           } else if (event.type === "token") {
             acc += event.value;
+            onProgress?.(acc);
             paint();
           } else if (event.type === "tool_start") {
             // Show the call immediately; results fill in when the round ends.
@@ -432,7 +438,7 @@ export default function Workspace() {
    * conversations save to the same chats and can use tools.
    */
   const askByVoice = useCallback(
-    async (text: string): Promise<string> => {
+    async (text: string, onToken?: (soFar: string) => void): Promise<string> => {
       let target = chat;
       if (!target) {
         target = await createChat();
@@ -452,7 +458,7 @@ export default function Workspace() {
           ? { ...target, title: deriveTitle(text) }
           : target;
 
-      return runTurn(titled, history);
+      return runTurn(titled, history, onToken);
     },
     [chat, createChat, runTurn],
   );

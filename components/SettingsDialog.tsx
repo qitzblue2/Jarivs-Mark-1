@@ -28,7 +28,7 @@ export const DEFAULT_SETTINGS: Settings = {
   temperature: 0.7,
   useTools: true,
   greeting: DEFAULT_GREETING,
-  ttsEngine: "browser",
+  ttsEngine: "kokoro",
   wakeThreshold: 0.5,
   keys: {},
 };
@@ -252,6 +252,14 @@ export default function SettingsDialog({
                 </select>
               </div>
             </div>
+
+            {draft.ttsEngine === "kokoro" && (
+              <p className="text-[10.5px] leading-relaxed text-ink-faint">
+                Runs on your machine, no account and no key. First use downloads
+                about 86MB of model, cached by the browser afterwards; it falls
+                back to the browser voice if that fails.
+              </p>
+            )}
 
             <button
               type="button"
