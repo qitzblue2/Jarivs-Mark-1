@@ -1,4 +1,4 @@
-import type { SpeakOptions, TtsEngine } from "./types";
+import type { PreparedSpeech, SpeakOptions, TtsEngine } from "./types";
 
 /**
  * Groq-hosted TTS (Orpheus), proxied through /api/speak so the key stays
@@ -26,7 +26,12 @@ export class GroqTts implements TtsEngine {
 
   async speak(text: string, options: SpeakOptions = {}): Promise<void> {
     if (!text.trim()) return;
+    const prepared = await this.synthesize(text, options);
+    await prepared.play(options.signal);
+  }
 
+  /** Fetch the audio without playing it, so the speaker can work ahead. */
+  async synthesize(text: string, options: SpeakOptions = {}): Promise<PreparedSpeech> {
     const res = await fetch("/api/speak", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -40,24 +45,26 @@ export class GroqTts implements TtsEngine {
     }
 
     const url = URL.createObjectURL(await res.blob());
-    const audio = new Audio(url);
-    this.audio = audio;
 
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const onAbort = () => {
-          audio.pause();
-          reject(new DOMException("Speech cancelled", "AbortError"));
-        };
-        options.signal?.addEventListener("abort", onAbort, { once: true });
-        audio.onended = () => resolve();
-        audio.onerror = () => resolve();
-        void audio.play().catch(reject);
-      });
-    } finally {
-      URL.revokeObjectURL(url);
-      if (this.audio === audio) this.audio = null;
-    }
+    return {
+      play: (signal) => {
+        const audio = new Audio(url);
+        this.audio = audio;
+        return new Promise<void>((resolve, reject) => {
+          const onAbort = () => {
+            audio.pause();
+            reject(new DOMException("Speech cancelled", "AbortError"));
+          };
+          signal?.addEventListener("abort", onAbort, { once: true });
+          audio.onended = () => resolve();
+          audio.onerror = () => resolve();
+          void audio.play().catch(reject);
+        }).finally(() => {
+          if (this.audio === audio) this.audio = null;
+        });
+      },
+      dispose: () => URL.revokeObjectURL(url),
+    };
   }
 
   cancel(): void {

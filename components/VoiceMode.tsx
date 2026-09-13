@@ -19,6 +19,7 @@ interface Props {
   greeting: string;
   ttsEngine: string;
   ttsVoice?: string;
+  ttsSpeed?: number;
   threshold: number;
   apiKey?: string;
   /** Starts recording immediately, skipping the wake word (mic button). */
@@ -38,8 +39,8 @@ const LABELS: Record<VoiceState, string> = {
 };
 
 export default function VoiceMode({
-  open, onClose, onQuestion, greeting, ttsEngine, ttsVoice, threshold, apiKey, pushToTalk,
-  onThresholdChange,
+  open, onClose, onQuestion, greeting, ttsEngine, ttsVoice, ttsSpeed, threshold, apiKey,
+  pushToTalk, onThresholdChange,
 }: Props) {
   const [state, setState] = useState<VoiceState>("off");
   const [level, setLevel] = useState(0);
@@ -83,6 +84,7 @@ export default function VoiceMode({
         greeting: greeting || DEFAULT_GREETING,
         ttsEngine,
         ttsVoice,
+        ttsSpeed,
         continuous,
         pushToTalk,
         threshold,
@@ -116,8 +118,8 @@ export default function VoiceMode({
 
   // Push config changes into the running session without restarting it.
   useEffect(() => {
-    session.current?.updateConfig({ greeting, ttsEngine, ttsVoice, threshold, continuous, apiKey });
-  }, [greeting, ttsEngine, ttsVoice, threshold, continuous, apiKey]);
+    session.current?.updateConfig({ greeting, ttsEngine, ttsVoice, ttsSpeed, threshold, continuous, apiKey });
+  }, [greeting, ttsEngine, ttsVoice, ttsSpeed, threshold, continuous, apiKey]);
 
   const closeRef = useRef(close);
   closeRef.current = close;
@@ -286,6 +288,14 @@ export default function VoiceMode({
                 <SlidersHorizontal size={11} />
                 {calibrating ? "Listening… say \u201cHey JARVIS\u201d" : "Can't hear me? Calibrate"}
               </button>
+            )}
+
+            {/* Speech latency, so "it's slow" can be measured. */}
+            {diag && diag.firstAudioMs > 0 && (
+              <div className="flex justify-center gap-2.5 font-mono text-[9.5px] text-ink-faint">
+                <span>first audio {(diag.firstAudioMs / 1000).toFixed(1)}s</span>
+                {diag.synthesisMs > 0 && <span>synth {diag.synthesisMs}ms/sentence</span>}
+              </div>
             )}
 
             {calibrationResult && (

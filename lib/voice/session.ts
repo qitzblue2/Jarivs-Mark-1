@@ -35,6 +35,10 @@ export interface VoiceDiagnostics {
   noiseFloor: number;
   /** Live speech probability from Silero, 0-1. */
   speechProbability: number;
+  /** Time from question sent to the first audio, in ms. */
+  firstAudioMs: number;
+  /** Most recent per-sentence synthesis time, in ms. */
+  synthesisMs: number;
 }
 
 export interface VoiceCallbacks {
@@ -56,6 +60,8 @@ export interface VoiceConfig {
   greeting: string;
   ttsEngine: string;
   ttsVoice?: string;
+  /** Speaking rate, from Settings. */
+  ttsSpeed?: number;
   /** Keep listening after each answer instead of returning to idle. */
   continuous: boolean;
   /** Skip the wake word; go straight to listening (the mic button). */
@@ -90,10 +96,12 @@ export class VoiceSession {
   private state: VoiceState = "off";
   private frameIndex = 0;
   private diagnostics: VoiceDiagnostics = {
-    frames: 0, scored: 0, peakLevel: 0, peakScore: 0, noiseFloor: 0, speechProbability: 0,
+    frames: 0, scored: 0, peakLevel: 0, peakScore: 0, noiseFloor: 0, speechProbability: 0, firstAudioMs: 0, synthesisMs: 0,
   };
   /** Rolling RMS history (~4s) used to track the room's noise floor. */
   private recentRms: number[] = [];
+  /** When the current question was sent, for the latency readout. */
+  private turnStartedAt = 0;
   private recording: Float32Array[] = [];
   private speakAbort: AbortController | null = null;
   private speaker: Speaker | null = null;
@@ -406,6 +414,7 @@ export class VoiceSession {
       }
 
       this.setState("thinking");
+      this.turnStartedAt = Date.now();
 
       // Speech starts on the first complete sentence rather than after the
       // whole reply, which is both why it feels responsive and why long
@@ -483,8 +492,16 @@ export class VoiceSession {
     this.speaker?.cancel();
     this.speaker = new Speaker(
       getTts(this.config.ttsEngine),
-      { voice: this.config.ttsVoice },
+      { voice: this.config.ttsVoice, rate: this.config.ttsSpeed },
       (message) => this.callbacks.onError(`Speech failed: ${message}`),
+      ({ synthesisMs, firstAudio }) => {
+        // Makes "it feels slow" a number rather than an argument.
+        this.diagnostics.synthesisMs = synthesisMs;
+        if (firstAudio && this.turnStartedAt) {
+          this.diagnostics.firstAudioMs = Date.now() - this.turnStartedAt;
+        }
+        this.emitDiagnostics();
+      },
     );
     return this.speaker;
   }

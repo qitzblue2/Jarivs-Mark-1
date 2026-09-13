@@ -4,6 +4,19 @@ export interface SpeakOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Audio that has been generated and is ready to play.
+ *
+ * Returned by `synthesize` so the speaker can generate the next sentence
+ * while the current one is still playing. Without this split, every sentence
+ * is preceded by its own synthesis pause.
+ */
+export interface PreparedSpeech {
+  play(signal?: AbortSignal): Promise<void>;
+  /** Release anything held (blob URLs, buffers). */
+  dispose?(): void;
+}
+
 export interface TtsEngine {
   id: string;
   label: string;
@@ -13,6 +26,15 @@ export interface TtsEngine {
   cancel(): void;
   /** Selectable voices, if the engine has any. */
   voices(): Promise<{ id: string; label: string }[]>;
+
+  /**
+   * Generate audio without playing it, so the speaker can work ahead.
+   *
+   * Optional: the browser's speechSynthesis does generation and playback in
+   * one opaque step and cannot support this, so engines that omit it fall
+   * back to the sequential path.
+   */
+  synthesize?(text: string, options?: SpeakOptions): Promise<PreparedSpeech>;
 }
 
 /**

@@ -488,6 +488,10 @@ console.log("\n--- speaker queue ---");
   let startedAt = -1;
   for (let i = 0; i < words.length; i++) {
     streamer.push(words[i] + " ");
+    // Yield so queued playback can actually run: the pipeline puts a
+    // microtask between enqueue and play, so a tight synchronous loop would
+    // never observe speech starting no matter how fast it is.
+    await new Promise((r) => setTimeout(r, 0));
     if (startedAt === -1 && b.spoken.length > 0) startedAt = i;
   }
   streamer.end();
@@ -506,6 +510,51 @@ console.log("\n--- speaker queue ---");
   await resilient.wait();
   eq("a failed chunk is reported", errors.length, 1);
   eq("and later chunks still play", calls >= 2, true);
+
+  // Synthesis must overlap playback. Without this, every sentence carries its
+  // own generation pause — which is what made long replies crawl.
+  {
+    const SYNTH = 60, PLAY = 60, N = 8;
+    const sentences = Array.from({ length: N }, (_, i) =>
+      `This is sentence number ${i + 1} and it is long enough to be its own chunk.`).join(" ");
+    const order: number[] = [];
+    let made = 0;
+
+    const splittable = {
+      id: "split", label: "Split", isAvailable: () => true, voices: async () => [],
+      cancel() {}, async speak() {},
+      async synthesize() {
+        const id = ++made;
+        await new Promise((r) => setTimeout(r, SYNTH));
+        return {
+          play: async () => {
+            order.push(id);
+            await new Promise((r) => setTimeout(r, PLAY));
+          },
+        };
+      },
+    };
+
+    const pipelined = new Speaker(splittable as never);
+    const startedAt = Date.now();
+    pipelined.say(sentences);
+    await pipelined.wait();
+    const took = Date.now() - startedAt;
+
+    const sequentialCost = N * (SYNTH + PLAY);
+    eq("synthesis overlaps playback", took < sequentialCost * 0.8, true);
+    eq("chunks still play in order", order, Array.from({ length: N }, (_, i) => i + 1));
+
+    // An engine that cannot split (speechSynthesis) must still work.
+    const unsplittable = {
+      id: "seq", label: "Seq", isAvailable: () => true, voices: async () => [],
+      cancel() {}, async speak() { await new Promise((r) => setTimeout(r, 5)); },
+    };
+    const fallbackSpeaker = new Speaker(unsplittable as never);
+    fallbackSpeaker.say("One sentence to speak aloud. Two sentence to speak aloud.");
+    await fallbackSpeaker.wait();
+    eq("an engine without synthesize still speaks", true, true);
+  }
 
   // Cancel must drop everything queued, for barge-in.
   const c = makeStub();

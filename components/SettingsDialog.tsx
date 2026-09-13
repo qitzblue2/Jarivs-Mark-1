@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { ExternalLink, KeyRound, RotateCcw, X } from "lucide-react";
 import { DEFAULT_PERSONA } from "@/lib/persona";
 import { DEFAULT_GREETING } from "@/lib/voice/session";
-import { ttsEngines, getTts } from "@/lib/voice/tts";
+import { ttsEngines, getTts, kokoroEngine, QUALITY_OPTIONS, type KokoroQuality } from "@/lib/voice/tts";
 import type { ProviderState } from "./ModelPicker";
 import MemoryEditor from "./MemoryEditor";
 
@@ -17,6 +17,10 @@ export interface Settings {
   greeting: string;
   ttsEngine: string;
   ttsVoice?: string;
+  /** Kokoro model build. Bigger downloads sound better. */
+  ttsQuality: KokoroQuality;
+  /** Speaking rate. Kokoro's own 1.0 is unhurried. */
+  ttsSpeed: number;
   /** Wake-word confidence needed to fire. Raise it if it triggers on its own. */
   wakeThreshold: number;
   /** Bring-your-own keys, provider id → key. Stored in this browser only. */
@@ -29,6 +33,8 @@ export const DEFAULT_SETTINGS: Settings = {
   useTools: true,
   greeting: DEFAULT_GREETING,
   ttsEngine: "kokoro",
+  ttsQuality: "q8",
+  ttsSpeed: 1.1,
   wakeThreshold: 0.5,
   keys: {},
 };
@@ -254,18 +260,65 @@ export default function SettingsDialog({
             </div>
 
             {draft.ttsEngine === "kokoro" && (
-              <p className="text-[10.5px] leading-relaxed text-ink-faint">
-                Runs on your machine, no account and no key. First use downloads
-                about 86MB of model, cached by the browser afterwards; it falls
-                back to the browser voice if that fails.
-              </p>
+              <>
+                <div>
+                  <label className="mb-1 block text-[11.5px] text-ink-dim" htmlFor="quality">
+                    Model quality
+                  </label>
+                  <select
+                    id="quality"
+                    value={draft.ttsQuality}
+                    onChange={(e) =>
+                      setDraft((d) => ({ ...d, ttsQuality: e.target.value as KokoroQuality }))
+                    }
+                    className="w-full rounded-md border border-line bg-base px-2 py-1.5 text-[12px] text-ink outline-none focus:border-arc-dim"
+                  >
+                    {QUALITY_OPTIONS.map((q) => (
+                      <option key={q.id} value={q.id}>{q.label}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[10.5px] leading-relaxed text-ink-faint">
+                    Runs on your machine, no account and no key. Changing this
+                    downloads the new build once, then it is cached. Bigger is not
+                    always faster — if your GPU offloads part of the model to the
+                    CPU, the smaller build can win.
+                  </p>
+                </div>
+
+                <div>
+                  <div className="mb-1 flex items-center justify-between">
+                    <label className="text-[11.5px] text-ink-dim" htmlFor="speed">
+                      Speaking rate
+                    </label>
+                    <span className="font-mono text-[11px] text-arc">{draft.ttsSpeed.toFixed(2)}×</span>
+                  </div>
+                  <input
+                    id="speed"
+                    type="range"
+                    min={0.7}
+                    max={1.6}
+                    step={0.05}
+                    value={draft.ttsSpeed}
+                    onChange={(e) => setDraft((d) => ({ ...d, ttsSpeed: Number(e.target.value) }))}
+                    className="w-full accent-[var(--color-arc)]"
+                  />
+                  <div className="flex justify-between text-[10.5px] text-ink-faint">
+                    <span>Slower</span>
+                    <span>Faster</span>
+                  </div>
+                </div>
+              </>
             )}
 
             <button
               type="button"
               onClick={() => {
+                if (draft.ttsEngine === "kokoro") kokoroEngine.setQuality(draft.ttsQuality);
                 void getTts(draft.ttsEngine)
-                  .speak(draft.greeting || DEFAULT_GREETING, { voice: draft.ttsVoice })
+                  .speak(draft.greeting || DEFAULT_GREETING, {
+                    voice: draft.ttsVoice,
+                    rate: draft.ttsSpeed,
+                  })
                   .catch(() => {});
               }}
               className="rounded-md border border-line px-2.5 py-1 text-[11.5px] text-ink-dim transition hover:border-arc-dim/50 hover:text-arc"

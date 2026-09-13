@@ -1,4 +1,4 @@
-import type { SpeakOptions, TtsEngine } from "./types";
+import type { PreparedSpeech, SpeakOptions, TtsEngine } from "./types";
 
 /**
  * Kokoro — an 82M-parameter Apache-2.0 speech model that runs entirely in the
@@ -31,6 +31,21 @@ const VOICES: { id: string; label: string }[] = [
 
 const DEFAULT_VOICE = "bm_george";
 
+/**
+ * Kokoro's natural pace at 1.0 is unhurried. Slightly above sounds like
+ * normal conversation; the Settings slider overrides this.
+ */
+const DEFAULT_SPEED = 1.1;
+
+/** Model build. Bigger is better-sounding and much slower to download. */
+export type KokoroQuality = "q4f16" | "q8" | "fp32";
+
+export const QUALITY_OPTIONS: { id: KokoroQuality; label: string }[] = [
+  { id: "q4f16", label: "Compact — ~50MB" },
+  { id: "q8", label: "Balanced — ~86MB" },
+  { id: "fp32", label: "Best — ~326MB" },
+];
+
 type KokoroModule = typeof import("kokoro-js");
 type KokoroInstance = Awaited<ReturnType<KokoroModule["KokoroTTS"]["from_pretrained"]>>;
 
@@ -46,6 +61,17 @@ export class KokoroTts implements TtsEngine {
 
   /** Reported during the first-run download so the UI can show progress. */
   onProgress?: (percent: number) => void;
+
+  /** Which build to fetch. Changing it forces a reload on next use. */
+  private quality: KokoroQuality = "q8";
+
+  setQuality(quality: KokoroQuality): void {
+    if (quality === this.quality) return;
+    this.quality = quality;
+    // Drop the loaded model so the new build is fetched next time.
+    this.model = null;
+    this.loading = null;
+  }
 
   isAvailable(): boolean {
     return typeof window !== "undefined";
@@ -74,6 +100,18 @@ export class KokoroTts implements TtsEngine {
     this.loading = (async () => {
       const { KokoroTTS } = await import("kokoro-js");
 
+      // ONNX Runtime logs benign warnings during session creation ("some
+      // nodes were not assigned to the preferred execution providers"), and
+      // Next's dev overlay paints anything on console.error as a red panel.
+      // kokoro-js drops session_options, so the global env is the only route.
+      // Same treatment as lib/voice/wake/openwakeword.ts.
+      try {
+        const { env } = await import("@huggingface/transformers");
+        (env.backends.onnx as { logLevel?: string }).logLevel = "error";
+      } catch {
+        /* logging config is a nicety, never a reason to fail */
+      }
+
       // WebGPU is several times faster; WASM is the universal fallback.
       const webgpu =
         typeof navigator !== "undefined" &&
@@ -84,9 +122,11 @@ export class KokoroTts implements TtsEngine {
           .catch(() => false));
 
       const model = await KokoroTTS.from_pretrained(MODEL_ID, {
-        // q8 is the sweet spot: ~86MB against fp32's ~326MB, with no
-        // audible loss for speech at this size.
-        dtype: webgpu ? "fp32" : "q8",
+        // Chosen in Settings. fp32 used to be forced on any WebGPU machine,
+        // which meant a 326MB download rather than the 86MB documented —
+        // and, given ORT reports nodes falling back to CPU, not reliably
+        // faster either.
+        dtype: this.quality,
         device: webgpu ? "webgpu" : "wasm",
         progress_callback: (info) => {
           // The union covers initiate/download/progress/done; only the
@@ -107,20 +147,36 @@ export class KokoroTts implements TtsEngine {
     }
   }
 
-  async speak(text: string, options: SpeakOptions = {}): Promise<void> {
-    if (!text.trim()) return;
-
+  /**
+   * Generate audio without playing it.
+   *
+   * This split is the whole point: it lets Speaker generate the next sentence
+   * while the current one is still playing. Without it every sentence carries
+   * its own synthesis pause, which is what made a long reply crawl.
+   */
+  async synthesize(text: string, options: SpeakOptions = {}): Promise<PreparedSpeech> {
     const model = await this.load();
     if (options.signal?.aborted) throw new DOMException("Cancelled", "AbortError");
 
     const raw = await model.generate(text, {
       voice: (options.voice || DEFAULT_VOICE) as never,
-      speed: options.rate ?? 1,
+      speed: options.rate ?? DEFAULT_SPEED,
     });
 
     if (options.signal?.aborted) throw new DOMException("Cancelled", "AbortError");
 
-    await this.play(raw.audio as Float32Array, raw.sampling_rate as number, options.signal);
+    const samples = new Float32Array(raw.audio as Float32Array);
+    const sampleRate = raw.sampling_rate as number;
+
+    return {
+      play: (signal) => this.play(samples, sampleRate, signal),
+    };
+  }
+
+  async speak(text: string, options: SpeakOptions = {}): Promise<void> {
+    if (!text.trim()) return;
+    const prepared = await this.synthesize(text, options);
+    await prepared.play(options.signal);
   }
 
   /**

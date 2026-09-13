@@ -8,6 +8,7 @@ import CodeCanvas from "./CodeCanvas";
 import SettingsDialog, { DEFAULT_SETTINGS, type Settings } from "./SettingsDialog";
 import VoiceMode from "./VoiceMode";
 import type { PendingApproval } from "./ApprovalCard";
+import { kokoroEngine } from "@/lib/voice/tts";
 import type { ProviderState } from "./ModelPicker";
 import { consumeJarvisStream } from "@/lib/stream";
 import { artifactsFromMessage, artifactsFromMessages } from "@/lib/codeblocks";
@@ -66,7 +67,11 @@ export default function Workspace() {
   useEffect(() => {
     try {
       const raw = localStorage.getItem(SETTINGS_KEY);
-      if (raw) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw) });
+      if (raw) {
+        const stored = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+        setSettings(stored);
+        kokoroEngine.setQuality(stored.ttsQuality);
+      }
       const width = localStorage.getItem(CANVAS_WIDTH_KEY);
       if (width) setCanvasWidth(Number(width));
     } catch {
@@ -76,6 +81,9 @@ export default function Workspace() {
 
   const saveSettings = useCallback((next: Settings) => {
     setSettings(next);
+    // Applied before anything speaks, so a changed build is picked up on the
+    // next utterance rather than after a reload.
+    kokoroEngine.setQuality(next.ttsQuality);
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
     } catch {
@@ -674,6 +682,7 @@ export default function Workspace() {
         greeting={settings.greeting}
         ttsEngine={settings.ttsEngine}
         ttsVoice={settings.ttsVoice}
+        ttsSpeed={settings.ttsSpeed}
         threshold={settings.wakeThreshold}
         apiKey={settings.keys.groq}
         pushToTalk={pushToTalk}

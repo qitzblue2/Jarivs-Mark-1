@@ -204,19 +204,36 @@ entirely in your browser, on WebGPU where available. It sounds close to a
 cloud service and costs nothing, forever: open weights, no account, no key,
 nothing that phones home, and it keeps working offline.
 
-The trade is a **one-time ~86MB download** on first use, cached by the browser
-afterwards. You'll see the progress while it happens. If it fails for any
-reason, speech falls back to the browser voice and tells you why — losing the
-nicer voice is annoying, losing voice entirely is a broken feature.
+The trade is a one-time model download, cached by the browser afterwards. Pick
+the size in **Settings → Voice**:
 
-Eleven voices, American and British, in **Settings → Voice**, with a Test
-button.
+| Quality | Download | Notes |
+|---|---|---|
+| Compact | ~50MB | Fastest to get going, slightly rougher |
+| **Balanced** (default) | ~86MB | Recommended |
+| Best | ~326MB | Only worth it if the smaller builds disappoint |
+
+Bigger is not automatically faster. If your GPU offloads part of the model to
+the CPU — ONNX Runtime says so in the console when it happens — the smaller
+build can be quicker in practice.
+
+Eleven voices, American and British, plus a speaking-rate slider (Kokoro's own
+default pace is unhurried; 1.1× sounds more like conversation). There's a Test
+button for both.
+
+If the model fails to load, speech falls back to the browser voice and tells
+you why — losing the nicer voice is annoying, losing voice entirely is broken.
 
 ### It speaks while it thinks
 
 Replies are spoken sentence by sentence as they are generated, so JARVIS
 starts talking about a second in rather than after the whole answer is
-written.
+written. Each sentence is generated **while the previous one is still
+playing**, so there's no synthesis pause between them — without that overlap
+every sentence carries its own generation delay, and a long reply crawls.
+
+Voice mode shows time-to-first-audio and per-sentence synthesis time, so if it
+ever does feel slow you can see where the time is going.
 
 That also fixed a real bug: **long replies used to go unspoken entirely.**
 Three things caused it — the text was clipped at 1,200 characters, a watchdog
