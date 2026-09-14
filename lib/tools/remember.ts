@@ -5,20 +5,14 @@ import type { Tool } from "./types";
 export const rememberTool: Tool = {
   name: "remember",
   description:
-    "Store a durable fact about the user or their projects so it survives " +
-    "into future conversations. Use it for preferences, names, decisions and " +
-    "ongoing work — things worth knowing next week. Do not store passwords, " +
-    "keys, or anything the user asks you to keep out of memory. Tag a fact " +
-    "'always' only if it should be available in every conversation.",
+    "Store a durable fact so it survives into later conversations: preferences, " +
+    "names, decisions, ongoing work. Never store passwords or keys. Tag " +
+    "'always' only for facts needed in every conversation.",
   parameters: {
     type: "object",
     properties: {
-      text: { type: "string", description: "The fact, written as a short standalone sentence." },
-      tags: {
-        type: "array",
-        items: { type: "string" },
-        description: 'Short labels, e.g. ["preference"]. Use "always" for facts needed every time.',
-      },
+      text: { type: "string", description: "One short standalone sentence." },
+      tags: { type: "array", items: { type: "string" }, description: 'e.g. ["preference"].' },
     },
     required: ["text"],
   },
@@ -53,13 +47,12 @@ export const rememberTool: Tool = {
 export const recallTool: Tool = {
   name: "recall",
   description:
-    "Search your stored memories. Relevant ones are already included in your " +
-    "context automatically, so use this only to dig for something specific " +
-    "that isn't there — or when the user asks what you remember.",
+    "Search stored memories. Relevant ones are already in your context, so use " +
+    "this only to dig for something specific, or when asked what you remember.",
   parameters: {
     type: "object",
     properties: {
-      query: { type: "string", description: "What to look for. Leave empty to list everything." },
+      query: { type: "string", description: "Empty lists everything." },
     },
   },
 
@@ -81,12 +74,12 @@ export const recallTool: Tool = {
 export const forgetTool: Tool = {
   name: "forget",
   description:
-    "Delete a stored memory. Use it when the user asks you to forget " +
-    "something, or when a fact you hold is now wrong. Find the id with recall.",
+    "Delete a stored memory — when asked to forget something, or when a fact " +
+    "you hold is now wrong. Get the id from recall.",
   parameters: {
     type: "object",
     properties: {
-      id: { type: "string", description: "The memory id, or its first 8 characters." },
+      id: { type: "string", description: "Id, or its first 8 characters." },
     },
     required: ["id"],
   },

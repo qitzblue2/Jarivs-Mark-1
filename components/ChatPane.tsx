@@ -76,7 +76,8 @@ export default function ChatPane(props: Props) {
     setPinned(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
   }
 
-  const anyKey = providers.some((p) => p.hasKey);
+  // A local server with no key still counts as somewhere to send a message.
+  const anyKey = providers.some((p) => p.ready);
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-base">

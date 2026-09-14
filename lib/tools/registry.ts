@@ -18,15 +18,12 @@ const ALL: Tool[] = [
   {
     name: "get_time",
     description:
-      "Get the current date and time. Use this rather than guessing — your " +
-      "training data has a cutoff and you do not otherwise know today's date.",
+      "The current date and time. Use this rather than guessing; you have a " +
+      "training cutoff and do not otherwise know today's date.",
     parameters: {
       type: "object",
       properties: {
-        timezone: {
-          type: "string",
-          description: 'IANA timezone, e.g. "America/New_York". Defaults to UTC.',
-        },
+        timezone: { type: "string", description: 'IANA name, e.g. "America/New_York". Default UTC.' },
       },
     },
     async handler(args) {

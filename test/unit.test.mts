@@ -10,6 +10,9 @@ import { htmlToText } from "../lib/tools/html-text";
 import { tidy } from "../lib/tools/search/types";
 import { WakeGate, SilenceGate } from "../lib/voice/wake/types";
 import { SpeechSegmenter } from "../lib/voice/device/segment";
+import { allTools } from "../lib/tools/registry";
+import { toWireTool } from "../lib/tools/types";
+import { DEFAULT_PERSONA } from "../lib/persona";
 import { isNoise } from "../lib/voice/phrases";
 import { forSpeech } from "../lib/voice/tts/types";
 import { SentenceSplitter, splitSentences } from "../lib/voice/tts/sentences";
@@ -632,6 +635,30 @@ console.log("\n--- speech segmenter ---");
     eq("flush ends an open turn", segmenter.flush().type, "end");
     eq("flush on silence does nothing", new SpeechSegmenter().flush().type, "none");
   }
+}
+
+console.log("\n--- what every request costs before you type ---");
+{
+  /**
+   * A ceiling on the fixed overhead, because it only ever grows.
+   *
+   * Tool schemas and the persona ride along on every single request, and the
+   * agent loop re-sends them on each of up to five rounds per turn. They were
+   * measured at 803 + 419 = 1,222 tokens, against a free tier metered at 6,000
+   * tokens a minute. Every tool added and every line of guidance written is
+   * paid for on every turn forever, so the number is pinned here rather than
+   * rediscovered the next time a free tier starts refusing requests.
+   */
+  const toolTokens = estimateTokens(JSON.stringify(allTools().map(toWireTool)));
+  const personaTokens = estimateTokens(DEFAULT_PERSONA);
+
+  console.log(`     tools ${toolTokens} + persona ${personaTokens} = ${toolTokens + personaTokens} per request`);
+  eq("tool schemas stay under budget", toolTokens <= 680, true);
+  eq("the persona stays under budget", personaTokens <= 330, true);
+  eq("and the two together stay under a thousand", toolTokens + personaTokens < 1000, true);
+
+  // Cheap to state, and it catches a tool registered with no guidance at all.
+  eq("every tool says what it is for", allTools().every((t) => t.description.length > 20), true);
 }
 
 console.log("\n--- room noise ---");

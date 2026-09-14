@@ -127,7 +127,23 @@ export default function SettingsDialog({
             </p>
 
             <div className="space-y-2.5">
-              {providers.map((p) => (
+              {/* A local server authenticates nobody, so it gets a line saying
+                  where it is rather than a key box that would do nothing. */}
+              {providers.filter((p) => !p.needsKey).map((p) => (
+                <div key={p.id} className="flex items-center gap-2 text-[11.5px]">
+                  <span className="font-medium text-ink">{p.label}</span>
+                  <span className="text-ink-faint">{p.note}</span>
+                  <span
+                    className={`ml-auto rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wide ${
+                      p.error ? "bg-danger/10 text-danger" : "bg-line text-ink-dim"
+                    }`}
+                  >
+                    {p.error ? "not reachable" : p.models.length > 0 ? "ready" : "no models"}
+                  </span>
+                </div>
+              ))}
+
+              {providers.filter((p) => p.needsKey).map((p) => (
                 <div key={p.id}>
                   <div className="mb-1 flex items-center gap-2">
                     <label className="text-[12px] font-medium" htmlFor={`key-${p.id}`}>

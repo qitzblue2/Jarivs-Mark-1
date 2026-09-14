@@ -104,11 +104,12 @@ export default function Workspace() {
       setSecurity(data.security ?? null);
 
       // Restore the last selection when it's still valid, else pick the first
-      // provider that actually has a key and a model.
+      // usable provider with a model. "Usable" rather than "has a key": a
+      // local server needs none and would otherwise never be auto-selected.
       setProvider((currentProvider) => {
         setModel((currentModel) => {
           const current = list.find((p) => p.id === currentProvider);
-          if (current?.hasKey && current.models.includes(currentModel)) return currentModel;
+          if (current?.ready && current.models.includes(currentModel)) return currentModel;
 
           let saved: { provider?: string; model?: string } = {};
           try {
@@ -118,14 +119,14 @@ export default function Workspace() {
           }
 
           const savedProvider = list.find((p) => p.id === saved.provider);
-          if (savedProvider?.hasKey && saved.model && savedProvider.models.includes(saved.model)) {
+          if (savedProvider?.ready && saved.model && savedProvider.models.includes(saved.model)) {
             queueMicrotask(() => setProvider(savedProvider.id));
             return saved.model;
           }
 
           const usable =
-            list.find((p) => p.id === data.defaultProvider && p.hasKey && p.models.length) ??
-            list.find((p) => p.hasKey && p.models.length);
+            list.find((p) => p.id === data.defaultProvider && p.ready && p.models.length) ??
+            list.find((p) => p.ready && p.models.length);
 
           if (usable) {
             queueMicrotask(() => setProvider(usable.id));

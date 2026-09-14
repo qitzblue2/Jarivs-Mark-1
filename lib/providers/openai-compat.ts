@@ -9,10 +9,52 @@ import { estimateTokens, trimToBudget, truncateMiddle } from "@/lib/tokens";
  */
 
 function authHeaders(key: string): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  // Omitted entirely for a local server rather than sent empty: a bare
+  // "Bearer " is a malformed credential, and some servers reject it outright
+  // instead of ignoring it the way Ollama does.
+  if (key) headers.Authorization = `Bearer ${key}`;
+  return headers;
+}
+
+/**
+ * Bound how long we wait for a provider to answer.
+ *
+ * `done()` must be called as soon as the response headers arrive. For a
+ * streaming completion the fetch promise resolves at the headers, and the
+ * body may then take minutes on a CPU model — clearing the timer there is
+ * what separates "this machine is thinking" from "this machine is not there".
+ */
+function deadline(signal: AbortSignal | undefined, ms: number | undefined) {
+  if (!ms) return { signal, done: () => {}, expired: () => false };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
   return {
-    Authorization: `Bearer ${key}`,
-    "Content-Type": "application/json",
+    signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+    done: () => clearTimeout(timer),
+    expired: () => controller.signal.aborted,
   };
+}
+
+/**
+ * A failure to connect, phrased as something you can act on.
+ *
+ * Without this a switched-off home server surfaces as the browser's bare
+ * "fetch failed", which names neither the machine nor the address.
+ */
+function toNetworkError(err: unknown, label: string, url: string, timedOut: boolean): never {
+  // The caller hitting Stop is not a provider failure.
+  if (!timedOut && (err as Error)?.name === "AbortError") throw err;
+
+  const cause = (err as { cause?: { code?: string } })?.cause?.code;
+  const reason = timedOut
+    ? "did not respond in time"
+    : cause === "ECONNREFUSED"
+      ? "refused the connection"
+      : "could not be reached";
+
+  throw new ProviderError(`${label} ${reason} at ${url}. Is it running?`, 503, true);
 }
 
 /** Turn an upstream failure into something a user can act on. */
@@ -55,10 +97,20 @@ async function toProviderError(res: Response, label: string): Promise<ProviderEr
 /** Live model list. Never hardcoded — provider lineups change often. */
 export async function listModels(providerId: string, key: string): Promise<ModelInfo[]> {
   const p = getProvider(providerId);
-  const res = await fetch(`${p.baseUrl}/models`, {
-    headers: authHeaders(key),
-    cache: "no-store",
-  });
+  const guard = deadline(undefined, p.probeTimeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetch(`${p.baseUrl}/models`, {
+      headers: authHeaders(key),
+      cache: "no-store",
+      signal: guard.signal,
+    });
+  } catch (err) {
+    toNetworkError(err, p.label, p.baseUrl, guard.expired());
+  } finally {
+    guard.done();
+  }
 
   if (!res.ok) throw await toProviderError(res, p.label);
 
@@ -77,7 +129,7 @@ export async function listModels(providerId: string, key: string): Promise<Model
 /** Open a streaming completion. Returns the raw upstream SSE body. */
 /** True when the upstream 400 is specifically "this model has no tools". */
 export function isToolsUnsupported(err: unknown): boolean {
-  if (!(err instanceof ProviderError)) return false;
+  if (!ProviderError.is(err)) return false;
   if (err.status !== 400 && err.status !== 404 && err.status !== 422) return false;
   return /tool|function.?call/i.test(err.message);
 }
@@ -89,12 +141,15 @@ export async function streamChat(
 ): Promise<ReadableStream<Uint8Array>> {
   const p = getProvider(providerId);
 
-  // Fit the conversation to this provider's free-tier window, leaving room for
-  // the tool schemas we are about to send alongside it.
+  // Fit the conversation to whichever is tighter: the model's window, or what
+  // one request is allowed to cost. For Groq those differ by a factor of
+  // sixteen, and using the window alone is what burns a minute of quota on a
+  // single question. Room is left for the tool schemas sent alongside.
   const toolBudget = req.tools?.length
     ? estimateTokens(JSON.stringify(req.tools))
     : 0;
-  const budget = Math.max(1000, p.maxContextTokens - toolBudget);
+  const ceiling = Math.min(p.maxContextTokens, p.maxRequestTokens ?? Infinity);
+  const budget = Math.max(1000, ceiling - toolBudget);
 
   const capped = req.messages.map((m) => ({
     ...m,
@@ -121,12 +176,23 @@ export async function streamChat(
     body.tool_choice = "auto";
   }
 
-  const res = await fetch(`${p.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: authHeaders(key),
-    signal: req.signal,
-    body: JSON.stringify(body),
-  });
+  // The deadline covers connecting and thinking, and is cleared as soon as
+  // the stream opens so a slow generation is never cut short.
+  const guard = deadline(req.signal, p.firstByteTimeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetch(`${p.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: authHeaders(key),
+      signal: guard.signal,
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    toNetworkError(err, p.label, p.baseUrl, guard.expired());
+  } finally {
+    guard.done();
+  }
 
   if (!res.ok) throw await toProviderError(res, p.label);
   if (!res.body) throw new ProviderError(`${p.label} returned an empty stream.`, 502, true);

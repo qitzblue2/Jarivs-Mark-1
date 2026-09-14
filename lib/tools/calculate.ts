@@ -147,9 +147,8 @@ export function evaluate(expression: string): number {
 export const calculateTool: Tool = {
   name: "calculate",
   description:
-    "Evaluate an arithmetic expression. Supports + - * / % ^, parentheses, " +
-    "the constants pi and e, and the functions sqrt, abs, round, floor, ceil, " +
-    "sin, cos, tan, log, log10, exp. Use this instead of doing arithmetic yourself.",
+    "Evaluate arithmetic instead of doing it yourself. Supports + - * / % ^, " +
+    "parentheses, pi, e, sqrt, abs, round, floor, ceil, sin, cos, tan, log, log10, exp.",
   parameters: {
     type: "object",
     properties: {

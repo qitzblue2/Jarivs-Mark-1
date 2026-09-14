@@ -1,6 +1,15 @@
 import { NextRequest } from "next/server";
 import { listModels } from "@/lib/providers/openai-compat";
-import { PROVIDERS, PROVIDER_IDS, defaultProviderId, hasServerKey, resolveKey } from "@/lib/providers/registry";
+import {
+  PROVIDERS,
+  PROVIDER_IDS,
+  defaultProviderId,
+  hasServerKey,
+  preferredModel,
+  providerReady,
+  requiresKey,
+  resolveKey,
+} from "@/lib/providers/registry";
 import { ProviderError } from "@/lib/providers/types";
 import { storageDriver } from "@/lib/storage";
 import { computerAccessEnabled } from "@/lib/tools/fs/workspace";
@@ -34,6 +43,7 @@ export async function GET(req: NextRequest) {
     PROVIDER_IDS.map(async (id) => {
       const config = PROVIDERS[id];
       const key = resolveKey(id, clientKeys[id]);
+      const needsKey = requiresKey(id);
 
       const base = {
         id,
@@ -42,19 +52,31 @@ export async function GET(req: NextRequest) {
         signupUrl: config.signupUrl,
         envKey: config.envKey,
         maxContextTokens: config.maxContextTokens,
+        /** Whether this provider is usable — not whether a key exists. */
+        ready: providerReady(id, clientKeys[id]),
+        needsKey,
         hasKey: Boolean(key),
-        keySource: hasServerKey(id) ? "server" : key ? "client" : null,
+        keySource: hasServerKey(id) ? "server" : key ? "client" : needsKey ? null : "none",
         models: [] as string[],
         error: null as string | null,
       };
 
-      if (!key) return base;
+      // A local server has no key and still has models to list, so this asks
+      // whether the provider is usable rather than whether a key turned up.
+      if (!base.ready) return base;
 
       try {
-        const models = await listModels(id, key);
-        return { ...base, models: models.map((m) => m.id) };
+        const models = await listModels(id, key ?? "");
+        // A pinned model is what will actually be used, so show it even when
+        // the server lists others alongside it.
+        const pinned = preferredModel(id);
+        const listed = models.map((m) => m.id);
+        return {
+          ...base,
+          models: pinned && !listed.includes(pinned) ? [pinned, ...listed] : listed,
+        };
       } catch (err) {
-        const message = err instanceof ProviderError ? err.message : (err as Error).message;
+        const message = ProviderError.is(err) ? err.message : (err as Error).message;
         return { ...base, error: message };
       }
     }),

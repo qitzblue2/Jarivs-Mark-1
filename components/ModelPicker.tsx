@@ -11,7 +11,10 @@ export interface ProviderState {
   envKey: string;
   maxContextTokens: number;
   hasKey: boolean;
-  keySource: "server" | "client" | null;
+  /** Usable right now — which for a local server means "needs no key". */
+  ready: boolean;
+  needsKey: boolean;
+  keySource: "server" | "client" | "none" | null;
   models: string[];
   error: string | null;
 }
@@ -81,9 +84,17 @@ export default function ModelPicker({
                     byo
                   </span>
                 )}
+                {p.keySource === "none" && (
+                  <span className="rounded bg-line px-1 text-[9px] uppercase tracking-wide text-ink-dim">
+                    no key
+                  </span>
+                )}
               </div>
 
-              {!p.hasKey ? (
+              {/* Asks whether the provider is usable, not whether a key
+                  turned up: a local server has no key and needs none, and
+                  nagging for one there would be nonsense. */}
+              {!p.ready ? (
                 <button
                   onClick={() => {
                     setOpen(false);
@@ -100,7 +111,11 @@ export default function ModelPicker({
                   <span className="break-words">{p.error}</span>
                 </div>
               ) : p.models.length === 0 ? (
-                <p className="px-2 pb-1.5 text-[11px] text-ink-faint">No chat models returned.</p>
+                <p className="px-2 pb-1.5 text-[11px] text-ink-faint">
+                  {p.needsKey
+                    ? "No chat models returned."
+                    : "Reachable, but no models pulled yet. Try `ollama pull qwen3:4b`."}
+                </p>
               ) : (
                 <ul>
                   {p.models.map((id) => {

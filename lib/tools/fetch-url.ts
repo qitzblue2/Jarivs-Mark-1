@@ -5,14 +5,13 @@ import type { Tool } from "./types";
 export const fetchUrlTool: Tool = {
   name: "fetch_url",
   description:
-    "Fetch a web page and return its readable text. Use after web_search to " +
-    "read a result properly, or when the user gives you a URL. Only public " +
-    "http(s) addresses can be reached.",
+    "Fetch a page and return its readable text. Use after web_search, or when " +
+    "given a URL. Public http(s) only.",
   dangerous: true,
   parameters: {
     type: "object",
     properties: {
-      url: { type: "string", description: "The full http(s) URL to fetch." },
+      url: { type: "string", description: "Full http(s) URL." },
     },
     required: ["url"],
   },

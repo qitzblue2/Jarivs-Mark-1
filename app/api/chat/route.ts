@@ -1,6 +1,14 @@
 import { NextRequest } from "next/server";
 
-import { defaultProviderId, getProvider, resolveKey, PROVIDER_IDS } from "@/lib/providers/registry";
+import {
+  defaultProviderId,
+  fallbackOrder,
+  getProvider,
+  preferredModel,
+  requiresKey,
+  resolveKey,
+  PROVIDER_IDS,
+} from "@/lib/providers/registry";
 import { ProviderError, type ContentPart, type WireMessage } from "@/lib/providers/types";
 import { supportsVision } from "@/lib/providers/registry";
 import { attachmentsToText, MAX_IMAGES } from "@/lib/attachments";
@@ -130,10 +138,11 @@ export async function POST(req: NextRequest) {
   const systemPrompt = (persona?.trim() || DEFAULT_PERSONA) + memoryBlock;
   const hasImages = messages.some((m) => m.attachments?.some((a) => a.kind === "image"));
 
-  // Try the chosen provider, then any other provider that has a key. Two free
-  // keys are only worth having if a rate limit on one rolls over to the other.
-  const order = [primary, ...PROVIDER_IDS.filter((id) => id !== primary)]
-    .filter((id) => resolveKey(id, keys[id]));
+  // Try the chosen provider, then everything else that is configured. Two
+  // free keys are only worth having if a rate limit on one rolls over to the
+  // other — and a local server is worth having because it never rate-limits
+  // at all, which is why it sits at the end of this list.
+  const order = fallbackOrder(primary, keys);
 
   if (order.length === 0) {
     const p = getProvider(primary);
@@ -146,8 +155,10 @@ export async function POST(req: NextRequest) {
   let lastError: ProviderError | null = null;
 
   for (const providerId of order) {
-    const key = resolveKey(providerId, keys[providerId]);
-    if (!key) continue;
+    // Empty string, not null: a local server needs no key, and `fallbackOrder`
+    // has already established that this provider is usable.
+    const key = resolveKey(providerId, keys[providerId]) ?? "";
+    if (!key && requiresKey(providerId)) continue;
 
     const config = getProvider(providerId);
     // The requested model only applies to the provider it was chosen for.
@@ -213,7 +224,7 @@ export async function POST(req: NextRequest) {
 
       return sseResponse(stream);
     } catch (err) {
-      if (err instanceof ProviderError) {
+      if (ProviderError.is(err)) {
         lastError = err;
         // Only roll over on rate limits and outages — a bad key or bad request
         // will fail the same way everywhere.
@@ -228,8 +239,20 @@ export async function POST(req: NextRequest) {
   return errorStream(lastError?.message ?? "Every configured provider failed.", lastError?.status);
 }
 
-/** Cheap model fallback for a provider the user didn't explicitly pick. */
+/**
+ * Which model to use for a provider the user didn't explicitly pick.
+ *
+ * A pinned model wins outright and is not checked against the list: if you
+ * named it, you meant it, and a typo failing loudly as "model not found"
+ * beats silently answering with a different model. Otherwise it is whatever
+ * the provider lists first, which is alphabetical and therefore arbitrary —
+ * fine for a cloud provider serving one lineup, which is why pinning exists
+ * for the local server serving whatever you happen to have pulled.
+ */
 async function firstModel(providerId: string, key: string): Promise<string | null> {
+  const pinned = preferredModel(providerId);
+  if (pinned) return pinned;
+
   const { listModels } = await import("@/lib/providers/openai-compat");
   try {
     const models = await listModels(providerId, key);

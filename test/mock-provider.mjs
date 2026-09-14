@@ -87,11 +87,25 @@ function streamToolCall(res, { id, name, args }, done) {
   res.on("close", () => clearInterval(timer));
 }
 
+/**
+ * Stand in for a local Ollama, which authenticates nobody.
+ *
+ * Without this the mock demands a Bearer token, so a keyless provider could
+ * only ever be tested by giving it a key — which is precisely the bug.
+ */
+const NO_AUTH = process.env.MOCK_NO_AUTH === "1";
+
 const server = http.createServer((req, res) => {
   const auth = req.headers.authorization || "";
 
-  if (req.url.startsWith("/search")) {
-    // fall through to the handler below; SearXNG needs no auth
+  if (NO_AUTH && auth) {
+    // A local server should never be sent a credential at all.
+    res.writeHead(400, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ error: { message: `Unexpected Authorization: ${auth}` } }));
+  }
+
+  if (NO_AUTH || req.url.startsWith("/search")) {
+    // fall through to the handler below; neither needs auth
   } else if (!auth.startsWith("Bearer ")) {
     res.writeHead(401, { "Content-Type": "application/json" });
     return res.end(JSON.stringify({ error: { message: "Missing API key" } }));

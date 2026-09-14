@@ -446,12 +446,19 @@ test/               mock provider, unit tests, browser e2e
 ## Testing
 
 ```bash
-npm test            # unit + containment/auth suites
+npm test                # unit + containment/auth suites
+npm run test:providers  # keyless providers, fallback order, request budgets
+npm run test:device     # on-device voice, against the real ONNX models
+
 ./test/start-mock.sh                       # fake provider on :8899
 GROQ_API_KEY=test JARVIS_GROQ_BASE_URL=http://localhost:8899/v1 npm run dev
 npm run test:e2e    # drives a real browser against the mock
 npm run test:voice  # voice mode, with a WAV standing in for a microphone
 ```
+
+`MOCK_NO_AUTH=1` makes the mock reject any request carrying an `Authorization`
+header, standing in for a local Ollama — which is how the keyless path is
+tested without a key existing anywhere.
 
 The mock streams tool calls the way real providers do — `arguments` split
 mid-JSON across chunks — so the reassembly logic is genuinely exercised
@@ -460,15 +467,65 @@ without spending any free-tier quota.
 ### Adding a provider
 
 Add an entry to `PROVIDERS` in `lib/providers/registry.ts` with its base URL,
-env var name and free-tier context limit. If it speaks the OpenAI wire format
-(most do), that's the whole job.
+env var name and free-tier limits. If it speaks the OpenAI wire format (most
+do), that's the whole job. Set `requiresKey: false` for a server that
+authenticates nobody.
 
-You can also repoint an existing slot at a local model — handy for Ollama or
-LM Studio, which need no key at all:
+### Running your own model
+
+Free tiers are fast but metered; your own hardware is slow but never runs out.
+That makes a local model the right **backstop** rather than the right default,
+which is how JARVIS treats it: the cloud answers first, and a rate limit rolls
+over to `local` automatically instead of failing.
+
+On the machine doing the work:
 
 ```bash
-JARVIS_GROQ_BASE_URL=http://localhost:11434/v1
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull qwen3:4b
+OLLAMA_HOST=0.0.0.0 OLLAMA_KEEP_ALIVE=-1 ollama serve
 ```
+
+`OLLAMA_HOST=0.0.0.0` lets another machine — a Pi running JARVIS — reach it.
+`OLLAMA_KEEP_ALIVE=-1` stops the model being unloaded after five idle minutes,
+which otherwise costs 10-20 seconds on the first question after a gap.
+
+Then, in `.env.local`:
+
+```bash
+JARVIS_LOCAL_BASE_URL=http://192.168.1.50:11434/v1
+JARVIS_LOCAL_MODEL=qwen3:4b
+```
+
+There is no API key, because there is nobody to authenticate.
+
+**Sizing it.** Generation speed is bound by memory bandwidth, not cores: every
+token reads the whole weight file out of RAM. So the useful number is
+`bandwidth / model size`, and roughly 60% of theoretical is achievable.
+
+A desktop with dual-channel DDR4 (~42 GB/s) runs a 3B at ~12 tok/s, a 4B at
+~10, an 8B at ~5, and a 14B at ~3. Speech is about 4 tok/s, so **a 4B keeps
+ahead of your own voice and an 8B roughly keeps pace** — that is the ceiling
+for a voice assistant. A Raspberry Pi has around a quarter of that bandwidth
+and is 20x slower again; the Pi should run the voice loop and let a real
+machine run the model.
+
+A discrete GPU only helps if the whole model fits in VRAM. Anything under 6 GB
+holds nothing useful, and CUDA has dropped support for Maxwell-era cards, so an
+old GPU is not worth wiring in — the CPU path is the one that works.
+
+### Free-tier limits, and why requests are small
+
+Providers publish two different numbers and it matters which one binds. Groq's
+*context window* is 96K tokens, but its free tier allows 6,000 tokens a
+**minute** — and the agent loop makes up to five requests per turn, each
+re-sending the whole conversation plus the tool schemas.
+
+So `maxRequestTokens` caps what a single request may cost, separately from
+`maxContextTokens`. Trimming to the window instead would spend sixteen minutes
+of quota on one question, which is what "Groq keeps running out" actually is.
+Raise it with `JARVIS_GROQ_REQUEST_TOKENS` if your account has a higher limit;
+the cost of a smaller budget is that JARVIS forgets earlier turns sooner.
 
 ## Security notes
 
