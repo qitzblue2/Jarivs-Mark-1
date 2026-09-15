@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, Check, ChevronDown, Cpu, Zap } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Cpu, Search, Zap } from "lucide-react";
 
 export interface ProviderState {
   id: string;
@@ -42,7 +42,14 @@ export default function ModelPicker({
   onOpenSettings,
 }: Props) {
   const [open, setOpen] = useState(false);
+  /**
+   * OpenRouter alone serves several hundred models, listed alphabetically.
+   * Without a filter, finding a specific one means scrolling past three
+   * hundred entries — which reads, reasonably, as the model not being there.
+   */
+  const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -54,13 +61,39 @@ export default function ModelPicker({
     }
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
+    // Type straight into the filter rather than reaching for the mouse.
+    searchRef.current?.focus();
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
 
+  // Start each visit unfiltered; a stale query reads as a missing model.
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
+
   const current = providers.find((p) => p.id === provider);
+
+  const needle = query.trim().toLowerCase();
+  const matches = (id: string) => !needle || id.toLowerCase().includes(needle);
+  const totalMatching = providers.reduce(
+    (n, p) => n + p.models.filter(matches).length,
+    0,
+  );
+
+  /**
+   * A model a provider didn't list is still worth offering.
+   *
+   * Catalogues go stale, a rate-limited list comes back empty, and a
+   * self-hosted server may serve something it doesn't advertise. If what you
+   * typed looks like a model id and nothing matched, use it as typed rather
+   * than insisting it doesn't exist.
+   */
+  const typedId = needle && totalMatching === 0 && /^[\w./:-]{3,}$/.test(query.trim())
+    ? query.trim()
+    : null;
 
   return (
     <div ref={ref} className="relative">
@@ -75,8 +108,45 @@ export default function ModelPicker({
       </button>
 
       {open && (
-        <div className="absolute right-0 z-40 mt-1.5 max-h-[70vh] w-[320px] overflow-y-auto rounded-xl border border-line bg-panel p-1.5 shadow-2xl shadow-black/50">
-          {providers.map((p) => (
+        <div className="absolute right-0 z-40 mt-1.5 flex max-h-[70vh] w-[320px] flex-col rounded-xl border border-line bg-panel p-1.5 shadow-2xl shadow-black/50">
+          <div className="relative mb-1 shrink-0">
+            <Search
+              size={11}
+              className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-faint"
+            />
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Filter models…"
+              spellCheck={false}
+              className="w-full rounded-md border border-line bg-base py-1.5 pl-7 pr-2 text-[12px] text-ink outline-none transition placeholder:text-ink-faint focus:border-arc-dim"
+            />
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto">
+          {typedId && (
+            <button
+              onClick={() => {
+                // Attach it to whichever provider is selected, or the first
+                // that can actually answer.
+                const target = current?.ready ? current : providers.find((x) => x.ready);
+                if (target) onChange(target.id, typedId);
+                setOpen(false);
+              }}
+              className="mb-1 block w-full rounded-md border border-dashed border-arc-dim/50 px-2 py-2 text-left text-[11px] text-ink-dim transition hover:text-arc"
+            >
+              Nothing matched. Use <span className="font-mono text-arc">{typedId}</span> anyway
+              <span className="mt-0.5 block text-ink-faint">
+                For a model the provider didn&rsquo;t list.
+              </span>
+            </button>
+          )}
+          {/* While filtering, a provider with no match is noise — its header
+              and its "no key yet" prompt both distract from the one result. */}
+          {providers
+            .filter((p) => !needle || p.models.some(matches))
+            .map((p) => (
             <div key={p.id} className="mb-1 last:mb-0">
               <div className="flex items-center gap-1.5 px-2 py-1.5">
                 <Cpu size={11} className="text-ink-faint" />
@@ -125,7 +195,7 @@ export default function ModelPicker({
                 </p>
               ) : (
                 <ul>
-                  {p.models.map((id) => {
+                  {p.models.filter(matches).map((id) => {
                     const selected = p.id === provider && id === model;
                     return (
                       <li key={`${p.id}:${id}`}>
@@ -152,7 +222,9 @@ export default function ModelPicker({
             </div>
           ))}
 
-          <p className="border-t border-line-soft px-2 pb-1 pt-2 text-[10px] leading-relaxed text-ink-faint">
+          </div>
+
+          <p className="shrink-0 border-t border-line-soft px-2 pb-1 pt-2 text-[10px] leading-relaxed text-ink-faint">
             Model lists are fetched live from each provider, so deprecations
             never leave you on a dead model.
           </p>
