@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 
 import {
+  anyProviderConfigured,
   defaultProviderId,
   fallbackOrder,
   getProvider,
@@ -152,13 +153,22 @@ export async function POST(req: NextRequest) {
   // at all, which is why it sits at the end of this list.
   const order = fallbackOrder(primary, keys, endpoints);
 
-  if (order.length === 0) {
-    const p = getProvider(primary);
+  // The self-hosted slot needs no key, so `order` is never empty and the
+  // guidance below became unreachable — a fresh clone answered its first
+  // message with "No usable model found on Self-hosted".
+  const configured = anyProviderConfigured(keys);
+
+  const onboarding = () => {
+    const free = PROVIDER_IDS.filter((id) => requiresKey(id)).map((id) => getProvider(id));
     return errorStream(
-      `No API key for ${p.label}. Add ${p.envKey} to .env.local, or paste a key in Settings. Get a free one at ${p.signupUrl}`,
+      "No AI provider configured yet. Open Settings and paste a free API key — " +
+        free.map((p) => `${p.label} (${p.signupUrl})`).join(", ") +
+        ". Or point the Self-hosted slot at a model you run yourself.",
       401,
     );
-  }
+  };
+
+  if (order.length === 0) return onboarding();
 
   let lastError: ProviderError | null = null;
 
@@ -247,6 +257,10 @@ export async function POST(req: NextRequest) {
       lastError = new ProviderError((err as Error).message || "Request failed.", 500, true);
     }
   }
+
+  // Exhausted. With nothing configured, the only thing we had to try was a
+  // self-hosted slot nobody set up, and its error explains none of that.
+  if (!configured) return onboarding();
 
   return errorStream(lastError?.message ?? "Every configured provider failed.", lastError?.status);
 }

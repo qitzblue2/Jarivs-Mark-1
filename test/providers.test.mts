@@ -12,6 +12,7 @@
 import http from "node:http";
 import { spawn } from "node:child_process";
 import {
+  anyProviderConfigured,
   defaultProviderId,
   fallbackOrder,
   getProvider,
@@ -110,6 +111,28 @@ console.log("\n--- fallback order ---");
   withEnv(NO_CLOUD_KEYS, () => {
     // Before this change, no keys meant no providers at all and a 401.
     eq("with no keys at all, local alone still answers", fallbackOrder("groq"), ["local"]);
+  });
+}
+
+console.log("\n--- is this install set up at all ---");
+{
+  withEnv(NO_CLOUD_KEYS, () => {
+    /**
+     * The regression this guards. Adding an always-ready keyless slot meant
+     * the fallback order was never empty, so the "no key configured" guidance
+     * became unreachable and a fresh clone answered its first message with
+     * "No usable model found on Self-hosted" — naming a server the user had
+     * never configured or heard of.
+     */
+    eq("a fresh clone is not configured", anyProviderConfigured(), false);
+    eq("even though a slot is always ready", providerReady("local"), true);
+    eq("and the order is never empty", fallbackOrder("groq").length > 0, true);
+
+    eq("a key pasted in Settings counts", anyProviderConfigured({ groq: "byo" }), true);
+  });
+
+  withEnv({ ...NO_CLOUD_KEYS, GEMINI_API_KEY: "k" }, () => {
+    eq("one env key anywhere counts", anyProviderConfigured(), true);
   });
 }
 

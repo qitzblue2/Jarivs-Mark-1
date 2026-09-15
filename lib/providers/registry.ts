@@ -341,6 +341,22 @@ export function resolveKey(
 }
 
 /**
+ * Has this install been set up at all?
+ *
+ * Asks whether any provider that NEEDS a key has one — deliberately not
+ * "can anything answer". The self-hosted slot needs no key and so is always
+ * ready, which would make every fresh clone look configured and turn the
+ * first message into an error about a server the user has never heard of.
+ *
+ * Someone running Ollama with no cloud keys is set up correctly and must not
+ * be told otherwise, so this is only ever used to explain a failure, never to
+ * refuse an attempt.
+ */
+export function anyProviderConfigured(clientKeys: Record<string, string> = {}): boolean {
+  return PROVIDER_IDS.some((id) => requiresKey(id) && resolveKey(id, clientKeys[id]));
+}
+
+/**
  * Which providers to try, in order, for one request.
  *
  * The chosen provider goes first even when it is the slow local one — an

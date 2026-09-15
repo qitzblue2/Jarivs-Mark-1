@@ -76,8 +76,11 @@ export default function ChatPane(props: Props) {
     setPinned(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
   }
 
-  // A local server with no key still counts as somewhere to send a message.
-  const anyKey = providers.some((p) => p.ready);
+  // Somewhere that can actually answer — not merely a slot that exists. The
+  // self-hosted slot is always "ready" even with nothing behind it, so asking
+  // only about readiness showed prompt starters to a brand-new install that
+  // could not respond to any of them.
+  const anyKey = providers.some((p) => p.ready && p.models.length > 0);
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-base">
