@@ -160,6 +160,36 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     visionModels: VISION_PATTERNS,
   },
   /**
+   * Awan LLM — the second flat-rate slot, sitting beside Arli.
+   *
+   * Its limits are not the constraint people assume: daily caps run 30,000 to
+   * 80,000 requests, against maybe 200 a day for heavy personal use. Nothing
+   * here will meet them. That is a different shape of limit from Groq's 6,000
+   * tokens a minute, which is spent by how LONG you have been talking rather
+   * than how often you ask, and so tightens as a conversation grows.
+   *
+   * The catalogue is the thing to know about: Llama 3.1 8B and 70B Instruct,
+   * Llama 3, and Awan's own 8B fine-tunes — 2024-era models. That matters for
+   * exactly one reason. Tool calling is what moves the projector, and Llama
+   * 3.1 8B is weak at it while 70B is acceptable. Check with the model probe
+   * before relying on a small one, or the display will quietly never respond.
+   *
+   * No visionModels: these are text-only, and claiming otherwise would fail
+   * requests that currently degrade to "[Attached image: x.jpg]" and still
+   * get answered.
+   */
+  awan: {
+    id: "awan",
+    label: "Awan LLM",
+    baseUrl: "https://api.awanllm.com/v1",
+    envKey: "AWAN_API_KEY",
+    signupUrl: "https://awanllm.com/",
+    maxContextTokens: 16_000,
+    maxRequestTokens: 13_000,
+    maxOutputTokens: 2048,
+    note: "Paid, from ~$5/mo. Unlimited tokens; models are Llama 3.1-era.",
+  },
+  /**
    * Your own machine, via Ollama or llama.cpp's server.
    *
    * Last on purpose: it is the only provider that never rate-limits, and the

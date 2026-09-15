@@ -6,8 +6,8 @@ can now use tools mid-answer instead of only talking.
 
 - **Free to run.** No credit card, no trial clock, no hosting bill.
 - **Fast.** Groq and Cerebras are the two quickest inference providers going.
-- **Provider-agnostic.** Groq, Gemini, Cerebras, Mistral, OpenRouter and Arli
-  ship in the box, plus a slot for any OpenAI-compatible URL of your own;
+- **Provider-agnostic.** Groq, Gemini, Cerebras, Mistral, OpenRouter, Arli and
+  Awan ship in the box, plus a slot for any OpenAI-compatible URL of your own;
   adding another is one entry in a config object.
 - **Tool-using.** Calls tools mid-answer and shows you exactly what it ran.
 - **Voice.** Say "Hey JARVIS" and talk to it. Wake word runs on your machine.
@@ -68,6 +68,22 @@ you would otherwise have been stuck.
 > under-use, and the big sellers have been drifting back toward metering.
 > Treat it as a good introductory price rather than a permanent arrangement —
 > which is the argument for leaving a free key configured behind it.
+
+### Awan LLM
+
+The other flat-rate option, from about $5/month, also unlimited tokens.
+
+Its **limits are not the constraint** people expect: daily caps run 30,000 to
+80,000 requests, against maybe 200 a day for heavy use. You will not meet
+them. That is a different shape of limit from Groq's 6,000 tokens a minute,
+which is spent by how *long* you have been talking rather than how often you
+ask — which is why Groq tightens as a conversation grows and this doesn't.
+
+**The catalogue is what to weigh.** Llama 3.1 8B and 70B Instruct, Llama 3,
+and Awan's own 8B fine-tunes — 2024-era models. That matters for one reason:
+tool calling is what drives the projector, and Llama 3.1 8B is weak at it
+while 70B is acceptable. Use the picker's **"Can this model use tools?"**
+before relying on one, or the display will quietly never respond.
 
 ### Mistral
 

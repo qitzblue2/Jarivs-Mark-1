@@ -25,6 +25,7 @@ import {
   resolveKey,
   resolveWakeMac,
   sanitizeEndpoint,
+  supportsVision,
 } from "../lib/providers/registry";
 import { listModels, streamChat } from "../lib/providers/openai-compat";
 import {
@@ -88,6 +89,7 @@ const ALL_CLOUD_KEYS = {
   MISTRAL_API_KEY: "k",
   OPENROUTER_API_KEY: "k",
   ARLI_API_KEY: "k",
+  AWAN_API_KEY: "k",
 };
 const NO_CLOUD_KEYS = Object.fromEntries(
   Object.keys(ALL_CLOUD_KEYS).map((k) => [k, undefined]),
@@ -124,7 +126,7 @@ console.log("\n--- fallback order ---");
     eq(
       "every configured provider is in the chain, local last",
       fallbackOrder("groq"),
-      ["groq", "gemini", "cerebras", "mistral", "openrouter", "arli", "local"],
+      ["groq", "gemini", "cerebras", "mistral", "openrouter", "arli", "awan", "local"],
     );
 
     /**
@@ -138,7 +140,8 @@ console.log("\n--- fallback order ---");
      */
     const chain = fallbackOrder("groq");
     eq("arli sits behind the free tiers", chain.indexOf("arli") > chain.indexOf("openrouter"), true);
-    eq("but ahead of the local machine", chain.indexOf("arli") < chain.indexOf("local"), true);
+    eq("so does awan", chain.indexOf("awan") > chain.indexOf("openrouter"), true);
+    eq("and both sit ahead of the local machine", Math.max(chain.indexOf("arli"), chain.indexOf("awan")) < chain.indexOf("local"), true);
     // Gemini has 40x Groq's per-minute budget and a window Cerebras can't
     // match, so it is the first place a rate-limited turn should land.
     eq("gemini is the first fallback", fallbackOrder("groq")[1], "gemini");
@@ -240,6 +243,16 @@ console.log("\n--- what one request is allowed to cost ---");
   eq("arli fits a request and its reply inside 16K", arli.maxRequestTokens! + arli.maxOutputTokens <= 16_000, true);
   withEnv({ JARVIS_ARLI_CONTEXT: "32000" }, () => {
     eq("and the $15 tier's bigger window can be set", getProvider("arli").maxContextTokens, 32_000);
+  });
+
+  // Text-only models. Claiming vision would fail requests that currently
+  // degrade to a description and still get answered.
+  eq("awan claims no vision", supportsVision("awan", "Meta-Llama-3.1-70B-Instruct"), false);
+
+  // Proves the generalised JARVIS_<ID>_* mechanism reaches a brand-new entry
+  // with no code written for it.
+  withEnv({ JARVIS_AWAN_CONTEXT: "32000" }, () => {
+    eq("a new slot gets env overrides for free", getProvider("awan").maxContextTokens, 32_000);
   });
 
   withEnv({ JARVIS_GROQ_REQUEST_TOKENS: "1200" }, () => {
