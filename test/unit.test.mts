@@ -680,6 +680,27 @@ console.log("\n--- what every request costs before you type ---");
   eq("every tool says what it is for", allTools().every((t) => t.description.length > 20), true);
 }
 
+console.log("\n--- which models can actually see ---");
+{
+  /**
+   * Getting this wrong is asymmetric, which is why the patterns are narrow.
+   * Claiming vision a model lacks fails the whole request; claiming none
+   * folds the image in as "[Attached image: x.jpg]", so the model knows one
+   * was sent and says it cannot see it. A worse answer, but an answer.
+   */
+  eq("a -VL model on Arli sees", supportsVision("arli", "Qwen2.5-VL-7B-Instruct"), true);
+  eq("a text model on Arli does not", supportsVision("arli", "Mistral-Nemo-12B-Instruct"), false);
+  eq("OpenRouter's vision models see", supportsVision("openrouter", "qwen/qwen2.5-vl-72b-instruct"), true);
+  eq("its text models do not", supportsVision("openrouter", "meta-llama/llama-3.3-70b-instruct"), false);
+  eq("every Gemini is multimodal", supportsVision("gemini", "gemini-2.5-flash"), true);
+  eq("Cerebras claims none", supportsVision("cerebras", "llama-3.3-70b"), false);
+  eq("an unknown provider claims none", supportsVision("nope", "qwen2.5-vl-7b"), false);
+
+  // The patterns are substrings, so guard the obvious false positives.
+  eq("\"vl\" inside a word is not a vision model", supportsVision("arli", "Vicuna-13B"), false);
+  eq("nor is a plain llama", supportsVision("arli", "Llama-3.1-8B"), false);
+}
+
 console.log("\n--- a thinking model's reasoning ---");
 {
   const done = splitReasoning("<think>They want the capital.</think>Paris.");

@@ -699,6 +699,23 @@ of quota on one question, which is what "Groq keeps running out" actually is.
 Raise it with `JARVIS_GROQ_REQUEST_TOKENS` if your account has a higher limit;
 the cost of a smaller budget is that JARVIS forgets earlier turns sooner.
 
+## Images
+
+Drop an image into the chat and JARVIS sends it to the model — if that model
+can see. Vision is per **model**, not per provider, so it is matched against
+the live model id: anything named `-VL`, `vision`, `llava`, `pixtral`,
+`internvl`, `minicpm-v`, `moondream`, `scout` or `maverick`, plus every Gemini
+model, which are all multimodal.
+
+When the chosen model can't see, the image isn't dropped — it arrives as
+`[Attached image: photo.jpg]`, so the model knows one was sent and can say it
+can't see it rather than answering as though nothing was attached.
+
+The matching is deliberately narrow, because the two mistakes are not equal:
+claiming vision a model lacks **fails the request outright**, while claiming
+none still gets you an answer. If a model you know sees isn't being given the
+image, its name is the thing to check.
+
 ## The room display
 
 JARVIS can put things on a screen — an answer easier to read than to hear,

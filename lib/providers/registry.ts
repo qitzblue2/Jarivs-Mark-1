@@ -6,6 +6,30 @@ import type { ProviderConfig } from "./types";
  * lib/providers/openai-compat.ts. Adding OpenRouter, Gemini (via its compat
  * endpoint), or a local Ollama is a new entry in this object — nothing else.
  */
+/**
+ * Model names that reliably mean "this one can see".
+ *
+ * Matched as substrings against a live model id. Deliberately conservative:
+ * claiming vision a model does not have fails the request outright, while
+ * claiming none folds the image into text as "[Attached image: photo.jpg]" —
+ * the model knows something was attached and says it cannot see it, which is
+ * a worse answer but still an answer.
+ *
+ * So every entry here names a family that is multimodal by definition, not a
+ * vendor whose lineup happens to include one.
+ */
+const VISION_PATTERNS = [
+  "vision",
+  "-vl",        // Qwen-VL, InternVL, and the rest of the -VL convention
+  "llava",
+  "pixtral",
+  "internvl",
+  "minicpm-v",
+  "moondream",
+  "scout",      // Llama 4
+  "maverick",
+];
+
 export const PROVIDERS: Record<string, ProviderConfig> = {
   groq: {
     id: "groq",
@@ -21,7 +45,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     note: "Free, no card. Very fast. ~6K tokens/min, so replies stay brief.",
     // qwen3.6-27b takes text and images: max 3 images, 2048 tokens each,
     // and only 1,000 requests/day on the free tier.
-    visionModels: ["qwen3.6", "qwen3.8", "vision", "llava", "scout", "maverick"],
+    visionModels: ["qwen3.6", "qwen3.8", ...VISION_PATTERNS],
   },
   /**
    * Google AI Studio, through its OpenAI-compatible endpoint.
@@ -100,6 +124,9 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     // One tool-using turn is up to five requests, so the free tier is ten
     // turns a day. A way to reach a specific model, not a workhorse.
     note: "50 requests/day free; 1,000 after a one-off $10 credit.",
+    // Hundreds of models, a good number of which see. Matching by name is
+    // the only option when the catalogue changes weekly.
+    visionModels: [...VISION_PATTERNS, "gemini", "gpt-4o", "claude-3"],
   },
   /**
    * Arli AI — flat monthly rate, unlimited tokens and requests.
@@ -114,10 +141,10 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
    * Sized for the $10 tier: models up to 31B, 16K context. On the $15 tier
    * set JARVIS_ARLI_CONTEXT=32000.
    *
-   * No visionModels entry deliberately. Arli serves vision models, but
-   * claiming support for a model that turns out not to have it fails the
-   * request outright, where claiming none folds images into text and still
-   * answers. Wrong in the safe direction.
+   * Vision is matched by model name rather than assumed. Arli serves vision
+   * models but publishes no capability flag, so the shared patterns above
+   * are the honest middle: a model called -VL or -vision gets the image, and
+   * anything else gets told one was attached.
    */
   arli: {
     id: "arli",
@@ -130,6 +157,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     maxRequestTokens: 13_000,
     maxOutputTokens: 2048,
     note: "Paid, ~$10/mo. Unlimited tokens and requests — never rate-limits.",
+    visionModels: VISION_PATTERNS,
   },
   /**
    * Your own machine, via Ollama or llama.cpp's server.
