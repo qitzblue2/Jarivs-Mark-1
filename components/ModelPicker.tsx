@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, Check, ChevronDown, Cpu, Search, Zap } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Cpu, Search, Stethoscope, Zap } from "lucide-react";
 
 export interface ProviderState {
   id: string;
@@ -48,6 +48,8 @@ export default function ModelPicker({
    * hundred entries — which reads, reasonably, as the model not being there.
    */
   const [query, setQuery] = useState("");
+  const [probing, setProbing] = useState(false);
+  const [probe, setProbe] = useState<{ ok: boolean; text: string } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -73,6 +75,53 @@ export default function ModelPicker({
   useEffect(() => {
     if (!open) setQuery("");
   }, [open]);
+
+  // A result about a model you are no longer on is worse than none.
+  useEffect(() => {
+    setProbe(null);
+  }, [provider, model]);
+
+  /**
+   * Ask the selected model to do the one thing JARVIS depends on.
+   *
+   * Tool calling is what moves the projector, searches the web and stores a
+   * memory. A model that accepts the `tools` parameter and then never calls
+   * one fails no check anywhere — it just quietly does nothing, which reads
+   * as JARVIS being broken rather than the model being unsuitable.
+   */
+  async function checkModel() {
+    setProbing(true);
+    setProbe(null);
+    try {
+      const res = await fetch("/api/probe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, model }),
+      });
+      const r = await res.json();
+
+      if (!r.ok) {
+        setProbe({ ok: false, text: r.error ?? "The probe failed." });
+      } else if (r.calledTool) {
+        const speed = r.tokensPerSecond ? `, ~${r.tokensPerSecond} tok/s` : "";
+        setProbe({
+          ok: true,
+          text: `Calls tools · first reply in ${(r.firstByteMs / 1000).toFixed(1)}s${speed}`,
+        });
+      } else {
+        setProbe({
+          ok: false,
+          text:
+            `Did not call a tool — it answered "${(r.saidInstead ?? "").slice(0, 60)}…" instead. ` +
+            "The projector, search and memory won't work on this model.",
+        });
+      }
+    } catch (err) {
+      setProbe({ ok: false, text: (err as Error).message });
+    } finally {
+      setProbing(false);
+    }
+  }
 
   const current = providers.find((p) => p.id === provider);
 
@@ -223,6 +272,30 @@ export default function ModelPicker({
           ))}
 
           </div>
+
+          {/* The question a model list cannot answer: does this one actually
+              do the thing JARVIS needs? */}
+          {model && (
+            <div className="shrink-0 border-t border-line-soft px-1 pt-1.5">
+              <button
+                onClick={checkModel}
+                disabled={probing}
+                className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[11px] text-ink-dim transition hover:text-arc disabled:opacity-50"
+              >
+                <Stethoscope size={11} className="shrink-0" />
+                {probing ? "Checking…" : "Can this model use tools?"}
+              </button>
+              {probe && (
+                <p
+                  className={`px-1.5 pb-1 text-[10.5px] leading-relaxed ${
+                    probe.ok ? "text-arc" : "text-warn"
+                  }`}
+                >
+                  {probe.text}
+                </p>
+              )}
+            </div>
+          )}
 
           <p className="shrink-0 border-t border-line-soft px-2 pb-1 pt-2 text-[10px] leading-relaxed text-ink-faint">
             Model lists are fetched live from each provider, so deprecations

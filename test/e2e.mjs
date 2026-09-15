@@ -77,6 +77,27 @@ await page.waitForTimeout(400);
 const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 check("no horizontal overflow at 390px", overflow === 0, `${overflow}px`);
 
+// --- can this model do the one thing JARVIS depends on? ---
+//
+// A model that accepts the `tools` parameter and then never calls one passes
+// every other check and simply ignores the projector, search and memory. The
+// probe is the only thing that catches it, so it is worth testing that the
+// probe itself distinguishes the two.
+const probe = async (model) =>
+  (await fetch("http://localhost:3000/api/probe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider: "groq", model }),
+  })).json();
+
+const good = await probe("mock-fast-8b");
+check("the probe sees a model call a tool", good.ok && good.calledTool === true);
+check("and names which one", good.toolName === "get_time", good.toolName);
+check("and times the first reply", typeof good.firstByteMs === "number" && good.firstByteMs >= 0);
+
+const noTools = await probe("mock-no-tools");
+check("a model that refuses tools is reported, not crashed", noTools.ok === false && /tool/i.test(noTools.error ?? ""), (noTools.error ?? "").slice(0, 40));
+
 check("no console or page errors", errors.length === 0, errors.join(" | "));
 await browser.close();
 process.exit(errors.length ? 1 : 0);

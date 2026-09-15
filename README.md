@@ -699,6 +699,23 @@ of quota on one question, which is what "Groq keeps running out" actually is.
 Raise it with `JARVIS_GROQ_REQUEST_TOKENS` if your account has a higher limit;
 the cost of a smaller budget is that JARVIS forgets earlier turns sooner.
 
+## Will this model actually work?
+
+Open the model picker and hit **"Can this model use tools?"**. It sends one
+request that can only be answered by calling a tool, and reports whether the
+model did, plus how fast it replied.
+
+That question is the one that matters, because tool calling is what moves the
+projector, searches the web and stores a memory. Everything else degrades
+gracefully; tool calling either happens or JARVIS silently does nothing and
+looks broken.
+
+Nothing else catches the important failure. A model that *rejects* the `tools`
+parameter is detected and retried without them. A model that **accepts it and
+then never calls one** — the usual behaviour of a roleplay-tuned fine-tune —
+passes every check there is and just ignores your projector. Check before you
+rely on it, especially with a small model or an unusual fine-tune.
+
 ## Images
 
 Drop an image into the chat and JARVIS sends it to the model — if that model

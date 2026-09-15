@@ -218,6 +218,17 @@ const server = http.createServer((req, res) => {
         );
       }
 
+      // A date question is what /api/probe asks, because it is the cleanest
+      // prompt that a tool-using model must answer with a tool call rather
+      // than from memory.
+      if (parsed.tools?.length && /date|time|today/i.test(prompt) && !alreadyRanTool) {
+        return streamToolCall(
+          res,
+          { id: "call_time1", name: "get_time", args: { timezone: "UTC" } },
+          finish,
+        );
+      }
+
       if (parsed.tools?.length && /calculat|multiply|\d\s*[*+/-]\s*\d/i.test(prompt) && !alreadyRanTool) {
         return streamToolCall(
           res,
