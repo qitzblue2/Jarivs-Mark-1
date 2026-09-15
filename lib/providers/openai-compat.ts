@@ -1,5 +1,6 @@
 import { getProvider } from "./registry";
-import { ProviderError, type ChatRequest, type ModelInfo } from "./types";
+import { cachedModels } from "./quota";
+import { ProviderError, type ChatRequest, type ModelInfo, type ProviderConfig } from "./types";
 import { estimateTokens, trimToBudget, truncateMiddle } from "@/lib/tokens";
 
 /**
@@ -98,10 +99,22 @@ async function toProviderError(res: Response, label: string): Promise<ProviderEr
     );
   }
   if (res.status === 429) {
+    // Providers state the wait in seconds, or as an HTTP date. Either beats
+    // guessing, since guessing short wastes a request and guessing long
+    // sidelines a provider that was ready.
+    const header = res.headers.get("retry-after");
+    const seconds = Number(header);
+    const retryAfterMs = Number.isFinite(seconds)
+      ? seconds * 1000
+      : header
+        ? Math.max(0, Date.parse(header) - Date.now()) || undefined
+        : undefined;
+
     return new ProviderError(
       `${label} rate limit reached (free tier). ${snippet}`,
       429,
       true,
+      retryAfterMs,
     );
   }
   if (res.status >= 500) {
@@ -115,9 +128,17 @@ export async function listModels(
   providerId: string,
   key: string,
   endpoint?: string | null,
+  /** Skip the cache. For the Settings Test button, which must ask live. */
+  force = false,
 ): Promise<ModelInfo[]> {
   // No budget: listing models does not depend on context sizing.
   const p = getProvider(providerId, endpoint);
+  return cachedModels(providerId, p.baseUrl, key, () => fetchModels(p, key), force);
+}
+
+/** The uncached fetch. Only `listModels` should call this. */
+async function fetchModels(p: ProviderConfig, key: string): Promise<ModelInfo[]> {
+  const providerId = p.id;
   const guard = deadline(undefined, p.probeTimeoutMs);
 
   let res: Response;

@@ -129,12 +129,15 @@ export class ProviderError extends Error {
 
   status: number;
   retryable: boolean;
+  /** From a Retry-After header, when the provider sent one. */
+  retryAfterMs?: number;
 
-  constructor(message: string, status: number, retryable = false) {
+  constructor(message: string, status: number, retryable = false, retryAfterMs?: number) {
     super(message);
     this.name = "ProviderError";
     this.status = status;
     this.retryable = retryable;
+    this.retryAfterMs = retryAfterMs;
   }
 
   /** Prefer this over `instanceof`. */

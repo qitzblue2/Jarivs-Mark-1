@@ -496,6 +496,9 @@ function EndpointField({
         headers: {
           "x-jarvis-endpoints": JSON.stringify({ [provider.id]: url }),
           "x-jarvis-keys": JSON.stringify({ [provider.id]: apiKey }),
+          // Ask upstream for real; a cached "it worked ten minutes ago" is
+          // the one answer this button must never give.
+          "x-jarvis-refresh": "1",
         },
       });
       const data = await res.json();

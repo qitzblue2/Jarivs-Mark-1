@@ -15,6 +15,7 @@ import { ProviderError, type ContentPart, type WireMessage } from "@/lib/provide
 import { supportsVision } from "@/lib/providers/registry";
 import { attachmentsToText, MAX_IMAGES } from "@/lib/attachments";
 import type { Attachment } from "@/lib/types";
+import { markRateLimited, skipCoolingDown } from "@/lib/providers/quota";
 import { encodeEvent, type JarvisEvent } from "@/lib/stream";
 import { runAgentTurn } from "@/lib/agent";
 import { denyAll } from "@/lib/tools/fs/approval";
@@ -151,7 +152,11 @@ export async function POST(req: NextRequest) {
   // free keys are only worth having if a rate limit on one rolls over to the
   // other — and a local server is worth having because it never rate-limits
   // at all, which is why it sits at the end of this list.
-  const order = fallbackOrder(primary, keys, endpoints);
+  // A provider that rate-limited a minute ago will rate-limit again, and
+  // being refused costs a request just like being answered. Skip it — unless
+  // everything is cooling down, in which case trying is still better than
+  // refusing outright.
+  const order = skipCoolingDown(fallbackOrder(primary, keys, endpoints));
 
   // The self-hosted slot needs no key, so `order` is never empty and the
   // guidance below became unreachable — a fresh clone answered its first
@@ -248,6 +253,9 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       if (ProviderError.is(err)) {
         lastError = err;
+        // Remember a 429 so the next turn doesn't spend a request rediscovering
+        // it, honouring Retry-After when the provider sent one.
+        if (err.status === 429) markRateLimited(providerId, err.retryAfterMs);
         // Only roll over on rate limits and outages — a bad key or bad request
         // will fail the same way everywhere.
         if (!err.retryable) break;

@@ -25,6 +25,14 @@ import {
   sanitizeEndpoint,
 } from "../lib/providers/registry";
 import { listModels, streamChat } from "../lib/providers/openai-compat";
+import {
+  cachedModels,
+  clearCooldowns,
+  clearModelCache,
+  cooldownRemaining,
+  markRateLimited,
+  skipCoolingDown,
+} from "../lib/providers/quota";
 import { ProviderError } from "../lib/providers/types";
 import { readSSE, extractChunk } from "../lib/stream";
 
@@ -202,6 +210,83 @@ console.log("\n--- what one request is allowed to cost ---");
   withEnv({ JARVIS_GROQ_REQUEST_TOKENS: "1200" }, () => {
     eq("and the budget is tunable per provider", getProvider("groq").maxRequestTokens, 1200);
   });
+}
+
+console.log("\n--- not spending the free tier on nothing ---");
+{
+  clearModelCache();
+  let fetches = 0;
+  const fetcher = async () => {
+    fetches++;
+    return [{ id: "m1", provider: "x" }];
+  };
+
+  /**
+   * The bug this measures. Every page load asked every configured provider
+   * for its model list, so five providers meant five upstream requests per
+   * refresh. On OpenRouter's 50-a-day tier, ten refreshes spent the whole day
+   * before a single question was asked.
+   */
+  for (let i = 0; i < 20; i++) await cachedModels("p", "http://x/v1", "key", fetcher);
+  eq("twenty page loads cost one upstream call", fetches, 1);
+
+  // A different key can see different models, so it must not reuse the list.
+  await cachedModels("p", "http://x/v1", "OTHER-KEY", fetcher);
+  eq("a changed key refetches", fetches, 2);
+
+  // And a different endpoint is a different server entirely.
+  await cachedModels("p", "http://elsewhere/v1", "key", fetcher);
+  eq("a changed endpoint refetches", fetches, 3);
+
+  // The Test button exists to answer "is it up right now".
+  await cachedModels("p", "http://x/v1", "key", fetcher, true);
+  eq("force bypasses the cache", fetches, 4);
+
+  // A server that is switched off must not be hammered once per render.
+  clearModelCache();
+  let failures = 0;
+  const failing = async (): Promise<never> => {
+    failures++;
+    throw new Error("down");
+  };
+  for (let i = 0; i < 5; i++) {
+    await cachedModels("q", "http://down/v1", "", failing).catch(() => {});
+  }
+  eq("a failure is remembered, not retried every time", failures, 1);
+}
+
+console.log("\n--- backing off a provider that said no ---");
+{
+  clearCooldowns();
+  const chain = ["groq", "gemini", "cerebras", "local"];
+
+  eq("nothing is cooling to begin with", skipCoolingDown(chain), chain);
+
+  markRateLimited("groq");
+  eq("a rate-limited provider is skipped", skipCoolingDown(chain), ["gemini", "cerebras", "local"]);
+  eq("and reports how long it needs", cooldownRemaining("groq") > 0, true);
+  eq("while the others are unaffected", cooldownRemaining("gemini"), 0);
+
+  // Honour what the provider actually said rather than guessing.
+  clearCooldowns();
+  markRateLimited("groq", 5 * 60_000);
+  const stated = cooldownRemaining("groq");
+  eq("Retry-After is honoured", stated > 4 * 60_000 && stated <= 5 * 60_000, true);
+
+  /**
+   * A daily quota resets on the provider's clock, not ours. "Retry in 24
+   * hours" must not remove a provider from the app until tomorrow — being
+   * wrong in this direction costs exactly one wasted request.
+   */
+  clearCooldowns();
+  markRateLimited("groq", 24 * 60 * 60_000);
+  eq("an absurd Retry-After is capped", cooldownRemaining("groq") <= 15 * 60_000, true);
+
+  // Refusing to try anything is worse than trying something likely to fail.
+  clearCooldowns();
+  for (const id of chain) markRateLimited(id);
+  eq("with everything cooling, try anyway", skipCoolingDown(chain), chain);
+  clearCooldowns();
 }
 
 console.log("\n--- a URL typed into Settings ---");

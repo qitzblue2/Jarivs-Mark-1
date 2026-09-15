@@ -13,6 +13,7 @@ import {
   resolveKey,
 } from "@/lib/providers/registry";
 import { ProviderError } from "@/lib/providers/types";
+import { cooldownRemaining, stats as quotaStats } from "@/lib/providers/quota";
 import { storageDriver } from "@/lib/storage";
 import { computerAccessEnabled } from "@/lib/tools/fs/workspace";
 import { authConfigured, openNetwork, requiresAuth } from "@/lib/auth/session";
@@ -45,6 +46,10 @@ function jsonHeader(req: NextRequest, name: string): Record<string, string> {
 export async function GET(req: NextRequest) {
   const clientKeys = jsonHeader(req, "x-jarvis-keys");
   const clientEndpoints = jsonHeader(req, "x-jarvis-endpoints");
+  // The Test button in Settings asks "is it reachable right now", which a
+  // cached answer cannot give. Ordinary page loads must stay cached, or the
+  // quota goes back to being spent on refreshes.
+  const force = req.headers.get("x-jarvis-refresh") === "1";
 
   const providers = await Promise.all(
     PROVIDER_IDS.map(async (id) => {
@@ -71,6 +76,8 @@ export async function GET(req: NextRequest) {
         baseUrl: endpoint.baseUrl,
         /** The sizes that apply with no override, for the Settings hints. */
         maxOutputTokens: sizes.maxOutputTokens,
+        /** Seconds until a rate-limited provider is worth trying again. */
+        cooldownSeconds: Math.ceil(cooldownRemaining(id) / 1000),
         /** Can the browser set that URL, and has the operator pinned it? */
         customEndpoint: Boolean(config.allowCustomEndpoint),
         endpointLocked: endpoint.locked,
@@ -85,7 +92,7 @@ export async function GET(req: NextRequest) {
       if (!base.ready) return base;
 
       try {
-        const models = await listModels(id, key ?? "", clientEndpoints[id]);
+        const models = await listModels(id, key ?? "", clientEndpoints[id], force);
         // A pinned model is what will actually be used, so show it even when
         // the server lists others alongside it.
         const pinned = preferredModel(id);
@@ -108,6 +115,9 @@ export async function GET(req: NextRequest) {
       providers,
       defaultProvider: defaultProviderId(),
       storage: storageDriver(),
+      // Upstream calls avoided versus made, so the cache is verifiable rather
+      // than merely claimed.
+      modelCache: { ...quotaStats },
       security: {
         computerAccess: computerAccessEnabled(),
         authConfigured: authConfigured(),
