@@ -8,6 +8,7 @@ import { ttsEngines, getTts, kokoroEngine, QUALITY_OPTIONS, type KokoroQuality }
 import type { ProviderState } from "./ModelPicker";
 import MemoryEditor from "./MemoryEditor";
 import DevicePanel from "./DevicePanel";
+import DisplayPanel from "./DisplayPanel";
 
 export interface Settings {
   persona: string;
@@ -400,6 +401,17 @@ export default function SettingsDialog({
               a room.
             </p>
             {open && <DevicePanel />}
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-[12px] font-semibold uppercase tracking-wide text-ink-dim">
+              Room display
+            </h3>
+            <p className="text-[11px] leading-relaxed text-ink-faint">
+              A screen JARVIS can put things on — an answer easier to read than to hear, code,
+              an image. With a projector on HDMI it can switch the projector itself on and off.
+            </p>
+            {open && <DisplayPanel />}
           </section>
 
           <section>

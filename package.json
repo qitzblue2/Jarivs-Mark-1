@@ -21,7 +21,8 @@
     "start:lan": "JARVIS_OPEN_NETWORK=1 next start -H 0.0.0.0",
     "setup:device": "node scripts/setup-device.mjs",
     "test:device": "tsx test/device.test.mts",
-    "test:providers": "tsx test/providers.test.mts"
+    "test:providers": "tsx test/providers.test.mts",
+    "test:display": "node test/e2e-display.mjs"
   },
   "dependencies": {
     "@ricky0123/vad-web": "^0.0.31",

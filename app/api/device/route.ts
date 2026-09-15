@@ -62,7 +62,7 @@ function parseConfig(raw: Record<string, unknown> | undefined): Partial<DeviceCo
   if (!raw) return {};
   const config: Partial<DeviceConfig> = {};
 
-  const bool = (key: "requireWakeWord" | "halfDuplex") => {
+  const bool = (key: "requireWakeWord" | "halfDuplex" | "showOnDisplay") => {
     if (typeof raw[key] === "boolean") config[key] = raw[key];
   };
   const number = (key: "wakeThreshold" | "vadThreshold" | "speed" | "armedMs" | "historyTurns", min: number, max: number) => {
@@ -77,6 +77,7 @@ function parseConfig(raw: Record<string, unknown> | undefined): Partial<DeviceCo
 
   bool("requireWakeWord");
   bool("halfDuplex");
+  bool("showOnDisplay");
   number("wakeThreshold", 0.05, 0.99);
   number("vadThreshold", 0.05, 0.99);
   number("speed", 0.5, 2);

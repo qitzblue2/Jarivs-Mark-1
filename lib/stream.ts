@@ -24,8 +24,20 @@ export type JarvisEvent =
   | { type: "done" }
   | { type: "error"; message: string; status?: number };
 
-export function encodeEvent(event: JarvisEvent): Uint8Array {
+/**
+ * Frame any typed event as SSE.
+ *
+ * Separate from `encodeEvent` so the chat route keeps its narrow type — a
+ * malformed JarvisEvent should be a build error there — while the display
+ * stream, which carries a different union, can use the same framing without
+ * this module having to know what a display is.
+ */
+export function encodeSSE(event: { type: string }): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+export function encodeEvent(event: JarvisEvent): Uint8Array {
+  return encodeSSE(event);
 }
 
 /**

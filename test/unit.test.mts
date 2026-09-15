@@ -655,6 +655,24 @@ console.log("\n--- what every request costs before you type ---");
 
   console.log(`     tools ${toolTokens} + persona ${personaTokens} = ${toolTokens + personaTokens} per request`);
   eq("tool schemas stay under budget", toolTokens <= 680, true);
+
+  /**
+   * The display tools cost 287 tokens of schema, which is why they are only
+   * offered where a screen might exist — a laptop with no projector should
+   * not pay for a capability it cannot use on every single request.
+   */
+  const withDisplay = (() => {
+    const saved = process.env.JARVIS_DEVICE_MODE;
+    process.env.JARVIS_DEVICE_MODE = "1";
+    const n = estimateTokens(JSON.stringify(allTools().map(toWireTool)));
+    if (saved === undefined) delete process.env.JARVIS_DEVICE_MODE;
+    else process.env.JARVIS_DEVICE_MODE = saved;
+    return n;
+  })();
+
+  console.log(`     appliance adds the display tools: ${withDisplay} tokens`);
+  eq("a machine with no screen is not charged for one", withDisplay > toolTokens, true);
+  eq("and the appliance stays under its own ceiling", withDisplay <= 960, true);
   eq("the persona stays under budget", personaTokens <= 330, true);
   eq("and the two together stay under a thousand", toolTokens + personaTokens < 1000, true);
 

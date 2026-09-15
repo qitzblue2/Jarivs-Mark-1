@@ -640,6 +640,53 @@ of quota on one question, which is what "Groq keeps running out" actually is.
 Raise it with `JARVIS_GROQ_REQUEST_TOKENS` if your account has a higher limit;
 the cost of a smaller budget is that JARVIS forgets earlier turns sooner.
 
+## The room display
+
+JARVIS can put things on a screen — an answer easier to read than to hear,
+code it just wrote, an image — and with a projector on HDMI it can switch the
+projector itself on and off.
+
+The display is just a browser page. On the Pi:
+
+```bash
+chromium --kiosk http://localhost:3000/display
+```
+
+It holds one SSE connection and renders whatever arrives; when there is
+nothing, it shows a clock rather than black, because a black rectangle looks
+exactly like a broken display and someone will go and check the cable.
+
+For projector power:
+
+```bash
+sudo apt install cec-utils
+```
+
+**Then turn HDMI-CEC on in the projector's own menu.** It is off by default on
+most of them and is the single most likely reason power control appears
+broken. Manufacturers each brand it differently — Anynet+, Bravia Sync,
+SimpLink, Viera Link — but it is all CEC. Without it JARVIS falls back to
+blanking the signal with `wlr-randr` or `vcgencmd`, which leaves the projector
+itself running.
+
+Three tools come with it: `show_on_display`, `clear_display` and
+`display_power`. They are registered only when a screen might exist — device
+mode, or a display currently connected — because their schemas cost 287
+tokens on every request and a laptop with no projector should not pay that.
+
+Two rules apply to everything that reaches the wall, since the content is
+model-authored and the display is a browser in your room:
+
+- **Markdown is escaped, never rendered as HTML.** A `<script>` tag from a
+  model arrives as text.
+- **Images must be on this server or a `data:` URI.** An arbitrary URL would
+  make the wall display fetch anywhere, and unlike a tool fetch there is no
+  `net-guard` on the page to stop it.
+
+`display_power` spawns a process, so the model chooses `on` or `off` and the
+command is built from that boolean here — no model-supplied string ever
+reaches a shell, which is why it needs no approval gate.
+
 ## Security notes
 
 - Server-side keys never reach the browser; the client only learns *whether* a

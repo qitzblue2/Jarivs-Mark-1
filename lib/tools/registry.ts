@@ -5,6 +5,9 @@ import { listFilesTool, readFileTool, writeFileTool } from "./fs/files";
 import { runCommandTool } from "./fs/exec";
 import { computerAccessEnabled } from "./fs/workspace";
 import { webSearchTool } from "./web-search";
+import { clearDisplayTool, displayPowerTool, showOnDisplayTool } from "./display";
+import { displayConnected } from "@/lib/display";
+import { deviceMode } from "@/lib/voice/device/detect";
 import type { Tool } from "./types";
 
 /** Every tool JARVIS can reach. Adding one is a file plus a line here. */
@@ -51,8 +54,24 @@ const ALL: Tool[] = [
  */
 const COMPUTER: Tool[] = [listFilesTool, readFileTool, writeFileTool, runCommandTool];
 
+/**
+ * The room display.
+ *
+ * These three cost 287 tokens of schema on every single request, which is
+ * real money on a tier metered per minute — so they are offered only where a
+ * screen might actually exist: the appliance, or any install with a kiosk
+ * page currently connected. Describing a projector to a laptop that has none
+ * is a permanent tax for a capability that cannot be used.
+ */
+const DISPLAY: Tool[] = [showOnDisplayTool, clearDisplayTool, displayPowerTool];
+
+function displayAvailable(): boolean {
+  return deviceMode() || displayConnected();
+}
+
 export function allTools(): Tool[] {
-  return computerAccessEnabled() ? [...ALL, ...COMPUTER] : ALL;
+  const base = displayAvailable() ? [...ALL, ...DISPLAY] : ALL;
+  return computerAccessEnabled() ? [...base, ...COMPUTER] : base;
 }
 
 export function getTool(name: string): Tool | undefined {

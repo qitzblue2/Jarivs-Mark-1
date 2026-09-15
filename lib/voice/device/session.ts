@@ -10,6 +10,7 @@ import { PiperTts } from "./piper-tts";
 import { ask, transcribeAudio } from "./client";
 import { detectDevice } from "./detect";
 import { piperStatus } from "./piper";
+import { display, displayConnected } from "@/lib/display";
 
 /**
  * The voice loop, running on the device itself.
@@ -65,6 +66,14 @@ export interface DeviceConfig {
   armedMs: number;
   /** Turns of context kept between questions. */
   historyTurns: number;
+  /**
+   * Put each answer on the room display as well as speaking it.
+   *
+   * Off by default. A screen lighting up for "what time is it" is worse than
+   * no screen, and this is the first thing JARVIS does that is visible from
+   * across a room — so it waits to be asked for.
+   */
+  showOnDisplay: boolean;
 }
 
 export const DEFAULT_DEVICE_CONFIG: DeviceConfig = {
@@ -75,6 +84,7 @@ export const DEFAULT_DEVICE_CONFIG: DeviceConfig = {
   halfDuplex: true,
   armedMs: 12_000,
   historyTurns: 6,
+  showOnDisplay: false,
 };
 
 export interface DeviceDiagnostics {
@@ -462,6 +472,15 @@ export class DeviceVoiceSession {
 
       this.diagnostics.lastReply = reply;
       this.events.onReply?.(reply);
+
+      // The wall gets the answer too, when asked for and when anything is
+      // there to show it. Spoken replies are deliberately short — the screen
+      // is where the rest of an answer can live.
+      if (this.config.showOnDisplay && reply.trim() && displayConnected()) {
+        await display
+          .show({ kind: "markdown", body: reply, title: text.slice(0, 80) })
+          .catch((err) => this.events.onError?.(`Display failed: ${(err as Error).message}`));
+      }
       this.history.push({ role: "user", content: text }, { role: "assistant", content: reply });
       this.diagnostics.turns++;
 
