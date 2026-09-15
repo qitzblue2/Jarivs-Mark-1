@@ -1,3 +1,5 @@
+import { withoutReasoning } from "@/lib/reasoning";
+
 export interface SpeakOptions {
   voice?: string;
   rate?: number;
@@ -48,7 +50,10 @@ export interface TtsEngine {
  * sentences by Speaker, so length is no longer a problem to solve here.
  */
 export function forSpeech(markdown: string, maxChars = Infinity): string {
-  let text = markdown
+  // A thinking model's reasoning is not an answer and must never be read
+  // aloud — otherwise JARVIS narrates a page of "the user is asking about..."
+  // before saying anything useful.
+  let text = withoutReasoning(markdown)
     .replace(/```[\s\S]*?```/g, " (code shown on screen) ")
     .replace(/`([^`]+)`/g, "$1")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "")

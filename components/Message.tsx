@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, Check, Copy, Pencil, RefreshCw, X } from "lucide-react";
+import { splitReasoning } from "@/lib/reasoning";
+import { AlertTriangle, Check, ChevronRight, Copy, Pencil, RefreshCw, X } from "lucide-react";
 import Markdown from "./Markdown";
 import ToolTrace from "./ToolTrace";
 import Attachments from "./Attachments";
@@ -25,6 +26,10 @@ export default function Message({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content);
   const [copied, setCopied] = useState(false);
+
+  // Split once per render: a thinking model's reasoning must not be rendered
+  // as if it were the reply, and `forSpeech` drops it for the same reason.
+  const { reasoning, answer, thinking } = splitReasoning(message.content);
   const isUser = message.role === "user";
 
   async function copyAll() {
@@ -119,13 +124,17 @@ export default function Message({
               {message.toolRounds && message.toolRounds.length > 0 && (
                 <ToolTrace rounds={message.toolRounds} pending={isStreaming} />
               )}
+              {/* Thinking models emit their reasoning inline. Kept, because
+                  it is often the interesting part, but folded away — it is
+                  working-out, not an answer. */}
+              {reasoning && <Reasoning text={reasoning} pending={thinking && isStreaming} />}
               <Markdown
-                content={message.content}
+                content={answer}
                 onOpenInCanvas={
                   onOpenInCanvas ? (index) => onOpenInCanvas(message.id, index) : undefined
                 }
               />
-              {isStreaming && !message.content && (
+              {isStreaming && !answer && !reasoning && (
                 <span className="streaming-caret text-ink-faint">
                   {message.toolRounds?.length ? "Working" : "Thinking"}
                 </span>
@@ -174,6 +183,38 @@ export default function Message({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+
+/**
+ * A thinking model's working-out, folded away.
+ *
+ * Deleting it would be easier and worse: when a reasoning model gets
+ * something wrong, the reasoning is where you find out why. Collapsed by
+ * default because it is usually longer than the answer.
+ */
+function Reasoning({ text, pending }: { text: string; pending: boolean }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="mb-2">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1 text-[11px] text-ink-faint transition hover:text-ink-dim"
+      >
+        <ChevronRight
+          size={11}
+          className={`transition-transform ${open ? "rotate-90" : ""}`}
+        />
+        {pending ? "Thinking…" : `Thought for ${text.split(/\s+/).length} words`}
+      </button>
+      {open && (
+        <div className="mt-1 whitespace-pre-wrap border-l-2 border-line py-0.5 pl-2.5 text-[12.5px] leading-relaxed text-ink-faint">
+          {text}
+        </div>
+      )}
     </div>
   );
 }

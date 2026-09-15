@@ -15,6 +15,7 @@ import { toWireTool } from "../lib/tools/types";
 import { DEFAULT_PERSONA } from "../lib/persona";
 import { isNoise } from "../lib/voice/phrases";
 import { forSpeech } from "../lib/voice/tts/types";
+import { splitReasoning } from "../lib/reasoning";
 import { SentenceSplitter, splitSentences } from "../lib/voice/tts/sentences";
 import { Speaker } from "../lib/voice/tts/speaker";
 import { encodeWav, durationOf } from "../lib/voice/wav";
@@ -659,6 +660,43 @@ console.log("\n--- what every request costs before you type ---");
 
   // Cheap to state, and it catches a tool registered with no guidance at all.
   eq("every tool says what it is for", allTools().every((t) => t.description.length > 20), true);
+}
+
+console.log("\n--- a thinking model's reasoning ---");
+{
+  const done = splitReasoning("<think>They want the capital.</think>Paris.");
+  eq("reasoning is separated from the answer", [done.reasoning, done.answer], ["They want the capital.", "Paris."]);
+  eq("and the block is closed", done.thinking, false);
+
+  /**
+   * The case that matters, because a reply streams. Speech starts on the
+   * first complete sentence, so a half-finished think block must never be
+   * mistaken for an answer — otherwise JARVIS reads its own working-out
+   * aloud before saying anything useful.
+   */
+  const mid = splitReasoning("<think>The user is asking about");
+  eq("an unfinished block yields no answer", mid.answer, "");
+  eq("and is reported as still thinking", mid.thinking, true);
+  eq("but its text is kept", mid.reasoning, "The user is asking about");
+
+  eq("speech never reads reasoning", forSpeech("<think>hmm, let me see</think>The answer is four."), "The answer is four.");
+  eq("nor an unfinished one", forSpeech("Hello. <think>now considering"), "Hello.");
+
+  // Plain replies must pass through completely untouched.
+  eq("a normal reply is unaffected", splitReasoning("Just an answer.").answer, "Just an answer.");
+  eq("with no phantom reasoning", splitReasoning("Just an answer.").reasoning, "");
+
+  // The tag spelling varies by model family.
+  eq("<thinking> is recognised", splitReasoning("<thinking>x</thinking>y").answer, "y");
+  eq("<reasoning> is recognised", splitReasoning("<reasoning>x</reasoning>y").answer, "y");
+
+  // Several blocks, and text on both sides of them.
+  const many = splitReasoning("A<think>one</think>B<think>two</think>C");
+  eq("every block is removed", many.answer, "ABC");
+  eq("and all of the reasoning kept", many.reasoning, "one\n\ntwo");
+
+  // A model that mentions the word must not trip the parser.
+  eq("prose about thinking is left alone", splitReasoning("I think so.").answer, "I think so.");
 }
 
 console.log("\n--- room noise ---");

@@ -567,6 +567,30 @@ anything with 16 GB of system RAM and an old GPU. The sizing table under
 [Running your own model](#running-your-own-model) is the one that decides
 this, and it does not care how good the model is.
 
+#### A specific model that only one provider serves
+
+Community fine-tunes usually are not on the big per-token hosts, but they are
+often reachable through **Hugging Face Inference Providers**, which routes to
+whoever does serve them behind one OpenAI-compatible URL:
+
+```
+URL:   https://router.huggingface.co/v1
+Key:   your Hugging Face token
+Model: <org>/<model>:<provider>        e.g. …:featherless-ai
+```
+
+The `:provider` suffix is required — it tells the router where to send the
+request. `:cheapest` picks the lowest price per output token instead.
+
+**Featherless AI** can also be used directly at `https://api.featherless.ai/v1`.
+It bills a flat monthly subscription with unlimited tokens rather than per
+token, which is the shape you want if you keep meeting rate limits.
+
+**Thinking models** — Qwen3, DeepSeek-R1 distills, GLM — open a `<think>`
+block by default, and some providers pass it through inline. JARVIS folds that
+into a collapsed "Thought for N words" section and never reads it aloud, so
+they work in voice mode without narrating their own working-out.
+
 #### Other endpoints worth putting in that field
 
 **Cloudflare Workers AI** — 10,000 neurons/day free, ~80 models, no card. Its
