@@ -90,8 +90,25 @@ async function toProviderError(res: Response, label: string): Promise<ProviderEr
     /api[ _-]?key|credential|unauthenticat|permission|not found/i.test(detail);
 
   if (res.status === 401 || res.status === 403 || looksLikeAuth) {
+    /**
+     * A 403 is ambiguous in a way a 401 is not.
+     *
+     * 401 is an authentication challenge and means what it says. 403 is what
+     * proxies, school and workplace filters, and WAFs all return when they
+     * block a host — so a network that cannot reach a provider is
+     * indistinguishable from a rejected key unless the body mentions one.
+     * Observed here: a blocking proxy's 403 read as "rejected the API key",
+     * which sends you off regenerating a key that was never the problem.
+     */
+    const mentionsAuth = /api[ _-]?key|credential|unauthori[sz]|token|permission/i.test(detail);
+    const ambiguous = res.status === 403 && !mentionsAuth;
+
     return new ProviderError(
-      `${label} rejected the API key. Check it in Settings or your .env.local file.`,
+      ambiguous
+        ? `${label} refused the request (403) without saying why. Either the API key is ` +
+          `wrong, or something on your network — a school or office filter, a proxy — is ` +
+          `blocking ${label}.`
+        : `${label} rejected the API key. Check it in Settings or your .env.local file.`,
       res.status,
       // Retryable so a key that is wrong for ONE provider lets the others
       // answer. A key that is wrong everywhere still ends with a clear error.

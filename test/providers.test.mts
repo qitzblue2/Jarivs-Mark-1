@@ -87,6 +87,7 @@ const ALL_CLOUD_KEYS = {
   CEREBRAS_API_KEY: "k",
   MISTRAL_API_KEY: "k",
   OPENROUTER_API_KEY: "k",
+  ARLI_API_KEY: "k",
 };
 const NO_CLOUD_KEYS = Object.fromEntries(
   Object.keys(ALL_CLOUD_KEYS).map((k) => [k, undefined]),
@@ -123,8 +124,21 @@ console.log("\n--- fallback order ---");
     eq(
       "every configured provider is in the chain, local last",
       fallbackOrder("groq"),
-      ["groq", "gemini", "cerebras", "mistral", "openrouter", "local"],
+      ["groq", "gemini", "cerebras", "mistral", "openrouter", "arli", "local"],
     );
+
+    /**
+     * The paid slot sits behind every free one.
+     *
+     * Not an accident of ordering: the free tiers are faster and cost
+     * nothing, so they should answer normal use, and the one provider that
+     * never rate-limits should be what catches what they cannot. Reversing
+     * this would mean paying for every question while free capacity sat
+     * unused.
+     */
+    const chain = fallbackOrder("groq");
+    eq("arli sits behind the free tiers", chain.indexOf("arli") > chain.indexOf("openrouter"), true);
+    eq("but ahead of the local machine", chain.indexOf("arli") < chain.indexOf("local"), true);
     // Gemini has 40x Groq's per-minute budget and a window Cerebras can't
     // match, so it is the first place a rate-limited turn should land.
     eq("gemini is the first fallback", fallbackOrder("groq")[1], "gemini");
@@ -220,6 +234,13 @@ console.log("\n--- what one request is allowed to cost ---");
   }
 
   eq("the retired GitHub Models slot is gone", PROVIDER_IDS.includes("github"), false);
+
+  // Sized for the $10 tier, whose window is 16K.
+  const arli = getProvider("arli");
+  eq("arli fits a request and its reply inside 16K", arli.maxRequestTokens! + arli.maxOutputTokens <= 16_000, true);
+  withEnv({ JARVIS_ARLI_CONTEXT: "32000" }, () => {
+    eq("and the $15 tier's bigger window can be set", getProvider("arli").maxContextTokens, 32_000);
+  });
 
   withEnv({ JARVIS_GROQ_REQUEST_TOKENS: "1200" }, () => {
     eq("and the budget is tunable per provider", getProvider("groq").maxRequestTokens, 1200);
@@ -561,6 +582,51 @@ console.log("\n--- a provider that says 400 when it means 'bad key' ---");
       eq(`and a ${status} keeps the fallback chain moving`, (err as ProviderError).retryable, true);
     } finally {
       server.close();
+      delete process.env.JARVIS_LOCAL_BASE_URL;
+    }
+  }
+
+  /**
+   * A bare 403 is what a blocking network returns, not just a bad key.
+   * Reproduced against this sandbox's own proxy, which blocks several
+   * provider hosts and reported every one of them as a rejected key.
+   */
+  {
+    const blocked = http.createServer((_req, res) => {
+      res.writeHead(403, { "Content-Type": "text/html" });
+      res.end("<html><body>Forbidden</body></html>");
+    });
+    await new Promise<void>((r) => blocked.listen(8907, "127.0.0.1", r));
+    try {
+      process.env.JARVIS_LOCAL_BASE_URL = "http://127.0.0.1:8907/v1";
+      let err: unknown;
+      await listModels("local", "a-key").catch((e) => {
+        err = e;
+      });
+      const message = (err as Error).message;
+      eq("a bare 403 does not blame the key alone", /network|filter|proxy/i.test(message), true);
+      eq("and still mentions the key as a possibility", /API key/i.test(message), true);
+    } finally {
+      blocked.close();
+      delete process.env.JARVIS_LOCAL_BASE_URL;
+    }
+  }
+
+  {
+    const rejected = http.createServer((_req, res) => {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: { message: "Invalid API key provided." } }));
+    });
+    await new Promise<void>((r) => rejected.listen(8908, "127.0.0.1", r));
+    try {
+      process.env.JARVIS_LOCAL_BASE_URL = "http://127.0.0.1:8908/v1";
+      let err: unknown;
+      await listModels("local", "bad").catch((e) => {
+        err = e;
+      });
+      eq("but a 403 that names the key still does", /rejected the API key/.test((err as Error).message), true);
+    } finally {
+      rejected.close();
       delete process.env.JARVIS_LOCAL_BASE_URL;
     }
   }

@@ -6,8 +6,8 @@ can now use tools mid-answer instead of only talking.
 
 - **Free to run.** No credit card, no trial clock, no hosting bill.
 - **Fast.** Groq and Cerebras are the two quickest inference providers going.
-- **Provider-agnostic.** Groq, Gemini, Cerebras, Mistral and OpenRouter ship
-  in the box, plus a slot for any OpenAI-compatible URL of your own;
+- **Provider-agnostic.** Groq, Gemini, Cerebras, Mistral, OpenRouter and Arli
+  ship in the box, plus a slot for any OpenAI-compatible URL of your own;
   adding another is one entry in a config object.
 - **Tool-using.** Calls tools mid-answer and shows you exactly what it ran.
 - **Voice.** Say "Hey JARVIS" and talk to it. Wake word runs on your machine.
@@ -47,6 +47,27 @@ keep running out mid-conversation, this is the fix.
 
 > Google's free tier may use your conversations to improve its products, and
 > JARVIS remembers things about you. Worth deciding deliberately.
+
+### Arli AI — the one that never runs out
+
+Not free, but the answer to "everything keeps hitting a limit".
+
+1. Go to **https://www.arliai.com/**, pick a plan, create a key.
+
+**$10/month buys unlimited tokens and unlimited requests** on models up to
+31B at 16K context. $15 raises that to 355B and 32K — set
+`JARVIS_ARLI_CONTEXT=32000` if you take that tier.
+
+It sits **last in the fallback chain**, behind every free tier. That is
+deliberate: the free providers are faster and cost nothing, so they should
+answer normal use, and the one provider that never rate-limits is what should
+catch whatever they cannot. You reach the thing you pay for only at the moment
+you would otherwise have been stuck.
+
+> Flat-rate "unlimited" plans are sold on the bet that most subscribers
+> under-use, and the big sellers have been drifting back toward metering.
+> Treat it as a good introductory price rather than a permanent arrangement —
+> which is the argument for leaving a free key configured behind it.
 
 ### Mistral
 

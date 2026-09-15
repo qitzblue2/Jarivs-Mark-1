@@ -102,6 +102,36 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     note: "50 requests/day free; 1,000 after a one-off $10 credit.",
   },
   /**
+   * Arli AI — flat monthly rate, unlimited tokens and requests.
+   *
+   * Last among the keyed providers on purpose. The free tiers above are
+   * faster and cost nothing, so they should answer first; this one exists to
+   * catch everything they cannot, and it is the only entry here that never
+   * runs out. That ordering is the whole point — normal use stays free and
+   * fast, and the paid slot absorbs the overflow instead of you meeting a
+   * rate limit.
+   *
+   * Sized for the $10 tier: models up to 31B, 16K context. On the $15 tier
+   * set JARVIS_ARLI_CONTEXT=32000.
+   *
+   * No visionModels entry deliberately. Arli serves vision models, but
+   * claiming support for a model that turns out not to have it fails the
+   * request outright, where claiming none folds images into text and still
+   * answers. Wrong in the safe direction.
+   */
+  arli: {
+    id: "arli",
+    label: "Arli AI",
+    baseUrl: "https://api.arliai.com/v1",
+    envKey: "ARLI_API_KEY",
+    signupUrl: "https://www.arliai.com/",
+    maxContextTokens: 16_000,
+    // Leaves room for the reply inside the tier's context window.
+    maxRequestTokens: 13_000,
+    maxOutputTokens: 2048,
+    note: "Paid, ~$10/mo. Unlimited tokens and requests — never rate-limits.",
+  },
+  /**
    * Your own machine, via Ollama or llama.cpp's server.
    *
    * Last on purpose: it is the only provider that never rate-limits, and the
