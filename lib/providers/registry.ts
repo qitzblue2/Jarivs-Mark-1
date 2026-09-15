@@ -1,3 +1,4 @@
+import { parseMac } from "@/lib/wake-on-lan";
 import type { ProviderConfig } from "./types";
 
 /**
@@ -255,6 +256,22 @@ export function getProvider(
       : undefined,
     maxOutputTokens: maxOutput,
   };
+}
+
+/**
+ * The MAC of the machine behind a self-hosted endpoint, if it can be woken.
+ *
+ * Exactly the rules the URL carries, for exactly the reasons: the operator's
+ * environment outranks the browser, and only a slot the browser may point
+ * somewhere may be given a MAC by it. A wake packet is harmless compared to a
+ * URL — it can only turn a machine on — but one rule is easier to hold than
+ * two, and a cloud slot has no machine to wake regardless.
+ */
+export function resolveWakeMac(id: string, clientMac?: string | null): string | null {
+  const fromEnv = parseMac(envFor(id, "MAC"));
+  if (fromEnv) return fromEnv;
+  if (!PROVIDERS[id]?.allowCustomEndpoint) return null;
+  return parseMac(clientMac);
 }
 
 /**

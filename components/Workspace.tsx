@@ -330,6 +330,7 @@ export default function Workspace() {
             keys: settings.keys,
             endpoints: settings.endpoints ?? {},
             budgets: settings.budgets ?? {},
+            macs: settings.macs ?? {},
           }),
         });
 

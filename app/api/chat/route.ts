@@ -8,6 +8,7 @@ import {
   preferredModel,
   requiresKey,
   resolveEndpoint,
+  resolveWakeMac,
   resolveKey,
   PROVIDER_IDS,
 } from "@/lib/providers/registry";
@@ -16,6 +17,7 @@ import { supportsVision } from "@/lib/providers/registry";
 import { attachmentsToText, MAX_IMAGES } from "@/lib/attachments";
 import type { Attachment } from "@/lib/types";
 import { markRateLimited, skipCoolingDown } from "@/lib/providers/quota";
+import { wake } from "@/lib/wake-on-lan";
 import { encodeEvent, type JarvisEvent } from "@/lib/stream";
 import { runAgentTurn } from "@/lib/agent";
 import { denyAll } from "@/lib/tools/fs/approval";
@@ -47,6 +49,8 @@ interface ChatBody {
   endpoints?: Record<string, string>;
   /** Context and output sizes from Settings, for those same slots. */
   budgets?: Record<string, { context?: number; maxOutput?: number }>;
+  /** MACs of machines behind those slots, so a sleeping one can be woken. */
+  macs?: Record<string, string>;
 }
 
 function sseResponse(stream: ReadableStream<Uint8Array>): Response {
@@ -81,7 +85,7 @@ export async function POST(req: NextRequest) {
 
   const {
     messages, model, temperature, persona, useTools,
-    keys = {}, endpoints = {}, budgets = {},
+    keys = {}, endpoints = {}, budgets = {}, macs = {},
   } = body;
 
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -176,94 +180,137 @@ export async function POST(req: NextRequest) {
   if (order.length === 0) return onboarding();
 
   let lastError: ProviderError | null = null;
+  /** Set when a sleeping machine was sent a packet during this turn. */
+  let woke: { providerId: string; endpoint: string; key: string } | null = null;
 
-  for (const providerId of order) {
-    const endpoint = resolveEndpoint(providerId, endpoints[providerId]);
-    // Empty string, not null: a local server needs no key, and `fallbackOrder`
-    // has already established that this provider is usable.
-    const key = resolveKey(providerId, keys[providerId], endpoint.fromClient) ?? "";
-    if (!key && requiresKey(providerId)) continue;
-
-    const config = getProvider(providerId, endpoints[providerId], budgets[providerId]);
-    // The requested model only applies to the provider it was chosen for.
-    const useModel =
-      providerId === primary && model ? model : await firstModel(providerId, key, endpoints[providerId]);
-    if (!useModel) {
-      lastError = new ProviderError(`No usable model found on ${config.label}.`, 502, true);
-      continue;
+  /**
+   * Two passes at most.
+   *
+   * The second only happens when a machine was woken AND nothing else could
+   * answer — that is, the self-hosted slot is the only provider configured.
+   * With a cloud key present the first pass answers and this never runs.
+   */
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt === 1) {
+      if (!woke) break;
+      // Bounded to cover a resume from sleep, not a cold boot. Waiting a full
+      // minute in silence is worse than saying "ask me again shortly".
+      const up = await waitForEndpoint(woke.providerId, woke.key, woke.endpoint, 25_000);
+      if (!up) {
+        return errorStream(
+          `Woke your machine — it hasn't finished starting up. Ask again in a moment.`,
+          503,
+        );
+      }
+      lastError = null;
     }
 
-    // Vision support is per provider AND per model, so the conversation is
-    // built inside the fallback loop rather than once up front.
-    const visionOk = hasImages && supportsVision(providerId, useModel);
-    const wire: WireMessage[] = messages[0]?.role === "system"
-      ? messages.map((m) => toWire(m, visionOk))
-      : [
-          { role: "system", content: systemPrompt },
-          ...messages.map((m) => toWire(m, visionOk)),
-        ];
+    for (const providerId of order) {
+      const endpoint = resolveEndpoint(providerId, endpoints[providerId]);
+      // Empty string, not null: a local server needs no key, and `fallbackOrder`
+      // has already established that this provider is usable.
+      const key = resolveKey(providerId, keys[providerId], endpoint.fromClient) ?? "";
+      if (!key && requiresKey(providerId)) continue;
 
-    try {
-      const turn = runAgentTurn(wire, {
-        providerId,
-        key,
-        model: useModel,
-        temperature,
-        signal: req.signal,
-        useTools,
-        endpoint: endpoints[providerId],
-        budget: budgets[providerId],
-      });
-
-      // Pull the first event before responding: the agent's opening upstream
-      // call happens here, so an auth error or rate limit still lands in the
-      // catch below and can fall back to the next provider. Once we have
-      // returned a 200 stream, falling back is no longer possible.
-      const first = await turn.next();
-
-      const fellBackFrom = providerId === primary ? undefined : primary;
-
-      const stream = new ReadableStream<Uint8Array>({
-        async start(controller) {
-          const send = (event: JarvisEvent) => controller.enqueue(encodeEvent(event));
-          send({ type: "meta", provider: providerId, model: useModel, fellBackFrom });
-
-          try {
-            if (!first.done && first.value) send(first.value);
-            for await (const event of turn) send(event);
-            send({ type: "done" });
-          } catch (err) {
-            // The client aborting is normal (Stop button), not an error.
-            if ((err as Error)?.name !== "AbortError") {
-              send({ type: "error", message: (err as Error).message || "Stream failed." });
-            }
-          } finally {
-            controller.close();
-          }
-        },
-        cancel() {
-          // Deny anything still waiting, or a killed turn leaves a tool
-          // parked on a promise nobody will ever answer.
-          denyAll();
-          void turn.return(undefined);
-        },
-      });
-
-      return sseResponse(stream);
-    } catch (err) {
-      if (ProviderError.is(err)) {
-        lastError = err;
-        // Remember a 429 so the next turn doesn't spend a request rediscovering
-        // it, honouring Retry-After when the provider sent one.
-        if (err.status === 429) markRateLimited(providerId, err.retryAfterMs);
-        // Only roll over on rate limits and outages — a bad key or bad request
-        // will fail the same way everywhere.
-        if (!err.retryable) break;
+      const config = getProvider(providerId, endpoints[providerId], budgets[providerId]);
+      // The requested model only applies to the provider it was chosen for.
+      const useModel =
+        providerId === primary && model ? model : await firstModel(providerId, key, endpoints[providerId]);
+      if (!useModel) {
+        lastError = new ProviderError(`No usable model found on ${config.label}.`, 502, true);
         continue;
       }
-      if ((err as Error)?.name === "AbortError") return new Response(null, { status: 499 });
-      lastError = new ProviderError((err as Error).message || "Request failed.", 500, true);
+
+      // Vision support is per provider AND per model, so the conversation is
+      // built inside the fallback loop rather than once up front.
+      const visionOk = hasImages && supportsVision(providerId, useModel);
+      const wire: WireMessage[] = messages[0]?.role === "system"
+        ? messages.map((m) => toWire(m, visionOk))
+        : [
+            { role: "system", content: systemPrompt },
+            ...messages.map((m) => toWire(m, visionOk)),
+          ];
+
+      try {
+        const turn = runAgentTurn(wire, {
+          providerId,
+          key,
+          model: useModel,
+          temperature,
+          signal: req.signal,
+          useTools,
+          endpoint: endpoints[providerId],
+          budget: budgets[providerId],
+        });
+
+        // Pull the first event before responding: the agent's opening upstream
+        // call happens here, so an auth error or rate limit still lands in the
+        // catch below and can fall back to the next provider. Once we have
+        // returned a 200 stream, falling back is no longer possible.
+        const first = await turn.next();
+
+        const fellBackFrom = providerId === primary ? undefined : primary;
+
+        const stream = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            const send = (event: JarvisEvent) => controller.enqueue(encodeEvent(event));
+            send({ type: "meta", provider: providerId, model: useModel, fellBackFrom });
+
+            try {
+              if (!first.done && first.value) send(first.value);
+              for await (const event of turn) send(event);
+              send({ type: "done" });
+            } catch (err) {
+              // The client aborting is normal (Stop button), not an error.
+              if ((err as Error)?.name !== "AbortError") {
+                send({ type: "error", message: (err as Error).message || "Stream failed." });
+              }
+            } finally {
+              controller.close();
+            }
+          },
+          cancel() {
+            // Deny anything still waiting, or a killed turn leaves a tool
+            // parked on a promise nobody will ever answer.
+            denyAll();
+            void turn.return(undefined);
+          },
+        });
+
+        return sseResponse(stream);
+      } catch (err) {
+        if (ProviderError.is(err)) {
+          lastError = err;
+          // Remember a 429 so the next turn doesn't spend a request rediscovering
+          // it, honouring Retry-After when the provider sent one.
+          if (err.status === 429) markRateLimited(providerId, err.retryAfterMs);
+
+          /**
+           * Unreachable, and a machine we can switch on.
+           *
+           * Deliberately not awaited into the turn. A resume from sleep takes
+           * 5-15 seconds and a cold boot a minute; blocking here to fix a
+           * problem the user did not know they had would make JARVIS feel
+           * broken. The packet goes out, the loop rolls on to whatever else can
+           * answer, and by the next question the server is up.
+           */
+          if (err.status === 503 && attempt === 0) {
+            const mac = resolveWakeMac(providerId, macs[providerId]);
+            if (mac) {
+              void wake(mac).catch(() => {});
+              woke = { providerId, endpoint: endpoints[providerId] ?? "", key };
+            }
+          }
+          // Only roll over on rate limits and outages — a bad key or bad request
+          // will fail the same way everywhere.
+          if (!err.retryable) break;
+          continue;
+        }
+        if ((err as Error)?.name === "AbortError") return new Response(null, { status: 499 });
+        lastError = new ProviderError((err as Error).message || "Request failed.", 500, true);
+      }
     }
+
   }
 
   // Exhausted. With nothing configured, the only thing we had to try was a
@@ -271,6 +318,36 @@ export async function POST(req: NextRequest) {
   if (!configured) return onboarding();
 
   return errorStream(lastError?.message ?? "Every configured provider failed.", lastError?.status);
+}
+
+/**
+ * Poll a just-woken endpoint until it answers, or give up.
+ *
+ * Uses the model list as the readiness check: a machine that is powered on
+ * but whose inference server has not started yet is not ready, and answering
+ * "it's awake" then failing the request would be the worst of both.
+ */
+async function waitForEndpoint(
+  providerId: string,
+  key: string,
+  endpoint: string,
+  budgetMs: number,
+): Promise<boolean> {
+  const { listModels } = await import("@/lib/providers/openai-compat");
+  const deadline = Date.now() + budgetMs;
+
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 2000));
+    try {
+      // force: a cached failure from moments ago is exactly what we are
+      // waiting to stop being true.
+      const models = await listModels(providerId, key, endpoint, true);
+      if (models.length > 0) return true;
+    } catch {
+      /* still down; keep waiting */
+    }
+  }
+  return false;
 }
 
 /**

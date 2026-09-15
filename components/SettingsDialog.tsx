@@ -40,6 +40,11 @@ export interface Settings {
    * next to the URL that changed what they apply to.
    */
   budgets: Record<string, { context?: number; maxOutput?: number }>;
+  /**
+   * MAC addresses of the machines behind those endpoints, so a sleeping one
+   * can be woken rather than simply being unavailable.
+   */
+  macs: Record<string, string>;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -54,6 +59,7 @@ export const DEFAULT_SETTINGS: Settings = {
   keys: {},
   endpoints: {},
   budgets: {},
+  macs: {},
 };
 
 interface Props {
@@ -153,6 +159,7 @@ export default function SettingsDialog({
                   url={draft.endpoints[p.id] ?? ""}
                   apiKey={draft.keys[p.id] ?? ""}
                   budget={draft.budgets?.[p.id] ?? {}}
+                  mac={draft.macs?.[p.id] ?? ""}
                   onUrl={(value) =>
                     setDraft((d) => ({ ...d, endpoints: { ...d.endpoints, [p.id]: value } }))
                   }
@@ -164,6 +171,9 @@ export default function SettingsDialog({
                       ...d,
                       budgets: { ...d.budgets, [p.id]: { ...d.budgets?.[p.id], ...next } },
                     }))
+                  }
+                  onMac={(value) =>
+                    setDraft((d) => ({ ...d, macs: { ...d.macs, [p.id]: value } }))
                   }
                 />
               ))}
@@ -484,17 +494,21 @@ function EndpointField({
   url,
   apiKey,
   budget,
+  mac,
   onUrl,
   onKey,
   onBudget,
+  onMac,
 }: {
   provider: ProviderState;
   url: string;
   apiKey: string;
   budget: { context?: number; maxOutput?: number };
+  mac: string;
   onUrl: (value: string) => void;
   onKey: (value: string) => void;
   onBudget: (next: { context?: number; maxOutput?: number }) => void;
+  onMac: (value: string) => void;
 }) {
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
@@ -519,7 +533,28 @@ function EndpointField({
       ) as ProviderState | undefined;
 
       if (!state) setResult({ ok: false, text: "No answer from JARVIS itself." });
-      else if (state.error) setResult({ ok: false, text: state.error });
+      else if (state.error) {
+        // The obvious place to find out whether Wake-on-LAN is set up at all:
+        // the machine is unreachable and you told us how to switch it on.
+        if (mac.trim()) {
+          const woke = await fetch("/api/wake", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mac }),
+          })
+            .then((r) => r.json())
+            .catch(() => ({ sent: false, reason: "Could not send the packet." }));
+
+          setResult({
+            ok: false,
+            text: woke.sent
+              ? `${state.error} Sent a wake packet — give it 20 seconds and test again.`
+              : `${state.error} Wake failed: ${woke.reason ?? "unknown"}`,
+          });
+        } else {
+          setResult({ ok: false, text: state.error });
+        }
+      }
       else if (state.models.length === 0) {
         setResult({ ok: false, text: "Reachable, but it is serving no models." });
       } else {
@@ -602,6 +637,17 @@ function EndpointField({
           />
         </label>
       </div>
+
+      {/* A machine that can be woken doesn't have to be left running. */}
+      <input
+        type="text"
+        autoComplete="off"
+        spellCheck={false}
+        value={mac}
+        onChange={(e) => onMac(e.target.value)}
+        placeholder="MAC address — to wake this machine when it's asleep (optional)"
+        className="mt-1.5 w-full rounded-md border border-line bg-base px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none transition focus:border-arc-dim"
+      />
 
       <div className="mt-1.5 flex items-start gap-2">
         <button

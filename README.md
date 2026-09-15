@@ -567,6 +567,44 @@ anything with 16 GB of system RAM and an old GPU. The sizing table under
 [Running your own model](#running-your-own-model) is the one that decides
 this, and it does not care how good the model is.
 
+#### Letting the machine sleep
+
+A desktop running all night to answer the occasional question is a waste. Put
+its MAC address in the field under the URL and JARVIS sends a Wake-on-LAN
+packet when it finds the machine asleep.
+
+It never makes you wait. If anything else can answer — a cloud key, any
+provider — the packet goes out and your question is answered immediately by
+something that is already awake; the server is up by the time you ask again.
+Only when the self-hosted slot is your *sole* provider does it pause, and then
+for 25 seconds, which covers a resume from sleep but not a cold boot. If it
+isn't up by then it says so rather than hanging.
+
+**Wake-on-LAN must be enabled in two places on the server**, and neither is on
+by default:
+
+```bash
+# Linux — and make it stick across reboots via systemd or NetworkManager
+sudo ethtool -s eth0 wol g
+ethtool eth0 | grep Wake-on        # should show "Wake-on: g"
+
+# Windows — Device Manager → adapter → Power Management →
+# "Allow this device to wake the computer"
+powercfg /devicequery wake_armed
+```
+
+...plus the BIOS/UEFI setting, usually called **Wake on PCI-E**, **Power On by
+PCI-E** or **Resume by LAN** depending on the vendor.
+
+**It has to be wired.** Wake-on-WLAN exists on paper but needs adapter and
+driver support most desktops do not have, so the server wants an Ethernet
+cable to the router.
+
+The **Test** button in Settings sends a packet when the URL is unreachable and
+a MAC is set — which is the quickest way to find out whether all of the above
+is configured. It reports that the packet *left*, not that the machine woke:
+Wake-on-LAN has no acknowledgement, because a sleeping machine cannot reply.
+
 #### A specific model that only one provider serves
 
 Community fine-tunes usually are not on the big per-token hosts, but they are

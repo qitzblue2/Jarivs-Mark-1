@@ -10,6 +10,7 @@
  * Run: npx tsx test/providers.test.mts
  */
 import http from "node:http";
+import dgram from "node:dgram";
 import { spawn } from "node:child_process";
 import {
   anyProviderConfigured,
@@ -22,6 +23,7 @@ import {
   resolveEndpoint,
   PROVIDER_IDS,
   resolveKey,
+  resolveWakeMac,
   sanitizeEndpoint,
 } from "../lib/providers/registry";
 import { listModels, streamChat } from "../lib/providers/openai-compat";
@@ -34,10 +36,22 @@ import {
   skipCoolingDown,
 } from "../lib/providers/quota";
 import { ProviderError } from "../lib/providers/types";
+import { magicPacket, parseMac, resetWakeHistory, wake, wakeCooldown } from "../lib/wake-on-lan";
 import { readSSE, extractChunk } from "../lib/stream";
 
 let pass = 0;
 let fail = 0;
+
+const throws = (name: string, fn: () => unknown) => {
+  try {
+    fn();
+    fail++;
+    console.log(`FAIL ${name}\n     expected a throw`);
+  } catch {
+    pass++;
+    console.log(`ok   ${name}`);
+  }
+};
 
 const eq = (name: string, got: unknown, want: unknown) => {
   const ok = JSON.stringify(got) === JSON.stringify(want);
@@ -287,6 +301,107 @@ console.log("\n--- backing off a provider that said no ---");
   for (const id of chain) markRateLimited(id);
   eq("with everything cooling, try anyway", skipCoolingDown(chain), chain);
   clearCooldowns();
+}
+
+console.log("\n--- waking a machine that is asleep ---");
+{
+  resetWakeHistory();
+
+  eq("colons", parseMac("aa:bb:cc:dd:ee:ff"), "aa:bb:cc:dd:ee:ff");
+  eq("dashes become colons", parseMac("AA-BB-CC-DD-EE-FF"), "aa:bb:cc:dd:ee:ff");
+  eq("case is normalised", parseMac("A1:B2:C3:D4:E5:F6"), "a1:b2:c3:d4:e5:f6");
+  eq("mixed separators are refused", parseMac("aa:bb-cc:dd:ee:ff"), null);
+  eq("too short is refused", parseMac("aa:bb:cc:dd:ee"), null);
+  eq("non-hex is refused", parseMac("gg:bb:cc:dd:ee:ff"), null);
+  // The single most likely thing to be pasted into a MAC box by mistake.
+  eq("an IP address is refused", parseMac("192.168.1.50"), null);
+  eq("empty is refused", parseMac(""), null);
+
+  /**
+   * Asserted byte by byte because there is no other way to find out.
+   * A magic packet that is one byte wrong is not rejected by anything — the
+   * network card simply ignores it, and the only symptom is a machine that
+   * never wakes, with nothing anywhere to debug.
+   */
+  const packet = magicPacket("a1:b2:c3:d4:e5:f6");
+  eq("the packet is 102 bytes", packet.length, 102);
+  eq("it opens with six 0xFF", [...packet.subarray(0, 6)], [255, 255, 255, 255, 255, 255]);
+
+  const address = [0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6];
+  let repeatsCorrect = true;
+  for (let i = 0; i < 16; i++) {
+    const slice = [...packet.subarray(6 + i * 6, 12 + i * 6)];
+    if (JSON.stringify(slice) !== JSON.stringify(address)) repeatsCorrect = false;
+  }
+  eq("then the MAC exactly sixteen times", repeatsCorrect, true);
+  throws("a bad MAC cannot produce a packet", () => magicPacket("nope"));
+}
+
+console.log("\n--- the packet actually leaves ---");
+{
+  resetWakeHistory();
+
+  /**
+   * A real socket, a real datagram. The builder being right is worth little
+   * if the send path mangles it, and unlike a projector or a Pi there is
+   * nothing about this that needs hardware to test.
+   */
+  const socket = dgram.createSocket("udp4");
+  const received: Buffer[] = [];
+  socket.on("message", (msg) => received.push(Buffer.from(msg)));
+  await new Promise<void>((r) => socket.bind(9999, "127.0.0.1", r));
+
+  try {
+    const result = await wake("a1:b2:c3:d4:e5:f6", { broadcast: "127.0.0.1", port: 9999 });
+    eq("the send reports success", result.sent, true);
+    eq("and echoes the normalised MAC", result.mac, "a1:b2:c3:d4:e5:f6");
+
+    await new Promise((r) => setTimeout(r, 200));
+    eq("a datagram arrived", received.length, 1);
+    eq("of the right length", received[0]?.length, 102);
+    eq(
+      "and it is the packet we built",
+      received[0]?.equals(magicPacket("a1:b2:c3:d4:e5:f6")),
+      true,
+    );
+
+    // A run of failed turns must not become a burst of packets at a machine
+    // that is already busy booting.
+    const again = await wake("a1:b2:c3:d4:e5:f6", { broadcast: "127.0.0.1", port: 9999 });
+    eq("a second wake is held off", again.sent, false);
+    eq("and says why", /booting/.test(again.reason ?? ""), true);
+    eq("the cooldown reports time remaining", wakeCooldown("a1:b2:c3:d4:e5:f6") > 0, true);
+
+    // The Test button needs to send regardless.
+    const forced = await wake("a1:b2:c3:d4:e5:f6", { broadcast: "127.0.0.1", port: 9999, force: true });
+    eq("force overrides the cooldown", forced.sent, true);
+
+    const bad = await wake("not-a-mac", { broadcast: "127.0.0.1", port: 9999 });
+    eq("a bad MAC never reaches the socket", bad.sent, false);
+  } finally {
+    socket.close();
+    resetWakeHistory();
+  }
+}
+
+console.log("\n--- who may be woken ---");
+{
+  withEnv({ JARVIS_LOCAL_MAC: undefined }, () => {
+    eq("the self-hosted slot takes a MAC from Settings", resolveWakeMac("local", "a1:b2:c3:d4:e5:f6"), "a1:b2:c3:d4:e5:f6");
+    eq("normalised on the way through", resolveWakeMac("local", "A1-B2-C3-D4-E5-F6"), "a1:b2:c3:d4:e5:f6");
+    eq("junk is refused", resolveWakeMac("local", "192.168.1.50"), null);
+    eq("no MAC means no wake", resolveWakeMac("local", undefined), null);
+
+    // Same rule as the URL. A cloud provider has no machine to switch on, and
+    // one rule is easier to hold than two.
+    eq("a cloud slot cannot be given one from the browser", resolveWakeMac("groq", "a1:b2:c3:d4:e5:f6"), null);
+  });
+
+  withEnv({ JARVIS_LOCAL_MAC: "0a:0b:0c:0d:0e:0f" }, () => {
+    eq("the environment outranks Settings", resolveWakeMac("local", "a1:b2:c3:d4:e5:f6"), "0a:0b:0c:0d:0e:0f");
+    // Env is the operator speaking, so it applies wherever they set it.
+    eq("and reaches a slot Settings could not", resolveWakeMac("groq", null), null);
+  });
 }
 
 console.log("\n--- a URL typed into Settings ---");
