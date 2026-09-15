@@ -329,6 +329,7 @@ export default function Workspace() {
             useTools: settings.useTools,
             keys: settings.keys,
             endpoints: settings.endpoints ?? {},
+            budgets: settings.budgets ?? {},
           }),
         });
 

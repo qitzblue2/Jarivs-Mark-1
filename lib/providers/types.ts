@@ -102,6 +102,8 @@ export interface ChatRequest {
   tools?: unknown[];
   /** Base URL chosen in Settings, for a slot that permits one. */
   endpoint?: string;
+  /** Context and output sizes chosen in Settings, for the same slot. */
+  budget?: { context?: number; maxOutput?: number };
 }
 
 export interface ModelInfo {

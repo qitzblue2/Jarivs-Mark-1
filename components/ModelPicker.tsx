@@ -10,6 +10,7 @@ export interface ProviderState {
   signupUrl: string;
   envKey: string;
   maxContextTokens: number;
+  maxOutputTokens: number;
   hasKey: boolean;
   /** Usable right now — which for a local server means "needs no key". */
   ready: boolean;

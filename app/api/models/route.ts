@@ -4,6 +4,7 @@ import {
   PROVIDERS,
   PROVIDER_IDS,
   defaultProviderId,
+  getProvider,
   hasServerKey,
   preferredModel,
   providerReady,
@@ -49,6 +50,10 @@ export async function GET(req: NextRequest) {
     PROVIDER_IDS.map(async (id) => {
       const config = PROVIDERS[id];
       const endpoint = resolveEndpoint(id, clientEndpoints[id]);
+      // Resolved WITHOUT the browser's own budget, so the sizes below are
+      // what applies when the Settings boxes are left empty — which is
+      // exactly what a placeholder should promise.
+      const sizes = getProvider(id, clientEndpoints[id]);
       const key = resolveKey(id, clientKeys[id], endpoint.fromClient);
       const needsKey = requiresKey(id);
 
@@ -58,12 +63,14 @@ export async function GET(req: NextRequest) {
         note: config.note,
         signupUrl: config.signupUrl,
         envKey: config.envKey,
-        maxContextTokens: config.maxContextTokens,
+        maxContextTokens: sizes.maxContextTokens,
         /** Whether this provider is usable — not whether a key exists. */
         ready: providerReady(id, clientKeys[id], clientEndpoints[id]),
         needsKey,
         /** Where requests to this provider actually go. */
         baseUrl: endpoint.baseUrl,
+        /** The sizes that apply with no override, for the Settings hints. */
+        maxOutputTokens: sizes.maxOutputTokens,
         /** Can the browser set that URL, and has the operator pinned it? */
         customEndpoint: Boolean(config.allowCustomEndpoint),
         endpointLocked: endpoint.locked,

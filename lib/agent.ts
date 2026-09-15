@@ -25,6 +25,8 @@ export interface AgentOptions {
   useTools?: boolean;
   /** Base URL chosen in Settings, for a slot that permits one. */
   endpoint?: string;
+  /** Context and output sizes chosen in Settings, for the same slot. */
+  budget?: { context?: number; maxOutput?: number };
 }
 
 /**
@@ -39,7 +41,7 @@ export async function* runAgentTurn(
   history: WireMessage[],
   options: AgentOptions,
 ): AsyncGenerator<JarvisEvent> {
-  const { providerId, key, model, temperature, signal, endpoint } = options;
+  const { providerId, key, model, temperature, signal, endpoint, budget } = options;
 
   const messages = [...history];
   const tools = allTools().map(toWireTool);
@@ -58,6 +60,7 @@ export async function* runAgentTurn(
         temperature,
         signal,
         endpoint,
+        budget,
         tools: offerTools ? tools : undefined,
       });
     } catch (err) {
@@ -72,6 +75,7 @@ export async function* runAgentTurn(
           temperature,
           signal,
           endpoint,
+          budget,
         });
       } else {
         throw err;

@@ -43,6 +43,8 @@ interface ChatBody {
   keys?: Record<string, string>;
   /** Base URLs from Settings, for slots that allow one. */
   endpoints?: Record<string, string>;
+  /** Context and output sizes from Settings, for those same slots. */
+  budgets?: Record<string, { context?: number; maxOutput?: number }>;
 }
 
 function sseResponse(stream: ReadableStream<Uint8Array>): Response {
@@ -75,7 +77,10 @@ export async function POST(req: NextRequest) {
     return errorStream("Malformed request body.", 400);
   }
 
-  const { messages, model, temperature, persona, useTools, keys = {}, endpoints = {} } = body;
+  const {
+    messages, model, temperature, persona, useTools,
+    keys = {}, endpoints = {}, budgets = {},
+  } = body;
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return errorStream("No messages to send.", 400);
@@ -164,7 +169,7 @@ export async function POST(req: NextRequest) {
     const key = resolveKey(providerId, keys[providerId], endpoint.fromClient) ?? "";
     if (!key && requiresKey(providerId)) continue;
 
-    const config = getProvider(providerId, endpoints[providerId]);
+    const config = getProvider(providerId, endpoints[providerId], budgets[providerId]);
     // The requested model only applies to the provider it was chosen for.
     const useModel =
       providerId === primary && model ? model : await firstModel(providerId, key, endpoints[providerId]);
@@ -192,6 +197,7 @@ export async function POST(req: NextRequest) {
         signal: req.signal,
         useTools,
         endpoint: endpoints[providerId],
+        budget: budgets[providerId],
       });
 
       // Pull the first event before responding: the agent's opening upstream

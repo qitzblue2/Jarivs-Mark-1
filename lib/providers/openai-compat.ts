@@ -74,11 +74,27 @@ async function toProviderError(res: Response, label: string): Promise<ProviderEr
 
   const snippet = detail.slice(0, 300);
 
-  if (res.status === 401 || res.status === 403) {
+  /**
+   * Not every provider says 401 when it means "bad key".
+   *
+   * Gemini answers a missing credential with 404 "Requested entity was not
+   * found" and a malformed one with 400 — both verified against the live
+   * endpoint. Left unrecognised those fall through to the generic branch
+   * below, which is marked non-retryable, so one typo in a Gemini key would
+   * stop the whole fallback chain instead of rolling on to the next
+   * provider. The body is what distinguishes them from a real bad request.
+   */
+  const looksLikeAuth =
+    (res.status === 400 || res.status === 404) &&
+    /api[ _-]?key|credential|unauthenticat|permission|not found/i.test(detail);
+
+  if (res.status === 401 || res.status === 403 || looksLikeAuth) {
     return new ProviderError(
       `${label} rejected the API key. Check it in Settings or your .env.local file.`,
       res.status,
-      false,
+      // Retryable so a key that is wrong for ONE provider lets the others
+      // answer. A key that is wrong everywhere still ends with a clear error.
+      true,
     );
   }
   if (res.status === 429) {
@@ -100,6 +116,7 @@ export async function listModels(
   key: string,
   endpoint?: string | null,
 ): Promise<ModelInfo[]> {
+  // No budget: listing models does not depend on context sizing.
   const p = getProvider(providerId, endpoint);
   const guard = deadline(undefined, p.probeTimeoutMs);
 
@@ -143,7 +160,7 @@ export async function streamChat(
   key: string,
   req: ChatRequest,
 ): Promise<ReadableStream<Uint8Array>> {
-  const p = getProvider(providerId, req.endpoint);
+  const p = getProvider(providerId, req.endpoint, req.budget);
 
   // Fit the conversation to whichever is tighter: the model's window, or what
   // one request is allowed to cost. For Groq those differ by a factor of

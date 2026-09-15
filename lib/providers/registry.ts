@@ -22,6 +22,36 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     // and only 1,000 requests/day on the free tier.
     visionModels: ["qwen3.6", "qwen3.8", "vision", "llava", "scout", "maverick"],
   },
+  /**
+   * Google AI Studio, through its OpenAI-compatible endpoint.
+   *
+   * The reason it is here: Groq allows 6,000 tokens a minute and this allows
+   * 250,000. That is the difference between a rate limit you hit every few
+   * questions and one you will not meet. Function calling survives the
+   * compatibility layer, so the agent loop works unchanged.
+   *
+   * Placed above Cerebras in the fallback order despite Cerebras being
+   * faster: an 8K window truncates a long conversation badly, and this one
+   * does not.
+   *
+   * Free tier means Google may use the conversation to improve its products,
+   * which is worth knowing for an assistant that remembers things about you.
+   */
+  gemini: {
+    id: "gemini",
+    label: "Gemini",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    envKey: "GEMINI_API_KEY",
+    signupUrl: "https://aistudio.google.com/apikey",
+    // 1M is offered; there is no reason to ever send that much.
+    maxContextTokens: 32_000,
+    // 250K/min at the 10 req/min cap is 25,000 per request, and the reply
+    // counts toward it too — so input plus output has to fit inside that.
+    maxRequestTokens: 20_000,
+    maxOutputTokens: 4096,
+    note: "Free, no card. 250K tokens/min — by far the most headroom.",
+    visionModels: ["gemini"],
+  },
   cerebras: {
     id: "cerebras",
     label: "Cerebras",
@@ -36,17 +66,39 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     maxOutputTokens: 1024,
     note: "Free, no card. 1M tokens/day. Fastest, but 8K context.",
   },
-  github: {
-    id: "github",
-    label: "GitHub Models",
-    baseUrl: "https://models.github.ai/inference",
-    envKey: "GITHUB_MODELS_TOKEN",
-    signupUrl: "https://github.com/settings/personal-access-tokens",
-    maxContextTokens: 6000,
-    // Limited per request rather than per minute, so only the window binds.
-    maxRequestTokens: 5000,
-    maxOutputTokens: 4096,
-    note: "Free with a GitHub account (13+). Slower: ~10 req/min.",
+  mistral: {
+    id: "mistral",
+    label: "Mistral",
+    baseUrl: "https://api.mistral.ai/v1",
+    envKey: "MISTRAL_API_KEY",
+    signupUrl: "https://console.mistral.ai/api-keys",
+    maxContextTokens: 32_000,
+    // Mistral stopped publishing exact free-tier rates, so this is a
+    // deliberate guess against a ~1B token monthly cap. Tune it if you meet
+    // a 429 that this should have avoided.
+    maxRequestTokens: 16_000,
+    maxOutputTokens: 2048,
+    note: "Free, no card. Roughly 1B tokens a month.",
+  },
+  /**
+   * One key, hundreds of models, including free variants.
+   *
+   * The budget is conservative because "OpenRouter" is not one model — the
+   * window depends entirely on which you pick, and guessing high truncates
+   * nothing but costs a 400 from whichever model is smallest.
+   */
+  openrouter: {
+    id: "openrouter",
+    label: "OpenRouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    envKey: "OPENROUTER_API_KEY",
+    signupUrl: "https://openrouter.ai/keys",
+    maxContextTokens: 16_000,
+    maxRequestTokens: 12_000,
+    maxOutputTokens: 2048,
+    // One tool-using turn is up to five requests, so the free tier is ten
+    // turns a day. A way to reach a specific model, not a workhorse.
+    note: "50 requests/day free; 1,000 after a one-off $10 credit.",
   },
   /**
    * Your own machine, via Ollama or llama.cpp's server.
@@ -149,20 +201,59 @@ export function resolveEndpoint(
   return { baseUrl: fallback.replace(/\/+$/, ""), fromClient: false, locked: false };
 }
 
-export function getProvider(id: string, clientUrl?: string | null): ProviderConfig {
+/** Sizes a browser may set for a slot it is allowed to point somewhere. */
+export interface EndpointBudget {
+  context?: number;
+  maxOutput?: number;
+}
+
+/**
+ * Clamped, because these arrive from a text box.
+ *
+ * The upper bound is not about safety — it is that an enormous context makes
+ * every request enormous, which is the exact failure this whole budget system
+ * was built to stop.
+ */
+function clamp(value: number | undefined, min: number, max: number): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const rounded = Math.round(value);
+  if (rounded < min) return null;
+  return Math.min(rounded, max);
+}
+
+export function getProvider(
+  id: string,
+  clientUrl?: string | null,
+  budget?: EndpointBudget,
+): ProviderConfig {
   const p = PROVIDERS[id];
   if (!p) throw new Error(`Unknown provider: ${id}`);
+
+  // Only a slot the browser may repoint may also be resized by it. A budget
+  // is far less dangerous than a URL, but one rule is easier to hold than two.
+  const custom = p.allowCustomEndpoint ? budget : undefined;
+  const customContext = clamp(custom?.context, 512, 200_000);
+  const customOutput = clamp(custom?.maxOutput, 128, 32_000);
+
+  // The environment outranks the browser here exactly as it does for the URL.
+  const context = numberFrom(envFor(id, "CONTEXT"), customContext ?? p.maxContextTokens);
+  const maxOutput = numberFrom(envFor(id, "MAX_TOKENS"), customOutput ?? p.maxOutputTokens);
 
   return {
     ...p,
     baseUrl: resolveEndpoint(id, clientUrl).baseUrl,
-    // Context sizing is guesswork for a local server — it depends entirely on
+    // Context sizing is guesswork for a self-hosted endpoint — it depends on
     // the model and the num_ctx it was loaded with, which only you know.
-    maxContextTokens: numberFrom(envFor(id, "CONTEXT"), p.maxContextTokens),
+    maxContextTokens: context,
+    // A resized slot gets its request budget resized with it, or raising the
+    // context would do nothing: the smaller of the two always binds.
     maxRequestTokens: p.maxRequestTokens
-      ? numberFrom(envFor(id, "REQUEST_TOKENS"), p.maxRequestTokens)
+      ? numberFrom(
+          envFor(id, "REQUEST_TOKENS"),
+          customContext ? Math.max(512, Math.round(context * 0.85)) : p.maxRequestTokens,
+        )
       : undefined,
-    maxOutputTokens: numberFrom(envFor(id, "MAX_TOKENS"), p.maxOutputTokens),
+    maxOutputTokens: maxOutput,
   };
 }
 

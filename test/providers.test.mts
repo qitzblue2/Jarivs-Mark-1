@@ -19,6 +19,7 @@ import {
   providerReady,
   requiresKey,
   resolveEndpoint,
+  PROVIDER_IDS,
   resolveKey,
   sanitizeEndpoint,
 } from "../lib/providers/registry";
@@ -56,11 +57,24 @@ function withEnv(vars: Record<string, string | undefined>, run: () => void) {
   }
 }
 
-const CLOUD_KEYS = { GROQ_API_KEY: "k", CEREBRAS_API_KEY: "k", GITHUB_MODELS_TOKEN: undefined };
+/** Every keyed slot, so a test can then remove exactly one and see it drop. */
+const ALL_CLOUD_KEYS = {
+  GROQ_API_KEY: "k",
+  GEMINI_API_KEY: "k",
+  CEREBRAS_API_KEY: "k",
+  MISTRAL_API_KEY: "k",
+  OPENROUTER_API_KEY: "k",
+};
+const NO_CLOUD_KEYS = Object.fromEntries(
+  Object.keys(ALL_CLOUD_KEYS).map((k) => [k, undefined]),
+) as Record<string, undefined>;
+
+/** Two keys only, the common case: something set, something not. */
+const CLOUD_KEYS = { ...NO_CLOUD_KEYS, GROQ_API_KEY: "k", CEREBRAS_API_KEY: "k" };
 
 console.log("\n--- who is usable ---");
 {
-  withEnv({ GROQ_API_KEY: undefined, CEREBRAS_API_KEY: undefined, GITHUB_MODELS_TOKEN: undefined }, () => {
+  withEnv(NO_CLOUD_KEYS, () => {
     eq("a keyed provider with no key is not ready", providerReady("groq"), false);
     eq("a keyless provider is always ready", providerReady("local"), true);
     eq("a client-supplied key makes it ready", providerReady("groq", "byo-key"), true);
@@ -78,10 +92,22 @@ console.log("\n--- fallback order ---");
     eq("local is the backstop, never the first try", fallbackOrder("groq"), ["groq", "cerebras", "local"]);
     eq("a rate-limited groq rolls over to cerebras before local", fallbackOrder("groq")[1], "cerebras");
     eq("an explicit choice of local is honoured first", fallbackOrder("local"), ["local", "groq", "cerebras"]);
-    eq("github is dropped with no token", fallbackOrder("groq").includes("github"), false);
+    // A provider with no key is simply absent, rather than tried and failed.
+    eq("a keyless-by-omission provider is dropped", fallbackOrder("groq").includes("mistral"), false);
   });
 
-  withEnv({ GROQ_API_KEY: undefined, CEREBRAS_API_KEY: undefined, GITHUB_MODELS_TOKEN: undefined }, () => {
+  withEnv(ALL_CLOUD_KEYS, () => {
+    eq(
+      "every configured provider is in the chain, local last",
+      fallbackOrder("groq"),
+      ["groq", "gemini", "cerebras", "mistral", "openrouter", "local"],
+    );
+    // Gemini has 40x Groq's per-minute budget and a window Cerebras can't
+    // match, so it is the first place a rate-limited turn should land.
+    eq("gemini is the first fallback", fallbackOrder("groq")[1], "gemini");
+  });
+
+  withEnv(NO_CLOUD_KEYS, () => {
     // Before this change, no keys meant no providers at all and a 401.
     eq("with no keys at all, local alone still answers", fallbackOrder("groq"), ["local"]);
   });
@@ -92,7 +118,7 @@ console.log("\n--- defaults ---");
   withEnv({ ...CLOUD_KEYS, JARVIS_DEFAULT_PROVIDER: undefined }, () => {
     eq("a keyed provider is preferred over the slow local one", defaultProviderId(), "groq");
   });
-  withEnv({ GROQ_API_KEY: undefined, CEREBRAS_API_KEY: undefined, GITHUB_MODELS_TOKEN: undefined, JARVIS_DEFAULT_PROVIDER: undefined }, () => {
+  withEnv({ ...NO_CLOUD_KEYS, JARVIS_DEFAULT_PROVIDER: undefined }, () => {
     eq("but with nothing else configured, local is the default", defaultProviderId(), "local");
   });
   withEnv({ ...CLOUD_KEYS, JARVIS_DEFAULT_PROVIDER: "local" }, () => {
@@ -135,6 +161,20 @@ console.log("\n--- what one request is allowed to cost ---");
   eq("cerebras stays inside its 8K free-tier window", cerebras.maxRequestTokens! + cerebras.maxOutputTokens <= 8192, true);
 
   eq("the local server gets a budget too", getProvider("local").maxRequestTokens! > 0, true);
+
+  // The point of adding Gemini: 250,000 tokens/min against Groq's 6,000.
+  const gemini = getProvider("gemini");
+  eq("gemini's request budget dwarfs groq's", gemini.maxRequestTokens! > groq.maxRequestTokens! * 5, true);
+  eq("and still sits inside 250K/min at 10 req/min", gemini.maxRequestTokens! + gemini.maxOutputTokens <= 25_000, true);
+
+  // Every slot must declare one, or it silently inherits a context window as
+  // its per-request budget, which is the bug this whole field exists for.
+  for (const id of PROVIDER_IDS) {
+    const p = getProvider(id);
+    eq(`${id} caps its requests`, (p.maxRequestTokens ?? 0) > 0 && p.maxRequestTokens! <= p.maxContextTokens, true);
+  }
+
+  eq("the retired GitHub Models slot is gone", PROVIDER_IDS.includes("github"), false);
 
   withEnv({ JARVIS_GROQ_REQUEST_TOKENS: "1200" }, () => {
     eq("and the budget is tunable per provider", getProvider("groq").maxRequestTokens, 1200);
@@ -194,6 +234,42 @@ console.log("\n--- keys never follow a browser-chosen URL ---");
   });
 }
 
+console.log("\n--- resizing a slot you pointed somewhere ---");
+{
+  withEnv({ JARVIS_LOCAL_CONTEXT: undefined, JARVIS_LOCAL_MAX_TOKENS: undefined }, () => {
+    eq("defaults suit a local CPU", getProvider("local").maxContextTokens, 3500);
+
+    // The reason this exists: paste a hosted endpoint into that URL box and
+    // 3,500 tokens is an arbitrary handicap it never asked for.
+    const bigger = getProvider("local", null, { context: 32_000, maxOutput: 4096 });
+    eq("a bigger context can be asked for", bigger.maxContextTokens, 32_000);
+    eq("and a longer reply", bigger.maxOutputTokens, 4096);
+
+    // Raising the context alone would do nothing: the smaller of the two
+    // always binds, so the request budget has to move with it.
+    eq("the request budget follows the context", bigger.maxRequestTokens! > 3000, true);
+    eq("but still sits under it", bigger.maxRequestTokens! <= bigger.maxContextTokens, true);
+
+    // It is a text box.
+    eq("nonsense is ignored", getProvider("local", null, { context: NaN }).maxContextTokens, 3500);
+    eq("a negative is ignored", getProvider("local", null, { context: -5 }).maxContextTokens, 3500);
+    eq("a silly number is clamped", getProvider("local", null, { context: 99_999_999 }).maxContextTokens, 200_000);
+
+    /**
+     * The same rule as the URL: only a slot the browser may repoint may be
+     * resized by it. Otherwise anyone with a session could quietly raise
+     * Groq's request budget past its rate limit and bring back the 429s this
+     * whole budget system was added to stop.
+     */
+    eq("a cloud slot ignores a browser budget", getProvider("groq", null, { context: 96_000 }).maxContextTokens, 96_000);
+    eq("and keeps its own request cap", getProvider("groq", null, { context: 96_000 }).maxRequestTokens, 3500);
+  });
+
+  withEnv({ JARVIS_LOCAL_CONTEXT: "8000" }, () => {
+    eq("the environment still outranks the browser", getProvider("local", null, { context: 32_000 }).maxContextTokens, 8000);
+  });
+}
+
 /** A mock OpenAI server that authenticates nobody, like Ollama. */
 const KEYLESS_PORT = 8901;
 const keyless = spawn(process.execPath, ["test/mock-provider.mjs"], {
@@ -227,6 +303,115 @@ try {
 } finally {
   keyless.kill();
   delete process.env.JARVIS_LOCAL_BASE_URL;
+}
+
+console.log("\n--- a provider that says 400 when it means 'bad key' ---");
+{
+  /**
+   * Gemini does not answer 401. Both of these are recorded verbatim from the
+   * live endpoint: no credential gives 404, a malformed one gives 400.
+   *
+   * Unrecognised, they land in the generic non-retryable branch — so a single
+   * mistyped Gemini key would stop the fallback chain dead and no other
+   * provider would get a turn.
+   */
+  const cases = [
+    { status: 404, body: { error: { code: 404, message: "Requested entity was not found.", status: "NOT_FOUND" } } },
+    { status: 400, body: { error: { code: 400, message: "API key not valid. Please pass a valid API key.", status: "INVALID_ARGUMENT" } } },
+  ];
+
+  for (const { status, body } of cases) {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(body));
+    });
+    await new Promise<void>((r) => server.listen(8904, "127.0.0.1", r));
+
+    try {
+      process.env.JARVIS_LOCAL_BASE_URL = "http://127.0.0.1:8904/v1";
+      let err: unknown;
+      await listModels("local", "bad-key").catch((e) => {
+        err = e;
+      });
+
+      eq(`a ${status} about a key reads as a key problem`, /rejected the API key/.test((err as Error).message), true);
+      eq(`and a ${status} keeps the fallback chain moving`, (err as ProviderError).retryable, true);
+    } finally {
+      server.close();
+      delete process.env.JARVIS_LOCAL_BASE_URL;
+    }
+  }
+
+  // The distinction has to survive: a real bad request is not a key problem.
+  const server = http.createServer((_req, res) => {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: { message: "Unsupported value for 'temperature'." } }));
+  });
+  await new Promise<void>((r) => server.listen(8905, "127.0.0.1", r));
+  try {
+    process.env.JARVIS_LOCAL_BASE_URL = "http://127.0.0.1:8905/v1";
+    let err: unknown;
+    await listModels("local", "fine").catch((e) => {
+      err = e;
+    });
+    eq("a genuine bad request is not mistaken for a bad key", /rejected the API key/.test((err as Error).message), false);
+    eq("and still does not retry forever", (err as ProviderError).retryable, false);
+  } finally {
+    server.close();
+    delete process.env.JARVIS_LOCAL_BASE_URL;
+  }
+}
+
+console.log("\n--- the budget reaches the wire ---");
+{
+  /**
+   * Asserting the resolved config is not the same as asserting the request.
+   * This captures what actually left the process, because a budget that is
+   * computed correctly and then not sent is exactly as useless as no budget.
+   */
+  let seen: { max_tokens?: number; messages?: { content: string }[] } | null = null;
+
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      if (req.url?.endsWith("/chat/completions")) seen = JSON.parse(body);
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.end("data: [DONE]\n\n");
+    });
+  });
+  await new Promise<void>((r) => server.listen(8906, "127.0.0.1", r));
+
+  try {
+    process.env.JARVIS_LOCAL_BASE_URL = "http://127.0.0.1:8906/v1";
+    // Long enough that a 3,500-token budget would have to cut it.
+    const long = "word ".repeat(12_000);
+
+    await streamChat("local", "", {
+      model: "m",
+      messages: [{ role: "user", content: long }],
+    });
+    const atDefault = seen!;
+
+    await streamChat("local", "", {
+      model: "m",
+      messages: [{ role: "user", content: long }],
+      budget: { context: 40_000, maxOutput: 4096 },
+    });
+    const resized = seen!;
+
+    eq("the default reply cap is sent", atDefault.max_tokens, 1024);
+    eq("a raised reply cap is sent", resized.max_tokens, 4096);
+
+    const sentAtDefault = atDefault.messages![0].content.length;
+    const sentResized = resized.messages![0].content.length;
+    console.log(`     prompt sent: ${sentAtDefault} chars default, ${sentResized} resized`);
+    eq("the default budget truncates a long prompt", sentAtDefault < long.length, true);
+    eq("and a raised context lets more of it through", sentResized > sentAtDefault, true);
+  } finally {
+    server.close();
+    delete process.env.JARVIS_LOCAL_BASE_URL;
+  }
 }
 
 console.log("\n--- when the server isn't there ---");

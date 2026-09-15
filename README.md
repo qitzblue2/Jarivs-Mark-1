@@ -6,7 +6,8 @@ can now use tools mid-answer instead of only talking.
 
 - **Free to run.** No credit card, no trial clock, no hosting bill.
 - **Fast.** Groq and Cerebras are the two quickest inference providers going.
-- **Provider-agnostic.** Groq, Cerebras and GitHub Models ship in the box;
+- **Provider-agnostic.** Groq, Gemini, Cerebras, Mistral and OpenRouter ship
+  in the box, plus a slot for any OpenAI-compatible URL of your own;
   adding another is one entry in a config object.
 - **Tool-using.** Calls tools mid-answer and shows you exactly what it ran.
 - **Voice.** Say "Hey JARVIS" and talk to it. Wake word runs on your machine.
@@ -35,17 +36,36 @@ Free tier: 1,000,000 tokens/day, resets 00:00 UTC. Fastest tokens/sec of any
 provider, but free-tier context is capped at 8K — the app trims long chats
 automatically so you never hit an error for it.
 
-### GitHub Models — the no-18+ option
-Every provider above requires you to be 18 in their terms of service, as do
-OpenRouter and Google AI Studio. GitHub accounts are open to ages 13+, so
-GitHub Models is the one mainstream free option that isn't 18+.
+### Gemini — the most headroom by far
 
-1. Go to **https://github.com/settings/personal-access-tokens**
-2. **Generate new token** → fine-grained → enable the **Models** permission.
-3. Copy the token.
+1. Go to **https://aistudio.google.com/apikey**
+2. **Create API key.** No credit card.
 
-Free tier: ~10 requests/min, 8K in / 4K out. Slower, but genuinely free and
-tied to an account you probably already have.
+Free tier: **250,000 tokens per minute**, 250 requests/day, 1M context. Groq
+allows 6,000 tokens a minute, so this is roughly forty times the room — if you
+keep running out mid-conversation, this is the fix.
+
+> Google's free tier may use your conversations to improve its products, and
+> JARVIS remembers things about you. Worth deciding deliberately.
+
+### Mistral
+
+1. Go to **https://console.mistral.ai/api-keys**
+2. Create a key. No credit card.
+
+Free tier: roughly a billion tokens a month. Mistral no longer publishes exact
+rate limits, so JARVIS ships a conservative per-request budget for it.
+
+### On being under 18
+
+GitHub Models used to be the one mainstream free option open to 13+, which is
+why it was here. **GitHub retired it entirely on 30 July 2026** — API,
+catalog and all — so that option is gone rather than deprecated.
+
+Every remaining hosted provider above requires 18 in its terms of service.
+The path that has no age gate at all is running the model yourself: see
+[Running your own model](#running-your-own-model) below. It is slower, it is
+free forever, and nobody's terms apply to a machine you own.
 
 > **On privacy:** free tiers are generally funded by your prompts being used
 > for training. Don't put anything sensitive through them.
@@ -471,6 +491,7 @@ env var name and free-tier limits. If it speaks the OpenAI wire format (most
 do), that's the whole job. Set `requiresKey: false` for a server that
 authenticates nobody.
 
+<a id="running-your-own-model"></a>
 ### Running your own model
 
 Free tiers are fast but metered; your own hardware is slow but never runs out.
@@ -513,6 +534,31 @@ Two rules govern that field, both enforced server-side:
 
 `JARVIS_LOCAL_BASE_URL` always outranks the Settings field, so on a JARVIS
 exposed through a tunnel the endpoint can be nailed down.
+
+**Context and Max reply** sit beside the URL for the same reason. They default
+to 3,500 and 1,024 — sized for a Raspberry Pi — and a hosted endpoint pasted
+into that box deserves to be told it can use more.
+
+#### Other endpoints worth putting in that field
+
+**Cloudflare Workers AI** — 10,000 neurons/day free, ~80 models, no card. Its
+URL embeds your account id, which is why it is a recipe rather than a
+built-in slot:
+
+```
+https://api.cloudflare.com/client/v4/accounts/<account_id>/ai/v1
+```
+
+with an API token from **AI → Workers AI → Use REST API**.
+
+**DeepInfra** — not free, but `$0.06/M` tokens for an 8B means €20 lasts a
+very long time, with no idle cost and no rate limit worth planning around:
+
+```
+https://api.deepinfra.com/v1/openai
+```
+
+Raise Context and Max reply when you use either; the defaults assume a Pi.
 
 **Sizing it.** Generation speed is bound by memory bandwidth, not cores: every
 token reads the whole weight file out of RAM. So the useful number is

@@ -31,6 +31,14 @@ export interface Settings {
    * only — pointing JARVIS at a model you host is configuration, not a secret.
    */
   endpoints: Record<string, string>;
+  /**
+   * Context and output sizes for those same slots, provider id → sizes.
+   *
+   * The defaults suit a slow local CPU. Point the slot at a hosted endpoint
+   * and they silently cap something far more capable, so they are editable
+   * next to the URL that changed what they apply to.
+   */
+  budgets: Record<string, { context?: number; maxOutput?: number }>;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -44,6 +52,7 @@ export const DEFAULT_SETTINGS: Settings = {
   wakeThreshold: 0.5,
   keys: {},
   endpoints: {},
+  budgets: {},
 };
 
 interface Props {
@@ -142,11 +151,18 @@ export default function SettingsDialog({
                   provider={p}
                   url={draft.endpoints[p.id] ?? ""}
                   apiKey={draft.keys[p.id] ?? ""}
+                  budget={draft.budgets?.[p.id] ?? {}}
                   onUrl={(value) =>
                     setDraft((d) => ({ ...d, endpoints: { ...d.endpoints, [p.id]: value } }))
                   }
                   onKey={(value) =>
                     setDraft((d) => ({ ...d, keys: { ...d.keys, [p.id]: value } }))
+                  }
+                  onBudget={(next) =>
+                    setDraft((d) => ({
+                      ...d,
+                      budgets: { ...d.budgets, [p.id]: { ...d.budgets?.[p.id], ...next } },
+                    }))
                   }
                 />
               ))}
@@ -455,14 +471,18 @@ function EndpointField({
   provider,
   url,
   apiKey,
+  budget,
   onUrl,
   onKey,
+  onBudget,
 }: {
   provider: ProviderState;
   url: string;
   apiKey: string;
+  budget: { context?: number; maxOutput?: number };
   onUrl: (value: string) => void;
   onKey: (value: string) => void;
+  onBudget: (next: { context?: number; maxOutput?: number }) => void;
 }) {
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
@@ -534,6 +554,39 @@ function EndpointField({
         placeholder="API key — leave empty for a server on your own network"
         className="mt-1.5 w-full rounded-md border border-line bg-base px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none transition focus:border-arc-dim"
       />
+
+      {/* Sized for a Raspberry Pi by default. A hosted endpoint pasted above
+          deserves to be told it can use more than that. */}
+      <div className="mt-1.5 flex items-center gap-2">
+        <label className="flex flex-1 items-center gap-1.5 text-[10.5px] text-ink-faint">
+          Context
+          <input
+            type="number"
+            min={512}
+            step={500}
+            value={budget.context ?? ""}
+            onChange={(e) =>
+              onBudget({ context: e.target.value ? Number(e.target.value) : undefined })
+            }
+            placeholder={String(provider.maxContextTokens)}
+            className="w-full min-w-0 rounded-md border border-line bg-base px-2 py-1 font-mono text-[11px] text-ink outline-none transition focus:border-arc-dim"
+          />
+        </label>
+        <label className="flex flex-1 items-center gap-1.5 text-[10.5px] text-ink-faint">
+          Max reply
+          <input
+            type="number"
+            min={128}
+            step={256}
+            value={budget.maxOutput ?? ""}
+            onChange={(e) =>
+              onBudget({ maxOutput: e.target.value ? Number(e.target.value) : undefined })
+            }
+            placeholder={String(provider.maxOutputTokens)}
+            className="w-full min-w-0 rounded-md border border-line bg-base px-2 py-1 font-mono text-[11px] text-ink outline-none transition focus:border-arc-dim"
+          />
+        </label>
+      </div>
 
       <div className="mt-1.5 flex items-start gap-2">
         <button
