@@ -539,6 +539,34 @@ exposed through a tunnel the endpoint can be nailed down.
 to 3,500 and 1,024 — sized for a Raspberry Pi — and a hosted endpoint pasted
 into that box deserves to be told it can use more.
 
+#### Serving a specific model from Hugging Face
+
+Ollama only serves what it has packaged. To run an arbitrary repo — a
+community fine-tune, say — use **vLLM**, which exposes an OpenAI-compatible
+server of its own, so JARVIS needs nothing beyond the URL:
+
+```bash
+pip install vllm
+vllm serve <org>/<model> --host 0.0.0.0 --port 8000 --max-model-len 8192
+```
+
+That serves at `http://<host>:8000/v1`, which goes straight into the
+Self-hosted field. Raise Context and Max reply to match `--max-model-len`.
+
+If the repo ships **GGUF** files instead, Ollama can take it directly and you
+skip vLLM:
+
+```bash
+ollama pull hf.co/<org>/<model>:<quant-tag>
+```
+
+**Check it fits before you start.** vLLM wants the weights in VRAM: roughly
+2 GB per billion parameters at fp16, or half that at Q4/AWQ. A 27B model is
+~17 GB quantised, so it needs a 24 GB card — a rented RTX 3090 or 4090, not
+anything with 16 GB of system RAM and an old GPU. The sizing table under
+[Running your own model](#running-your-own-model) is the one that decides
+this, and it does not care how good the model is.
+
 #### Other endpoints worth putting in that field
 
 **Cloudflare Workers AI** — 10,000 neurons/day free, ~80 models, no card. Its
