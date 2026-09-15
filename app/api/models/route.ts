@@ -8,6 +8,7 @@ import {
   preferredModel,
   providerReady,
   requiresKey,
+  resolveEndpoint,
   resolveKey,
 } from "@/lib/providers/registry";
 import { ProviderError } from "@/lib/providers/types";
@@ -25,24 +26,30 @@ export const dynamic = "force-dynamic";
  * IDs in June 2026 and a baked-in list would have silently broken the app.
  *
  * Client keys arrive via the `x-jarvis-keys` header (JSON, provider id → key)
- * rather than the query string, so they stay out of server access logs.
+ * rather than the query string, so they stay out of server access logs. The
+ * self-hosted slot's URL arrives the same way.
  */
-export async function GET(req: NextRequest) {
-  let clientKeys: Record<string, string> = {};
-  const header = req.headers.get("x-jarvis-keys");
-  if (header) {
-    try {
-      const parsed = JSON.parse(header);
-      if (parsed && typeof parsed === "object") clientKeys = parsed;
-    } catch {
-      /* ignore a malformed header rather than failing the whole request */
-    }
+/** Ignore a malformed header rather than failing the whole request. */
+function jsonHeader(req: NextRequest, name: string): Record<string, string> {
+  const raw = req.headers.get(name);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
   }
+}
+
+export async function GET(req: NextRequest) {
+  const clientKeys = jsonHeader(req, "x-jarvis-keys");
+  const clientEndpoints = jsonHeader(req, "x-jarvis-endpoints");
 
   const providers = await Promise.all(
     PROVIDER_IDS.map(async (id) => {
       const config = PROVIDERS[id];
-      const key = resolveKey(id, clientKeys[id]);
+      const endpoint = resolveEndpoint(id, clientEndpoints[id]);
+      const key = resolveKey(id, clientKeys[id], endpoint.fromClient);
       const needsKey = requiresKey(id);
 
       const base = {
@@ -53,8 +60,13 @@ export async function GET(req: NextRequest) {
         envKey: config.envKey,
         maxContextTokens: config.maxContextTokens,
         /** Whether this provider is usable — not whether a key exists. */
-        ready: providerReady(id, clientKeys[id]),
+        ready: providerReady(id, clientKeys[id], clientEndpoints[id]),
         needsKey,
+        /** Where requests to this provider actually go. */
+        baseUrl: endpoint.baseUrl,
+        /** Can the browser set that URL, and has the operator pinned it? */
+        customEndpoint: Boolean(config.allowCustomEndpoint),
+        endpointLocked: endpoint.locked,
         hasKey: Boolean(key),
         keySource: hasServerKey(id) ? "server" : key ? "client" : needsKey ? null : "none",
         models: [] as string[],
@@ -66,7 +78,7 @@ export async function GET(req: NextRequest) {
       if (!base.ready) return base;
 
       try {
-        const models = await listModels(id, key ?? "");
+        const models = await listModels(id, key ?? "", clientEndpoints[id]);
         // A pinned model is what will actually be used, so show it even when
         // the server lists others alongside it.
         const pinned = preferredModel(id);

@@ -26,6 +26,11 @@ export interface Settings {
   wakeThreshold: number;
   /** Bring-your-own keys, provider id → key. Stored in this browser only. */
   keys: Record<string, string>;
+  /**
+   * Base URLs for slots that allow one, provider id → URL. Also this browser
+   * only — pointing JARVIS at a model you host is configuration, not a secret.
+   */
+  endpoints: Record<string, string>;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -38,6 +43,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ttsSpeed: 1.1,
   wakeThreshold: 0.5,
   keys: {},
+  endpoints: {},
 };
 
 interface Props {
@@ -127,23 +133,25 @@ export default function SettingsDialog({
             </p>
 
             <div className="space-y-2.5">
-              {/* A local server authenticates nobody, so it gets a line saying
-                  where it is rather than a key box that would do nothing. */}
-              {providers.filter((p) => !p.needsKey).map((p) => (
-                <div key={p.id} className="flex items-center gap-2 text-[11.5px]">
-                  <span className="font-medium text-ink">{p.label}</span>
-                  <span className="text-ink-faint">{p.note}</span>
-                  <span
-                    className={`ml-auto rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wide ${
-                      p.error ? "bg-danger/10 text-danger" : "bg-line text-ink-dim"
-                    }`}
-                  >
-                    {p.error ? "not reachable" : p.models.length > 0 ? "ready" : "no models"}
-                  </span>
-                </div>
+              {/* A slot you point somewhere yourself: the URL is the setting,
+                  and the key is optional because a server on your own network
+                  authenticates nobody while a rented one usually does. */}
+              {providers.filter((p) => p.customEndpoint).map((p) => (
+                <EndpointField
+                  key={p.id}
+                  provider={p}
+                  url={draft.endpoints[p.id] ?? ""}
+                  apiKey={draft.keys[p.id] ?? ""}
+                  onUrl={(value) =>
+                    setDraft((d) => ({ ...d, endpoints: { ...d.endpoints, [p.id]: value } }))
+                  }
+                  onKey={(value) =>
+                    setDraft((d) => ({ ...d, keys: { ...d.keys, [p.id]: value } }))
+                  }
+                />
               ))}
 
-              {providers.filter((p) => p.needsKey).map((p) => (
+              {providers.filter((p) => !p.customEndpoint).map((p) => (
                 <div key={p.id}>
                   <div className="mb-1 flex items-center gap-2">
                     <label className="text-[12px] font-medium" htmlFor={`key-${p.id}`}>
@@ -429,6 +437,119 @@ export default function SettingsDialog({
             Save
           </button>
         </footer>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The self-hosted slot: a URL, an optional key, and a way to find out now.
+ *
+ * The Test button matters more than it looks. Everything that can go wrong
+ * here is somewhere else — a machine that is asleep, a port that isn't open,
+ * `OLLAMA_HOST` still bound to localhost so nothing off-box can reach it.
+ * Without a check that answers immediately, you find out by asking JARVIS a
+ * question and waiting for a silence to explain itself.
+ */
+function EndpointField({
+  provider,
+  url,
+  apiKey,
+  onUrl,
+  onKey,
+}: {
+  provider: ProviderState;
+  url: string;
+  apiKey: string;
+  onUrl: (value: string) => void;
+  onKey: (value: string) => void;
+}) {
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // A URL typed but not yet saved should be what gets tested.
+  async function test() {
+    setTesting(true);
+    setResult(null);
+    try {
+      const res = await fetch("/api/models", {
+        headers: {
+          "x-jarvis-endpoints": JSON.stringify({ [provider.id]: url }),
+          "x-jarvis-keys": JSON.stringify({ [provider.id]: apiKey }),
+        },
+      });
+      const data = await res.json();
+      const state = (data.providers ?? []).find(
+        (p: ProviderState) => p.id === provider.id,
+      ) as ProviderState | undefined;
+
+      if (!state) setResult({ ok: false, text: "No answer from JARVIS itself." });
+      else if (state.error) setResult({ ok: false, text: state.error });
+      else if (state.models.length === 0) {
+        setResult({ ok: false, text: "Reachable, but it is serving no models." });
+      } else {
+        setResult({
+          ok: true,
+          text: `${state.models.length} model${state.models.length === 1 ? "" : "s"}: ${state.models.slice(0, 3).join(", ")}`,
+        });
+      }
+    } catch (err) {
+      setResult({ ok: false, text: (err as Error).message });
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center gap-2">
+        <label className="text-[12px] font-medium" htmlFor={`url-${provider.id}`}>
+          {provider.label}
+        </label>
+        {provider.endpointLocked && (
+          <span className="rounded bg-arc-dim/15 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-arc">
+            set via {provider.envKey.replace("_API_KEY", "_BASE_URL")}
+          </span>
+        )}
+      </div>
+
+      <input
+        id={`url-${provider.id}`}
+        type="url"
+        inputMode="url"
+        autoComplete="off"
+        spellCheck={false}
+        disabled={provider.endpointLocked}
+        value={provider.endpointLocked ? provider.baseUrl : url}
+        onChange={(e) => onUrl(e.target.value)}
+        placeholder="http://192.168.1.50:11434/v1"
+        className="w-full rounded-md border border-line bg-base px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none transition focus:border-arc-dim disabled:opacity-60"
+      />
+
+      <input
+        type="password"
+        autoComplete="off"
+        value={apiKey}
+        onChange={(e) => onKey(e.target.value)}
+        placeholder="API key — leave empty for a server on your own network"
+        className="mt-1.5 w-full rounded-md border border-line bg-base px-2.5 py-1.5 font-mono text-[12px] text-ink outline-none transition focus:border-arc-dim"
+      />
+
+      <div className="mt-1.5 flex items-start gap-2">
+        <button
+          onClick={test}
+          disabled={testing || (!url && !provider.endpointLocked)}
+          className="shrink-0 rounded-md border border-line px-2 py-0.5 text-[11px] text-ink-dim transition hover:border-arc-dim/50 hover:text-arc disabled:opacity-40"
+        >
+          {testing ? "Testing…" : "Test"}
+        </button>
+        <p
+          className={`text-[10.5px] leading-relaxed ${
+            result ? (result.ok ? "text-arc" : "text-warn") : "text-ink-faint"
+          }`}
+        >
+          {result ? result.text : provider.note}
+        </p>
       </div>
     </div>
   );

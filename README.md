@@ -490,14 +490,29 @@ OLLAMA_HOST=0.0.0.0 OLLAMA_KEEP_ALIVE=-1 ollama serve
 `OLLAMA_KEEP_ALIVE=-1` stops the model being unloaded after five idle minutes,
 which otherwise costs 10-20 seconds on the first question after a gap.
 
-Then, in `.env.local`:
+Then point JARVIS at it. Either **Settings → API keys → Self-hosted**, which
+takes any OpenAI-compatible URL and has a Test button that tells you
+immediately whether the machine is reachable — or, to pin it so the browser
+cannot change it:
 
 ```bash
 JARVIS_LOCAL_BASE_URL=http://192.168.1.50:11434/v1
 JARVIS_LOCAL_MODEL=qwen3:4b
 ```
 
-There is no API key, because there is nobody to authenticate.
+The key field beside it is optional: a server on your own network
+authenticates nobody, while a host you rent usually issues a key.
+
+Two rules govern that field, both enforced server-side:
+
+- **Only this slot can be repointed from the browser.** The cloud providers
+  cannot, or anyone with a session could aim the Groq slot at a server they
+  control and read the key out of the forwarded request.
+- **A browser-chosen URL never receives the server's key** — only a key typed
+  alongside it. Same reason.
+
+`JARVIS_LOCAL_BASE_URL` always outranks the Settings field, so on a JARVIS
+exposed through a tunnel the endpoint can be nailed down.
 
 **Sizing it.** Generation speed is bound by memory bandwidth, not cores: every
 token reads the whole weight file out of RAM. So the useful number is

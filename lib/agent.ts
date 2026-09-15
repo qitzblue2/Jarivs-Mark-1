@@ -23,6 +23,8 @@ export interface AgentOptions {
   signal?: AbortSignal;
   /** Set false to run a plain completion with no tools at all. */
   useTools?: boolean;
+  /** Base URL chosen in Settings, for a slot that permits one. */
+  endpoint?: string;
 }
 
 /**
@@ -37,7 +39,7 @@ export async function* runAgentTurn(
   history: WireMessage[],
   options: AgentOptions,
 ): AsyncGenerator<JarvisEvent> {
-  const { providerId, key, model, temperature, signal } = options;
+  const { providerId, key, model, temperature, signal, endpoint } = options;
 
   const messages = [...history];
   const tools = allTools().map(toWireTool);
@@ -55,6 +57,7 @@ export async function* runAgentTurn(
         model,
         temperature,
         signal,
+        endpoint,
         tools: offerTools ? tools : undefined,
       });
     } catch (err) {
@@ -68,6 +71,7 @@ export async function* runAgentTurn(
           model,
           temperature,
           signal,
+          endpoint,
         });
       } else {
         throw err;

@@ -92,10 +92,16 @@ export default function Workspace() {
   }, []);
 
   /** Ask the server which providers are usable and what models they serve. */
-  const loadProviders = useCallback(async (keys: Record<string, string>) => {
+  const loadProviders = useCallback(async (
+    keys: Record<string, string>,
+    endpoints: Record<string, string>,
+  ) => {
     try {
       const res = await fetch("/api/models", {
-        headers: { "x-jarvis-keys": JSON.stringify(keys) },
+        headers: {
+          "x-jarvis-keys": JSON.stringify(keys),
+          "x-jarvis-endpoints": JSON.stringify(endpoints),
+        },
       });
       const data = await res.json();
       const list: ProviderState[] = data.providers ?? [];
@@ -142,8 +148,8 @@ export default function Workspace() {
   }, []);
 
   useEffect(() => {
-    void loadProviders(settings.keys);
-  }, [loadProviders, settings.keys]);
+    void loadProviders(settings.keys, settings.endpoints ?? {});
+  }, [loadProviders, settings.keys, settings.endpoints]);
 
   const refreshChats = useCallback(async () => {
     try {
@@ -322,6 +328,7 @@ export default function Workspace() {
             persona: settings.persona,
             useTools: settings.useTools,
             keys: settings.keys,
+            endpoints: settings.endpoints ?? {},
           }),
         });
 

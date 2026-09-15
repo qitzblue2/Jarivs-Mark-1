@@ -14,6 +14,12 @@ export interface ProviderState {
   /** Usable right now — which for a local server means "needs no key". */
   ready: boolean;
   needsKey: boolean;
+  /** Where this provider's requests actually go. */
+  baseUrl: string;
+  /** Can the browser point this slot somewhere else? */
+  customEndpoint: boolean;
+  /** The operator pinned the URL in the environment; Settings can't move it. */
+  endpointLocked: boolean;
   keySource: "server" | "client" | "none" | null;
   models: string[];
   error: string | null;
@@ -114,7 +120,7 @@ export default function ModelPicker({
                 <p className="px-2 pb-1.5 text-[11px] text-ink-faint">
                   {p.needsKey
                     ? "No chat models returned."
-                    : "Reachable, but no models pulled yet. Try `ollama pull qwen3:4b`."}
+                    : "Reachable, but serving no models yet."}
                 </p>
               ) : (
                 <ul>

@@ -95,8 +95,12 @@ async function toProviderError(res: Response, label: string): Promise<ProviderEr
 }
 
 /** Live model list. Never hardcoded — provider lineups change often. */
-export async function listModels(providerId: string, key: string): Promise<ModelInfo[]> {
-  const p = getProvider(providerId);
+export async function listModels(
+  providerId: string,
+  key: string,
+  endpoint?: string | null,
+): Promise<ModelInfo[]> {
+  const p = getProvider(providerId, endpoint);
   const guard = deadline(undefined, p.probeTimeoutMs);
 
   let res: Response;
@@ -139,7 +143,7 @@ export async function streamChat(
   key: string,
   req: ChatRequest,
 ): Promise<ReadableStream<Uint8Array>> {
-  const p = getProvider(providerId);
+  const p = getProvider(providerId, req.endpoint);
 
   // Fit the conversation to whichever is tighter: the model's window, or what
   // one request is allowed to cost. For Groq those differ by a factor of

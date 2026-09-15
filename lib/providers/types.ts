@@ -15,6 +15,14 @@ export interface ProviderConfig {
    * from the fallback order despite being perfectly reachable.
    */
   requiresKey?: boolean;
+  /**
+   * May the browser point this slot at a URL of its own choosing?
+   *
+   * True only for the self-hosted slot. Allowing it everywhere would let
+   * anyone with a session repoint the Groq slot at a server they control and
+   * read the operator's API key straight out of the forwarded request.
+   */
+  allowCustomEndpoint?: boolean;
   /** Where to get a free key, surfaced in the UI when the key is missing. */
   signupUrl: string;
   /**
@@ -92,6 +100,8 @@ export interface ChatRequest {
   signal?: AbortSignal;
   /** OpenAI-shaped tool definitions. Omitted entirely when empty. */
   tools?: unknown[];
+  /** Base URL chosen in Settings, for a slot that permits one. */
+  endpoint?: string;
 }
 
 export interface ModelInfo {

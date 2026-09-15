@@ -6,6 +6,7 @@ import {
   getProvider,
   preferredModel,
   requiresKey,
+  resolveEndpoint,
   resolveKey,
   PROVIDER_IDS,
 } from "@/lib/providers/registry";
@@ -40,6 +41,8 @@ interface ChatBody {
   useTools?: boolean;
   /** Bring-your-own keys from Settings, keyed by provider id. */
   keys?: Record<string, string>;
+  /** Base URLs from Settings, for slots that allow one. */
+  endpoints?: Record<string, string>;
 }
 
 function sseResponse(stream: ReadableStream<Uint8Array>): Response {
@@ -72,7 +75,7 @@ export async function POST(req: NextRequest) {
     return errorStream("Malformed request body.", 400);
   }
 
-  const { messages, model, temperature, persona, useTools, keys = {} } = body;
+  const { messages, model, temperature, persona, useTools, keys = {}, endpoints = {} } = body;
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return errorStream("No messages to send.", 400);
@@ -142,7 +145,7 @@ export async function POST(req: NextRequest) {
   // free keys are only worth having if a rate limit on one rolls over to the
   // other — and a local server is worth having because it never rate-limits
   // at all, which is why it sits at the end of this list.
-  const order = fallbackOrder(primary, keys);
+  const order = fallbackOrder(primary, keys, endpoints);
 
   if (order.length === 0) {
     const p = getProvider(primary);
@@ -155,14 +158,16 @@ export async function POST(req: NextRequest) {
   let lastError: ProviderError | null = null;
 
   for (const providerId of order) {
+    const endpoint = resolveEndpoint(providerId, endpoints[providerId]);
     // Empty string, not null: a local server needs no key, and `fallbackOrder`
     // has already established that this provider is usable.
-    const key = resolveKey(providerId, keys[providerId]) ?? "";
+    const key = resolveKey(providerId, keys[providerId], endpoint.fromClient) ?? "";
     if (!key && requiresKey(providerId)) continue;
 
-    const config = getProvider(providerId);
+    const config = getProvider(providerId, endpoints[providerId]);
     // The requested model only applies to the provider it was chosen for.
-    const useModel = providerId === primary && model ? model : await firstModel(providerId, key);
+    const useModel =
+      providerId === primary && model ? model : await firstModel(providerId, key, endpoints[providerId]);
     if (!useModel) {
       lastError = new ProviderError(`No usable model found on ${config.label}.`, 502, true);
       continue;
@@ -186,6 +191,7 @@ export async function POST(req: NextRequest) {
         temperature,
         signal: req.signal,
         useTools,
+        endpoint: endpoints[providerId],
       });
 
       // Pull the first event before responding: the agent's opening upstream
@@ -249,13 +255,17 @@ export async function POST(req: NextRequest) {
  * fine for a cloud provider serving one lineup, which is why pinning exists
  * for the local server serving whatever you happen to have pulled.
  */
-async function firstModel(providerId: string, key: string): Promise<string | null> {
+async function firstModel(
+  providerId: string,
+  key: string,
+  endpoint?: string,
+): Promise<string | null> {
   const pinned = preferredModel(providerId);
   if (pinned) return pinned;
 
   const { listModels } = await import("@/lib/providers/openai-compat");
   try {
-    const models = await listModels(providerId, key);
+    const models = await listModels(providerId, key, endpoint);
     return models[0]?.id ?? null;
   } catch {
     return null;

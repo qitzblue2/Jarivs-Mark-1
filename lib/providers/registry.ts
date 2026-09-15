@@ -60,10 +60,11 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
    */
   local: {
     id: "local",
-    label: "Local",
+    label: "Self-hosted",
     baseUrl: "http://127.0.0.1:11434/v1",
     envKey: "JARVIS_LOCAL_API_KEY",
     requiresKey: false,
+    allowCustomEndpoint: true,
     signupUrl: "https://ollama.com/download",
     maxContextTokens: 3500,
     // No quota to respect, but prefill on a CPU costs real seconds per
@@ -74,7 +75,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     // Generous: a cold Ollama loads the weights from disk before it can even
     // start, and prefill on a CPU is slow the first time through a prompt.
     firstByteTimeoutMs: 90_000,
-    note: "Your own hardware. Never runs out, but far slower than the cloud.",
+    note: "Any OpenAI-compatible URL — Ollama at home, or a host you rent.",
   },
 };
 
@@ -96,13 +97,65 @@ function numberFrom(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-export function getProvider(id: string): ProviderConfig {
+/**
+ * Accept a URL typed into Settings, or reject it.
+ *
+ * Deliberately strict about two things. Only http and https, because every
+ * other scheme reaching a server-side fetch is someone probing rather than
+ * configuring. And no embedded `user:pass@`, which browsers strip from
+ * display but fetch still sends — a credential hidden in a URL is not a
+ * credential anyone meant to store in localStorage.
+ */
+export function sanitizeEndpoint(url: string | null | undefined): string | null {
+  const trimmed = (url ?? "").trim();
+  if (!trimmed) return null;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return null;
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  if (parsed.username || parsed.password) return null;
+  if (!parsed.hostname) return null;
+
+  return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, "");
+}
+
+/**
+ * Where a provider's requests actually go, and who decided.
+ *
+ * The operator's environment always wins over the browser. That ordering is
+ * the safety property: on a JARVIS reachable through a tunnel, a pinned
+ * endpoint cannot be moved by whoever holds the password.
+ */
+export function resolveEndpoint(
+  id: string,
+  clientUrl?: string | null,
+): { baseUrl: string; fromClient: boolean; locked: boolean } {
+  const p = PROVIDERS[id];
+  const fallback = p?.baseUrl ?? "";
+
+  const fromEnv = envFor(id, "BASE_URL");
+  if (fromEnv) return { baseUrl: fromEnv.replace(/\/+$/, ""), fromClient: false, locked: true };
+
+  if (p?.allowCustomEndpoint) {
+    const custom = sanitizeEndpoint(clientUrl);
+    if (custom) return { baseUrl: custom, fromClient: true, locked: false };
+  }
+
+  return { baseUrl: fallback.replace(/\/+$/, ""), fromClient: false, locked: false };
+}
+
+export function getProvider(id: string, clientUrl?: string | null): ProviderConfig {
   const p = PROVIDERS[id];
   if (!p) throw new Error(`Unknown provider: ${id}`);
 
   return {
     ...p,
-    baseUrl: (envFor(id, "BASE_URL") || p.baseUrl).replace(/\/+$/, ""),
+    baseUrl: resolveEndpoint(id, clientUrl).baseUrl,
     // Context sizing is guesswork for a local server — it depends entirely on
     // the model and the num_ctx it was loaded with, which only you know.
     maxContextTokens: numberFrom(envFor(id, "CONTEXT"), p.maxContextTokens),
@@ -165,10 +218,14 @@ export function requiresKey(id: string): boolean {
  * switched off still counts as ready here and fails later with a message that
  * says so.
  */
-export function providerReady(id: string, clientKey?: string | null): boolean {
+export function providerReady(
+  id: string,
+  clientKey?: string | null,
+  clientEndpoint?: string | null,
+): boolean {
   if (!PROVIDERS[id]) return false;
   if (!requiresKey(id)) return true;
-  return resolveKey(id, clientKey) !== null;
+  return resolveKey(id, clientKey, resolveEndpoint(id, clientEndpoint).fromClient) !== null;
 }
 
 /**
@@ -176,9 +233,19 @@ export function providerReady(id: string, clientKey?: string | null): boolean {
  * client-supplied key (Settings → bring your own key) is the fallback so a
  * deployed instance is usable without baking secrets into it.
  */
-export function resolveKey(id: string, clientKey?: string | null): string | null {
+export function resolveKey(
+  id: string,
+  clientKey?: string | null,
+  endpointFromClient = false,
+): string | null {
   const p = PROVIDERS[id];
   if (!p) return null;
+
+  // A browser-chosen endpoint never receives the server's key. Without this,
+  // pointing a slot at your own server and reading the Authorization header
+  // off the request is a one-step key exfiltration.
+  if (endpointFromClient) return clientKey || null;
+
   return process.env[p.envKey] || clientKey || null;
 }
 
@@ -195,9 +262,15 @@ export function resolveKey(id: string, clientKey?: string | null): string | null
  * above, which is invisible, load-bearing, and one reformat away from
  * silently reversing.
  */
-export function fallbackOrder(primary: string, clientKeys: Record<string, string> = {}): string[] {
+export function fallbackOrder(
+  primary: string,
+  clientKeys: Record<string, string> = {},
+  clientEndpoints: Record<string, string> = {},
+): string[] {
   const rest = PROVIDER_IDS.filter((id) => id !== primary).sort(
     (a, b) => Number(!requiresKey(a)) - Number(!requiresKey(b)),
   );
-  return [primary, ...rest].filter((id) => providerReady(id, clientKeys[id]));
+  return [primary, ...rest].filter((id) =>
+    providerReady(id, clientKeys[id], clientEndpoints[id]),
+  );
 }

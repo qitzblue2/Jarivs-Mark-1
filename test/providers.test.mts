@@ -18,6 +18,9 @@ import {
   preferredModel,
   providerReady,
   requiresKey,
+  resolveEndpoint,
+  resolveKey,
+  sanitizeEndpoint,
 } from "../lib/providers/registry";
 import { listModels, streamChat } from "../lib/providers/openai-compat";
 import { ProviderError } from "../lib/providers/types";
@@ -135,6 +138,59 @@ console.log("\n--- what one request is allowed to cost ---");
 
   withEnv({ JARVIS_GROQ_REQUEST_TOKENS: "1200" }, () => {
     eq("and the budget is tunable per provider", getProvider("groq").maxRequestTokens, 1200);
+  });
+}
+
+console.log("\n--- a URL typed into Settings ---");
+{
+  eq("a plain host and port", sanitizeEndpoint("http://192.168.1.50:11434/v1"), "http://192.168.1.50:11434/v1");
+  eq("trailing slashes trimmed", sanitizeEndpoint("https://api.example.com/v1///"), "https://api.example.com/v1");
+  eq("whitespace trimmed", sanitizeEndpoint("  https://api.example.com/v1  "), "https://api.example.com/v1");
+  eq("empty is nothing", sanitizeEndpoint(""), null);
+  eq("undefined is nothing", sanitizeEndpoint(undefined), null);
+  eq("not a URL at all", sanitizeEndpoint("not a url"), null);
+  eq("a bare hostname is not a URL", sanitizeEndpoint("192.168.1.50:11434"), null);
+
+  // Anything but http(s) reaching a server-side fetch is probing, not config.
+  eq("file:// is refused", sanitizeEndpoint("file:///etc/passwd"), null);
+  eq("data: is refused", sanitizeEndpoint("data:text/plain,hi"), null);
+
+  // Browsers hide these; fetch still sends them.
+  eq("a credential smuggled into the URL is refused", sanitizeEndpoint("http://user:pass@example.com/v1"), null);
+  eq("a username alone is refused", sanitizeEndpoint("http://admin@example.com/v1"), null);
+}
+
+console.log("\n--- who is allowed to move an endpoint ---");
+{
+  withEnv({ JARVIS_LOCAL_BASE_URL: undefined }, () => {
+    const moved = resolveEndpoint("local", "http://10.0.0.9:8000/v1");
+    eq("the self-hosted slot follows Settings", moved.baseUrl, "http://10.0.0.9:8000/v1");
+    eq("and knows the browser chose it", moved.fromClient, true);
+
+    /**
+     * The one that matters. If a browser could repoint the Groq slot, anyone
+     * with a session could aim it at a server they control and read the
+     * operator's API key straight out of the Authorization header.
+     */
+    const groq = resolveEndpoint("groq", "http://evil.example.com/v1");
+    eq("a keyed cloud slot cannot be repointed from the browser", groq.baseUrl, "https://api.groq.com/openai/v1");
+    eq("and does not report a client origin", groq.fromClient, false);
+  });
+
+  withEnv({ JARVIS_LOCAL_BASE_URL: "http://pinned.local:11434/v1" }, () => {
+    const pinned = resolveEndpoint("local", "http://10.0.0.9:8000/v1");
+    eq("an operator-pinned URL outranks Settings", pinned.baseUrl, "http://pinned.local:11434/v1");
+    eq("and is reported as locked", pinned.locked, true);
+  });
+}
+
+console.log("\n--- keys never follow a browser-chosen URL ---");
+{
+  withEnv({ JARVIS_LOCAL_API_KEY: "server-secret" }, () => {
+    // Same slot, same server-side key, two different origins for the URL.
+    eq("an operator URL uses the operator's key", resolveKey("local", undefined, false), "server-secret");
+    eq("a browser URL never sees it", resolveKey("local", undefined, true), null);
+    eq("only the key typed alongside it is sent", resolveKey("local", "typed-in-settings", true), "typed-in-settings");
   });
 }
 
