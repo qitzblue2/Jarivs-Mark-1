@@ -6,9 +6,10 @@ can now use tools mid-answer instead of only talking.
 
 - **Free to run.** No credit card, no trial clock, no hosting bill.
 - **Fast.** Groq and Cerebras are the two quickest inference providers going.
-- **Provider-agnostic.** Groq, Gemini, Cerebras, Mistral, OpenRouter, Arli and
-  Awan ship in the box, plus a slot for any OpenAI-compatible URL of your own;
-  adding another is one entry in a config object.
+- **Provider-agnostic.** Groq, Gemini, Cerebras, Mistral, OpenRouter, NanoGPT,
+  Featherless, Arli and Awan ship in the box, plus a slot for any
+  OpenAI-compatible URL of your own; adding another is one entry in a config
+  object.
 - **Tool-using.** Calls tools mid-answer and shows you exactly what it ran.
 - **Voice.** Say "Hey JARVIS" and talk to it. Wake word runs on your machine.
 - **Yours.** Chats are plain JSON files on your disk. Nothing to sign into.
@@ -48,6 +49,47 @@ keep running out mid-conversation, this is the fix.
 > Google's free tier may use your conversations to improve its products, and
 > JARVIS remembers things about you. Worth deciding deliberately.
 
+### NanoGPT — the cheapest way off the free tiers
+
+**$8/month**, and the one to reach for first if the free tiers keep running
+out. It is cheaper than Arli below and carries far more: **200+ open models** —
+every DeepSeek, Qwen and Kimi K2 release, plus uncensored and roleplay
+fine-tunes — and **100 images a day** on top.
+
+1. Go to **https://nano-gpt.com/**, take the subscription, create a key.
+2. Put it in `.env.local` as `NANOGPT_API_KEY`.
+
+Its limits are **60 requests a minute** and **60 million input tokens a week**.
+Both are about how *often* you ask. That is the distinction that matters:
+Groq's 6,000 tokens a minute is spent by how *long* you have been talking, so
+it tightens as a conversation grows and fails you mid-thought. You cannot
+speak sixty times a minute, and at JARVIS' default budget the weekly cap is
+around 500 tool-using turns. If you somehow meet it, set
+`JARVIS_NANOGPT_REQUEST_TOKENS=12000` rather than paying for more.
+
+> JARVIS points this slot at `/api/subscription/v1`, not `/api/v1`. The second
+> one bills per token against deposited credit — same models, same API, but
+> you would be paying twice.
+
+### Featherless — when you want all 22,000
+
+**$25/month** for the entire Hugging Face open-weight catalogue behind one
+key: roughly 22,000 models, no size cap, 32K context, four concurrent. Also
+unlimited tokens and requests.
+
+Worth it for one reason only — the breadth. If NanoGPT already serves what you
+want, this is three times the price for models you will not use.
+
+1. Go to **https://featherless.ai/** and take the **$25 Chat** plan.
+
+> The **$50 "Developer"** plan is not a bigger version of this. It is $50 of
+> credits billed per token — the metered arrangement these slots exist to
+> escape. Several comparison sites also still list a $10 tier; it is gone.
+
+The picker lists 400 models, not 22,000 — past a few hundred rows it stops
+being something you can read. For anything else, type its full id into the
+picker's filter box and choose **"use it anyway"**.
+
 ### Arli AI — the one that never runs out
 
 Not free, but the answer to "everything keeps hitting a limit".
@@ -58,11 +100,13 @@ Not free, but the answer to "everything keeps hitting a limit".
 31B at 16K context. $15 raises that to 355B and 32K — set
 `JARVIS_ARLI_CONTEXT=32000` if you take that tier.
 
-It sits **last in the fallback chain**, behind every free tier. That is
-deliberate: the free providers are faster and cost nothing, so they should
-answer normal use, and the one provider that never rate-limits is what should
-catch whatever they cannot. You reach the thing you pay for only at the moment
-you would otherwise have been stuck.
+All four paid slots sit **behind every free tier** and ahead of your own
+hardware. Among themselves the order is not by price — Awan is the cheapest
+and comes last, because its models are two years old and poor at tool
+calling, which is the thing JARVIS actually needs. That is deliberate: the free providers are faster and cost nothing,
+so they should answer normal use, and the providers that never rate-limit are
+what should catch whatever they cannot. You reach the thing you pay for only
+at the moment you would otherwise have been stuck.
 
 > Flat-rate "unlimited" plans are sold on the bet that most subscribers
 > under-use, and the big sellers have been drifting back toward metering.
@@ -71,7 +115,8 @@ you would otherwise have been stuck.
 
 ### Awan LLM
 
-The other flat-rate option, from about $5/month, also unlimited tokens.
+The cheapest of the four at about $5/month, also unlimited tokens — but see
+the catalogue warning below before choosing it over NanoGPT for $3 more.
 
 Its **limits are not the constraint** people expect: daily caps run 30,000 to
 80,000 requests, against maybe 200 a day for heavy use. You will not meet

@@ -84,6 +84,8 @@ export async function GET(req: NextRequest) {
         hasKey: Boolean(key),
         keySource: hasServerKey(id) ? "server" : key ? "client" : needsKey ? null : "none",
         models: [] as string[],
+        /** The list was cut short, so a model may exist that is not in it. */
+        truncated: false,
         error: null as string | null,
       };
 
@@ -100,6 +102,12 @@ export async function GET(req: NextRequest) {
         return {
           ...base,
           models: pinned && !listed.includes(pinned) ? [pinned, ...listed] : listed,
+          // Inferred from hitting the ceiling rather than reported by the
+          // fetch, which would mean threading a second value through the
+          // cache. A catalogue that lands on exactly the cap would be called
+          // truncated when it wasn't; the note it produces only says a model
+          // can also be typed in, which is true regardless.
+          truncated: config.maxModels !== undefined && models.length >= config.maxModels,
         };
       } catch (err) {
         const message = ProviderError.is(err) ? err.message : (err as Error).message;

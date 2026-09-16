@@ -88,6 +88,8 @@ const ALL_CLOUD_KEYS = {
   CEREBRAS_API_KEY: "k",
   MISTRAL_API_KEY: "k",
   OPENROUTER_API_KEY: "k",
+  NANOGPT_API_KEY: "k",
+  FEATHERLESS_API_KEY: "k",
   ARLI_API_KEY: "k",
   AWAN_API_KEY: "k",
 };
@@ -126,7 +128,7 @@ console.log("\n--- fallback order ---");
     eq(
       "every configured provider is in the chain, local last",
       fallbackOrder("groq"),
-      ["groq", "gemini", "cerebras", "mistral", "openrouter", "arli", "awan", "local"],
+      ["groq", "gemini", "cerebras", "mistral", "openrouter", "nanogpt", "featherless", "arli", "awan", "local"],
     );
 
     /**
@@ -139,9 +141,16 @@ console.log("\n--- fallback order ---");
      * unused.
      */
     const chain = fallbackOrder("groq");
+    const paid = ["nanogpt", "featherless", "arli", "awan"].map((id) => chain.indexOf(id));
     eq("arli sits behind the free tiers", chain.indexOf("arli") > chain.indexOf("openrouter"), true);
     eq("so does awan", chain.indexOf("awan") > chain.indexOf("openrouter"), true);
-    eq("and both sit ahead of the local machine", Math.max(chain.indexOf("arli"), chain.indexOf("awan")) < chain.indexOf("local"), true);
+    eq("so does featherless", chain.indexOf("featherless") > chain.indexOf("openrouter"), true);
+    eq("and so does nanogpt", chain.indexOf("nanogpt") > chain.indexOf("openrouter"), true);
+    eq("all four sit ahead of the local machine", Math.max(...paid) < chain.indexOf("local"), true);
+    // Not by price: Awan is the cheapest at $5 and comes LAST, because its
+    // Llama 3.1-era models are poor at the tool calling that drives the
+    // display. The paid group is ordered by what answers well.
+    eq("nanogpt leads the paid group", Math.min(...paid), chain.indexOf("nanogpt"));
     // Gemini has 40x Groq's per-minute budget and a window Cerebras can't
     // match, so it is the first place a rate-limited turn should land.
     eq("gemini is the first fallback", fallbackOrder("groq")[1], "gemini");
@@ -244,6 +253,39 @@ console.log("\n--- what one request is allowed to cost ---");
   withEnv({ JARVIS_ARLI_CONTEXT: "32000" }, () => {
     eq("and the $15 tier's bigger window can be set", getProvider("arli").maxContextTokens, 32_000);
   });
+
+  // Sized for its one flat tier, whose window is 32K. The $50 plan above it
+  // is metered per token, so there is nothing larger to size for here.
+  const feather = getProvider("featherless");
+  eq(
+    "featherless fits a request and its reply inside 32K",
+    feather.maxRequestTokens! + feather.maxOutputTokens <= 32_000,
+    true,
+  );
+  eq("and uses that window rather than Arli's 16K", feather.maxContextTokens, 32_000);
+  withEnv({ JARVIS_FEATHERLESS_CONTEXT: "16000" }, () => {
+    eq("a tighter window can still be forced", getProvider("featherless").maxContextTokens, 16_000);
+  });
+
+  // 22,000 Hugging Face repos and no capability flag, so vision is matched by
+  // name — right for the ones that follow the -VL convention, and honest about
+  // the rest, which get told an image was attached rather than failing.
+  eq("featherless sees a -VL model", supportsVision("featherless", "Qwen/Qwen2.5-VL-7B-Instruct"), true);
+  eq("and claims nothing for a text-only one", supportsVision("featherless", "Qwen/Qwen3-14B"), false);
+
+  // The subscription path, not the pay-per-token one. Getting this wrong bills
+  // a plan the user already paid for, and nothing would surface it.
+  eq(
+    "nanogpt asks the path the subscription covers",
+    getProvider("nanogpt").baseUrl.endsWith("/api/subscription/v1"),
+    true,
+  );
+  const nano = getProvider("nanogpt");
+  eq(
+    "and fits a request and its reply inside 32K",
+    nano.maxRequestTokens! + nano.maxOutputTokens <= 32_000,
+    true,
+  );
 
   // Text-only models. Claiming vision would fail requests that currently
   // degrade to a description and still get answered.
@@ -560,6 +602,52 @@ try {
 } finally {
   keyless.kill();
   delete process.env.JARVIS_LOCAL_BASE_URL;
+}
+
+console.log("\n--- a catalogue of twenty-two thousand ---");
+{
+  /**
+   * Featherless serves the whole Hugging Face open-weight catalogue.
+   *
+   * Treated like every other provider it would hand the picker a hundred
+   * arbitrary rows, most of them models the subscription cannot run. So the
+   * slot narrows the request and caps what comes back. Both are generic
+   * fields, and the second half of this block is the one that matters: a
+   * provider setting neither must behave exactly as it did before they
+   * existed, same URL, same list, nothing trimmed.
+   */
+  clearModelCache();
+
+  let askedFor = "";
+  const huge = http.createServer((req, res) => {
+    askedFor = req.url ?? "";
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(
+      JSON.stringify({
+        data: Array.from({ length: 500 }, (_, i) => ({
+          id: `org/model-${String(i).padStart(4, "0")}`,
+        })),
+      }),
+    );
+  });
+  await new Promise<void>((r) => huge.listen(8909, "127.0.0.1", () => r()));
+
+  try {
+    process.env.JARVIS_FEATHERLESS_BASE_URL = "http://127.0.0.1:8909/v1";
+    const many = await listModels("featherless", "key");
+    eq("the plan filter reaches the wire", askedFor.includes("available_on_current_plan=true"), true);
+    eq("five hundred models are cut to the cap", many.length, 400);
+    delete process.env.JARVIS_FEATHERLESS_BASE_URL;
+
+    process.env.JARVIS_LOCAL_BASE_URL = "http://127.0.0.1:8909/v1";
+    const all = await listModels("local", "");
+    eq("a provider that sets neither keeps every model", all.length, 500);
+    eq("and asks the plain URL it always did", askedFor, "/v1/models");
+  } finally {
+    delete process.env.JARVIS_FEATHERLESS_BASE_URL;
+    delete process.env.JARVIS_LOCAL_BASE_URL;
+    await new Promise((r) => huge.close(() => r(null)));
+  }
 }
 
 console.log("\n--- a provider that says 400 when it means 'bad key' ---");

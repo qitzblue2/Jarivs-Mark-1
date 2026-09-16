@@ -23,6 +23,8 @@ export interface ProviderState {
   endpointLocked: boolean;
   keySource: "server" | "client" | "none" | null;
   models: string[];
+  /** The catalogue was too big to send whole; `models` is the first slice. */
+  truncated: boolean;
   error: string | null;
 }
 
@@ -243,6 +245,7 @@ export default function ModelPicker({
                     : "Reachable, but serving no models yet."}
                 </p>
               ) : (
+                <>
                 <ul>
                   {p.models.filter(matches).map((id) => {
                     const selected = p.id === provider && id === model;
@@ -267,6 +270,16 @@ export default function ModelPicker({
                     );
                   })}
                 </ul>
+                {/* Featherless serves around 22,000 models. Saying so beats
+                    letting the filter come back empty and read as absence. */}
+                {p.truncated && (
+                  <p className="px-2 pb-1.5 pt-0.5 text-[10.5px] leading-relaxed text-ink-faint">
+                    First {p.models.length} of a much larger catalogue. For one
+                    that isn&rsquo;t here, type its full id above and pick
+                    &ldquo;use it anyway&rdquo;.
+                  </p>
+                )}
+                </>
               )}
             </div>
           ))}

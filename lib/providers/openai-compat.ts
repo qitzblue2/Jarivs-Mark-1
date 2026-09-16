@@ -160,7 +160,7 @@ async function fetchModels(p: ProviderConfig, key: string): Promise<ModelInfo[]>
 
   let res: Response;
   try {
-    res = await fetch(`${p.baseUrl}/models`, {
+    res = await fetch(`${p.baseUrl}/models${p.modelsQuery ? `?${p.modelsQuery}` : ""}`, {
       headers: authHeaders(key),
       cache: "no-store",
       signal: guard.signal,
@@ -181,6 +181,12 @@ async function fetchModels(p: ProviderConfig, key: string): Promise<ModelInfo[]>
     .filter((id): id is string => typeof id === "string" && id.length > 0)
     // Drop non-chat models (whisper, TTS, guard/safety) — they can't hold a conversation.
     .filter((id) => !/whisper|tts|embed|guard|prompt-?guard|moderation/i.test(id))
+    // Cut in the upstream's own order, BEFORE sorting. Sorting first and then
+    // cutting would keep whatever sorts earliest, and on a catalogue of Hugging
+    // Face repo ids that is several hundred forgotten fine-tunes beginning with
+    // a digit, and no Qwen — the list would be long, alphabetical and useless.
+    // A provider that sets no ceiling slices to `undefined` and keeps the lot.
+    .slice(0, p.maxModels)
     .sort((a, b) => a.localeCompare(b))
     .map((id) => ({ id, provider: providerId }));
 }

@@ -129,6 +129,97 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     visionModels: [...VISION_PATTERNS, "gemini", "gpt-4o", "claude-3"],
   },
   /**
+   * NanoGPT — the best of the flat-rate slots, and first of them tried.
+   *
+   * $8/mo covers 200+ open models: every DeepSeek, Qwen and Kimi K2 release,
+   * plus uncensored and roleplay fine-tunes. Cheaper than Arli with a far
+   * larger catalogue, and current where Awan — cheaper still at $5 — is stuck
+   * on Llama 3.1-era models that are poor at tool calling. The paid group is
+   * ordered by what answers well, not by price, which is why $5 comes last
+   * and this leads.
+   *
+   * Note the base URL. NanoGPT serves the same API at two paths: /api/v1
+   * bills per token against deposited credit, and /api/subscription/v1 is
+   * covered by the flat fee and lists only the models the subscription
+   * includes. Pointing at the wrong one quietly spends money on a plan you
+   * already paid for, so the subscription path is the one wired here — and it
+   * is why this slot needs no `modelsQuery`: the URL is already the filter.
+   *
+   * Its limits are real but the right shape. 60 requests a minute (and 10 per
+   * 10 seconds in burst) is spent by how OFTEN you ask, which no conversation
+   * can outrun — unlike Groq's 6,000 tokens a minute, which is spent by how
+   * long you have been talking. The one to watch is 60M input tokens a week:
+   * at the budget below that is roughly 500 tool-using turns a week, and if
+   * you meet it, lower JARVIS_NANOGPT_REQUEST_TOKENS rather than upgrading.
+   * Over either, it answers 429 with Retry-After, which the cooldown already
+   * reads and respects.
+   *
+   * The subscription also includes 100 images a day. Nothing uses that yet.
+   */
+  nanogpt: {
+    id: "nanogpt",
+    label: "NanoGPT",
+    // The subscription path, NOT /api/v1 — see above.
+    baseUrl: "https://nano-gpt.com/api/subscription/v1",
+    envKey: "NANOGPT_API_KEY",
+    signupUrl: "https://nano-gpt.com/",
+    maxContextTokens: 32_000,
+    // Sized against the weekly input cap rather than the window: the models
+    // here would take far more, and spending the week's allowance on one long
+    // conversation is the failure this field exists to prevent.
+    maxRequestTokens: 24_000,
+    maxOutputTokens: 4096,
+    note: "Paid, $8/mo. 200+ models, 60 req/min. Cheapest way off the free tiers.",
+    visionModels: VISION_PATTERNS,
+  },
+  /**
+   * Featherless — the same flat-rate deal as Arli, over the whole Hugging
+   * Face open-weight catalogue.
+   *
+   * First of the three paid slots because of that catalogue: roughly 22,000
+   * models behind one key, against a few dozen at Arli and about ten at Awan.
+   * Unlimited tokens and requests, so like both of those it cannot run out —
+   * which is the entire reason any of them are here.
+   *
+   * Two things to know.
+   *
+   * There is exactly ONE flat-rate tier, $25/mo — every model, 32K context,
+   * four concurrent. The $50 "Developer" plan above it is not an upgrade of
+   * the same thing: it is $50 of credits billed per token, which is the
+   * metered arrangement this slot exists to escape. Sized for the $25 tier
+   * accordingly. (An earlier $10 tier capped at 15B no longer exists; several
+   * comparison sites still list it.)
+   *
+   * And its model list is not the usual dozen rows. See `modelsQuery` and
+   * `maxModels` below.
+   */
+  featherless: {
+    id: "featherless",
+    label: "Featherless",
+    baseUrl: "https://api.featherless.ai/v1",
+    envKey: "FEATHERLESS_API_KEY",
+    signupUrl: "https://featherless.ai/",
+    // The flat tier's window: prompt and completion together must fit in 32K.
+    maxContextTokens: 32_000,
+    // Leaves room for the reply inside that window.
+    maxRequestTokens: 26_000,
+    maxOutputTokens: 4096,
+    note: "Paid, $25/mo. Unlimited tokens, ~22,000 models, every size, 32K.",
+    /**
+     * `available_on_current_plan` narrows 22,000 models to the ones this
+     * subscription can actually run — without it the list is mostly models
+     * that 403 when picked. `per_page` is asked for because the default page
+     * is 100; the documented floor is 100 and the ceiling is not published, so
+     * a server that clamps this returns fewer models rather than failing.
+     */
+    modelsQuery: "available_on_current_plan=true&per_page=400",
+    maxModels: 400,
+    // Featherless accepts vision messages, but it serves whatever Hugging Face
+    // holds and publishes no capability flag, so the shared name patterns are
+    // the honest middle — the same call made for Arli.
+    visionModels: VISION_PATTERNS,
+  },
+  /**
    * Arli AI — flat monthly rate, unlimited tokens and requests.
    *
    * Last among the keyed providers on purpose. The free tiers above are

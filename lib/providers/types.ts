@@ -55,6 +55,26 @@ export interface ProviderConfig {
    */
   visionModels?: string[];
   /**
+   * Query string appended to the model-list request, without the `?`.
+   *
+   * Exists because "list the models" is not the same question everywhere.
+   * Featherless serves the whole Hugging Face open-weight catalogue — around
+   * 22,000 entries, paginated — and most of them a given subscription cannot
+   * run, so asking for all of them returns a hundred arbitrary rows that
+   * mostly fail when picked. Unset for every other provider, whose request
+   * stays exactly what it always was.
+   */
+  modelsQuery?: string;
+  /**
+   * Ceiling on how many models to keep from the list.
+   *
+   * The picker renders every entry it is given, which is fine at four hundred
+   * and unusable at twenty thousand. Truncating is safe only because a model
+   * id can also be typed in directly, so nothing becomes unreachable — the
+   * list is a convenience, not the only door. Unset means keep everything.
+   */
+  maxModels?: number;
+  /**
    * How long to wait for the model list, in ms.
    *
    * This doubles as the reachability check for a server on your LAN. A host
