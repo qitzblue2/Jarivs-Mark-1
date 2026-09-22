@@ -1,4 +1,5 @@
 /** Pure-function tests. Run with: npm test */
+import { readFileSync } from "node:fs";
 import { extractCodeBlocks, artifactsFromMessage, buildPreviewDocument } from "../lib/codeblocks";
 import { trimToBudget, truncateMiddle, estimateTokens } from "../lib/tokens";
 import { ToolCallAccumulator, extractChunk } from "../lib/stream";
@@ -749,6 +750,58 @@ console.log("\n--- room noise ---");
   eq("punctuation only is noise", isNoise("..."), true);
   eq("short real word survives", isNoise("hello"), false);
   eq("okay with a question survives", isNoise("okay what time is it"), false);
+}
+
+console.log("\n--- the voice ships with the app ---");
+{
+  /**
+   * Kokoro used to fetch its weights from Hugging Face in the browser on
+   * first use, and fall back to speechSynthesis — a Google voice — whenever
+   * that failed. Both assets are served from this origin now, which only
+   * holds while these two lists agree.
+   *
+   * Read as text rather than imported: both modules are browser-side and pull
+   * in transformers.js, which resolves asset paths on evaluation and throws
+   * under Node.
+   */
+  const setup = readFileSync(new URL("../scripts/setup-voice.mjs", import.meta.url), "utf8");
+  const engine = readFileSync(new URL("../lib/voice/tts/kokoro.ts", import.meta.url), "utf8");
+
+  const copied = new Set(
+    (setup.match(/const KOKORO_VOICES = \[([\s\S]*?)\]/)?.[1] ?? "")
+      .match(/"([a-z]{2}_[a-z]+)"/g)
+      ?.map((s) => s.replaceAll('"', "")) ?? [],
+  );
+  const offered = (engine.match(/\{ id: "([a-z]{2}_[a-z]+)"/g) ?? []).map((s) =>
+    s.replace(/.*"([a-z_]+)"/, "$1"),
+  );
+
+  eq("Settings offers some voices", offered.length > 0, true);
+  // The failure this prevents is quiet: a voice added to the picker but not to
+  // the copy list still works, by silently fetching from Hugging Face.
+  eq(
+    "every offered voice is copied locally",
+    offered.filter((v) => !copied.has(v)),
+    [],
+  );
+
+  // The URL kokoro-js hardcodes. The local copy is cached under exactly this
+  // key, so a drift here means the cache never hits and every voice is
+  // fetched from the network again.
+  eq(
+    "the cache key matches the repo kokoro-js asks for",
+    /huggingface\.co\/\$\{MODEL_ID\}\/resolve\/main\/voices/.test(engine),
+    true,
+  );
+
+  // Falling back to the browser engine is what produced the Google voice.
+  const fallback = readFileSync(new URL("../lib/voice/tts/index.ts", import.meta.url), "utf8");
+  const synthesize = fallback.slice(fallback.indexOf("async synthesize"));
+  eq(
+    "a failed load never reaches speechSynthesis",
+    /browser\.speak/.test(synthesize),
+    false,
+  );
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

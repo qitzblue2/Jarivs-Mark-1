@@ -10,19 +10,29 @@ export { QUALITY_OPTIONS, type KokoroQuality } from "./kokoro";
 const browser = new BrowserTts();
 
 /**
- * Kokoro wrapped so a failure degrades instead of silencing voice entirely.
+ * Kokoro wrapped so a failure is explained rather than disguised.
  *
- * The model is a large first-run download over a network that might not
- * cooperate. If it can't load, speech falls through to the browser engine and
- * the caller is told why — losing the nicer voice is annoying, losing voice
- * altogether is a broken feature.
+ * The weights are served from this origin now (setup-voice.mjs fetches them),
+ * so the common failure is simply that the install step hasn't run. When that
+ * happens the caller is told exactly that, once, and JARVIS stays silent for a
+ * minute before trying again — it does NOT quietly switch to another voice.
  */
+/**
+ * How long to stop retrying Kokoro after it fails to load.
+ *
+ * Long enough that a five-sentence reply doesn't attempt an 86MB load five
+ * times, short enough that the next thing you say tries again. This used to be
+ * a permanent flag, which meant one stumble muted the good voice for the whole
+ * session.
+ */
+const RETRY_AFTER_MS = 60_000;
+
 class KokoroWithFallback implements TtsEngine {
   id = "kokoro";
   label = "Kokoro (natural, local)";
 
   private kokoro = new KokoroTts();
-  private failed = false;
+  private failedUntil = 0;
 
   /** Set by the UI to surface the first-run download and any fallback. */
   onNotice?: (message: string) => void;
@@ -31,7 +41,7 @@ class KokoroWithFallback implements TtsEngine {
   setQuality(quality: KokoroQuality): void {
     this.kokoro.setQuality(quality);
     // A different build deserves a fresh attempt even if the last one failed.
-    this.failed = false;
+    this.failedUntil = 0;
   }
 
   isAvailable(): boolean {
@@ -39,22 +49,24 @@ class KokoroWithFallback implements TtsEngine {
   }
 
   voices(): Promise<{ id: string; label: string }[]> {
-    return this.failed ? browser.voices() : this.kokoro.voices();
+    return this.kokoro.voices();
   }
 
   /**
    * Generate ahead, so the speaker can overlap synthesis with playback.
    *
-   * A failure here must not reject: the Speaker would report an error and
-   * skip the sentence. Instead it degrades to the browser engine, wrapped as
-   * a prepared item so the rest of the reply still gets spoken.
+   * There is deliberately no fallback engine here. This one used to degrade to
+   * the browser's speechSynthesis, which on Chrome is a Google voice — a cloud
+   * dependency arriving by accident in the feature chosen specifically for not
+   * having one. Silence with a reason beats a voice you did not pick; the
+   * reply is on screen either way, and the browser engine is still selectable
+   * in Settings for anyone who wants it.
    */
   async synthesize(text: string, options: SpeakOptions = {}): Promise<PreparedSpeech> {
-    const viaBrowser: PreparedSpeech = {
-      play: (signal) => browser.speak(text, { ...options, voice: undefined, signal }),
-    };
-
-    if (this.failed) return viaBrowser;
+    // Inside the cooldown, stay quiet rather than throwing again: Speaker
+    // reports every rejection, and one failure should not produce an error per
+    // sentence for the rest of the answer.
+    if (Date.now() < this.failedUntil) return { play: async () => {} };
 
     const firstRun = !this.kokoro.isLoaded;
     if (firstRun) this.watchDownload();
@@ -66,11 +78,14 @@ class KokoroWithFallback implements TtsEngine {
     } catch (err) {
       if ((err as Error)?.name === "AbortError") throw err;
 
-      this.failed = true;
+      this.failedUntil = Date.now() + RETRY_AFTER_MS;
       this.onNotice?.(
-        `Couldn't load the Kokoro voice (${(err as Error).message}). Using the browser voice instead.`,
+        `The Kokoro voice didn't load (${(err as Error).message}). ` +
+          "Run `npm run setup:voice` to fetch it. Answers still appear on screen.",
       );
-      return viaBrowser;
+      // Thrown once, so the first failure is visible; later chunks take the
+      // silent path above.
+      throw err;
     }
   }
 
@@ -88,7 +103,6 @@ class KokoroWithFallback implements TtsEngine {
 
   cancel(): void {
     this.kokoro.cancel();
-    browser.cancel();
   }
 }
 

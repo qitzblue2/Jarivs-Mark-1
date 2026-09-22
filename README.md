@@ -49,6 +49,21 @@ keep running out mid-conversation, this is the fix.
 > Google's free tier may use your conversations to improve its products, and
 > JARVIS remembers things about you. Worth deciding deliberately.
 
+### A note on the voice
+
+JARVIS speaks with **Kokoro** — an 82M-parameter Apache-2.0 model that runs on
+your own machine. No key, no account, no cloud, nothing that can be revoked or
+start charging. `npm install` fetches it once (~86MB) into `public/models/`
+alongside the wake-word and speech-detection models, so it works offline
+afterwards.
+
+If it didn't download, JARVIS says so and stays quiet rather than switching to
+your browser's built-in voice — which on Chrome is a Google voice, and a cloud
+dependency has no business appearing by accident in the one feature chosen for
+not having one. Re-run `npm run setup:voice` to fix it.
+
+On the Pi, device mode uses **Piper** instead — also local, also free.
+
 ### NanoGPT — the cheapest way off the free tiers
 
 **$8/month**, and the one to reach for first if the free tiers keep running

@@ -14,6 +14,50 @@ import type { PreparedSpeech, SpeakOptions, TtsEngine } from "./types";
 
 const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
 
+/**
+ * Where setup-voice.mjs put the weights, served from this origin.
+ *
+ * transformers.js resolves a local model as <localModelPath>/<model id>/<file>,
+ * so the repo id exists as real directories under here.
+ */
+const LOCAL_MODELS = "/models/kokoro";
+
+/**
+ * The URL kokoro-js will ask for a voice, verbatim.
+ *
+ * Not configurable: the published bundle hardcodes this string. It does check
+ * the Cache API first, though, which is the seam used below — the cache is
+ * primed from our own copy so that fetch never happens.
+ */
+const voiceUrl = (id: string) =>
+  `https://huggingface.co/${MODEL_ID}/resolve/main/voices/${id}.bin`;
+
+const VOICE_CACHE = "kokoro-voices";
+
+/**
+ * Put a locally-served voice into the cache under kokoro-js' own URL.
+ *
+ * Every step is allowed to fail. Cache Storage needs a secure context, a
+ * private window may refuse it, and the file may simply not have been fetched
+ * at install time. In all of those cases kokoro-js falls back to its network
+ * fetch exactly as before — slower and online, but not broken.
+ */
+async function primeVoice(id: string): Promise<void> {
+  if (typeof caches === "undefined") return;
+  try {
+    const cache = await caches.open(VOICE_CACHE);
+    const url = voiceUrl(id);
+    if (await cache.match(url)) return;
+
+    const local = await fetch(`${LOCAL_MODELS}/voices/${id}.bin`);
+    if (!local.ok) return;
+
+    await cache.put(url, new Response(await local.arrayBuffer()));
+  } catch {
+    /* the remote fetch inside kokoro-js remains as the fallback */
+  }
+}
+
 /** A usable spread rather than the full catalogue, which is overwhelming. */
 const VOICES: { id: string; label: string }[] = [
   { id: "af_heart", label: "Heart — American, warm" },
@@ -121,6 +165,17 @@ export class KokoroTts implements TtsEngine {
           .then((a) => Boolean(a))
           .catch(() => false));
 
+      // Served from this origin rather than Hugging Face. Remote models stay
+      // ALLOWED on purpose: a quality other than the installed one has no
+      // local copy, and downloading it beats refusing to speak.
+      try {
+        const { env } = await import("@huggingface/transformers");
+        env.localModelPath = LOCAL_MODELS;
+        env.allowLocalModels = true;
+      } catch {
+        /* falls back to the remote copy, which is the old behaviour */
+      }
+
       const model = await KokoroTTS.from_pretrained(MODEL_ID, {
         // Chosen in Settings. fp32 used to be forced on any WebGPU machine,
         // which meant a 326MB download rather than the 86MB documented —
@@ -155,11 +210,16 @@ export class KokoroTts implements TtsEngine {
    * its own synthesis pause, which is what made a long reply crawl.
    */
   async synthesize(text: string, options: SpeakOptions = {}): Promise<PreparedSpeech> {
+    const voice = options.voice || DEFAULT_VOICE;
+    // Before load(), so the first sentence doesn't wait on a network fetch
+    // for the embedding after already waiting for the model.
+    await primeVoice(voice);
+
     const model = await this.load();
     if (options.signal?.aborted) throw new DOMException("Cancelled", "AbortError");
 
     const raw = await model.generate(text, {
-      voice: (options.voice || DEFAULT_VOICE) as never,
+      voice: voice as never,
       speed: options.rate ?? DEFAULT_SPEED,
     });
 

@@ -33,6 +33,46 @@ const VAD_FILES = [
   "vad.worklet.bundle.min.js",
 ];
 
+/**
+ * Kokoro, the speaking voice — the one asset that used to break the rule above.
+ *
+ * It was loaded straight from Hugging Face by the browser on first use: 86MB,
+ * over the user's connection, every fresh cache. When that fetch failed the
+ * voice fell back to the browser's built-in speech, which on Chrome is a
+ * Google voice — a cloud dependency arriving by accident in a feature chosen
+ * specifically for having none.
+ *
+ * The directory layout below is not arbitrary: transformers.js resolves a
+ * local model as <localModelPath>/<model id>/<file>, so the repo id has to be
+ * mirrored as real directories.
+ */
+const KOKORO_REPO = "onnx-community/Kokoro-82M-v1.0-ONNX";
+const KOKORO_DIR = path.join(ROOT, "public", "models", "kokoro");
+const KOKORO_MODEL_DIR = path.join(KOKORO_DIR, ...KOKORO_REPO.split("/"));
+const KOKORO_HF = `https://huggingface.co/${KOKORO_REPO}/resolve/main`;
+
+const KOKORO_CONFIG = ["config.json", "tokenizer.json", "tokenizer_config.json"];
+
+/**
+ * The q8 build, which is the default quality in Settings.
+ *
+ * Named as candidates because transformers.js derives the filename from the
+ * dtype and the repo is free to spell it either way. Trying both and saying
+ * which one landed beats writing a directory that looks complete and isn't.
+ */
+const KOKORO_ONNX_CANDIDATES = ["model_quantized.onnx", "model_q8.onnx"];
+
+/**
+ * Voice embeddings ship inside kokoro-js, so these are copied, never fetched.
+ * Only the voices actually offered in Settings — all 54 would be 28MB to
+ * serve 11.
+ */
+const KOKORO_VOICES = [
+  "af_heart", "af_bella", "af_nicole", "af_sarah",
+  "am_michael", "am_fenrir", "am_puck",
+  "bf_emma", "bf_isabella", "bm_george", "bm_daniel",
+];
+
 const exists = (p) => access(p).then(() => true).catch(() => false);
 
 async function download(url, target) {
@@ -73,6 +113,69 @@ async function main() {
   for (const model of MODELS) {
     const how = await download(`${RELEASE}/${model}`, path.join(MODEL_DIR, model));
     console.log(`voice: ${model} ${how}`);
+  }
+
+  await setupKokoro();
+}
+
+/**
+ * The speaking voice.
+ *
+ * Isolated in its own try/catch rather than sharing main()'s: the wake word
+ * and VAD are what make voice mode start at all, while this only decides
+ * whether it sounds good. A failed 86MB download should leave JARVIS
+ * listening, not refuse to install.
+ */
+async function setupKokoro() {
+  // Voices first, and in their own try: they are copied out of node_modules
+  // with no network involved, so a failed model download must not take them
+  // with it. Ordering these the other way round silently skipped all 11.
+  try {
+    await mkdir(path.join(KOKORO_DIR, "voices"), { recursive: true });
+    let copied = 0;
+    for (const voice of KOKORO_VOICES) {
+      const from = path.join(ROOT, "node_modules", "kokoro-js", "voices", `${voice}.bin`);
+      const to = path.join(KOKORO_DIR, "voices", `${voice}.bin`);
+      if (!(await exists(from))) continue;
+      if (!(await exists(to))) await copyFile(from, to);
+      copied++;
+    }
+    console.log(`voice: kokoro ${copied}/${KOKORO_VOICES.length} voices ready`);
+  } catch (err) {
+    console.warn(`voice: kokoro voices unavailable (${err.message})`);
+  }
+
+  try {
+    await mkdir(path.join(KOKORO_MODEL_DIR, "onnx"), { recursive: true });
+
+    for (const file of KOKORO_CONFIG) {
+      await download(`${KOKORO_HF}/${file}`, path.join(KOKORO_MODEL_DIR, file));
+    }
+
+    // Both spellings are tried; the first that exists wins and is reported by
+    // name, so a repo that renames its builds fails loudly here rather than
+    // silently at the first spoken sentence.
+    let onnx = null;
+    for (const candidate of KOKORO_ONNX_CANDIDATES) {
+      try {
+        const how = await download(
+          `${KOKORO_HF}/onnx/${candidate}`,
+          path.join(KOKORO_MODEL_DIR, "onnx", candidate),
+        );
+        onnx = `${candidate} ${how}`;
+        break;
+      } catch {
+        /* try the next spelling */
+      }
+    }
+    if (!onnx) throw new Error(`no q8 build found (tried ${KOKORO_ONNX_CANDIDATES.join(", ")})`);
+    console.log(`voice: kokoro ${onnx}`);
+  } catch (err) {
+    console.warn(
+      `voice: kokoro model not fetched (${err.message}) — ` +
+        "re-run `npm run setup:voice` with network access. " +
+        "Until then JARVIS listens and answers on screen, but won't speak.",
+    );
   }
 }
 
