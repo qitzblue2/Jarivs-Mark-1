@@ -481,30 +481,45 @@ export default function Workspace() {
     [chat, createChat, runTurn],
   );
 
+  /**
+   * These three are memoised for rendering cost, not tidiness.
+   *
+   * Each is handed to every Message in the conversation. As plain function
+   * declarations they were new references on every Workspace render, which
+   * defeated memoisation the whole way down and re-ran react-markdown —
+   * syntax highlighting included — for every message on every keystroke.
+   */
+
   /** Drop the last assistant turn and ask again. */
-  async function regenerate(messageId: string) {
-    if (!chat || streaming) return;
-    const index = chat.messages.findIndex((m) => m.id === messageId);
-    if (index < 1) return;
-    await runTurn(chat, chat.messages.slice(0, index));
-  }
+  const regenerate = useCallback(
+    async (messageId: string) => {
+      if (!chat || streaming) return;
+      const index = chat.messages.findIndex((m) => m.id === messageId);
+      if (index < 1) return;
+      await runTurn(chat, chat.messages.slice(0, index));
+    },
+    [chat, streaming, runTurn],
+  );
 
   /** Rewrite a user turn and discard everything that followed it. */
-  async function editMessage(messageId: string, content: string) {
-    if (!chat || streaming) return;
-    const index = chat.messages.findIndex((m) => m.id === messageId);
-    if (index === -1) return;
-    const history = [
-      ...chat.messages.slice(0, index),
-      { ...chat.messages[index], content },
-    ];
-    await runTurn(chat, history);
-  }
+  const editMessage = useCallback(
+    async (messageId: string, content: string) => {
+      if (!chat || streaming) return;
+      const index = chat.messages.findIndex((m) => m.id === messageId);
+      if (index === -1) return;
+      const history = [
+        ...chat.messages.slice(0, index),
+        { ...chat.messages[index], content },
+      ];
+      await runTurn(chat, history);
+    },
+    [chat, streaming, runTurn],
+  );
 
-  function openInCanvas(messageId: string, blockIndex: number) {
+  const openInCanvas = useCallback((messageId: string, blockIndex: number) => {
     setActiveArtifactId(`${messageId}-${blockIndex}`);
     setCanvasOpen(true);
-  }
+  }, []);
 
   function changeModel(nextProvider: string, nextModel: string) {
     setProvider(nextProvider);

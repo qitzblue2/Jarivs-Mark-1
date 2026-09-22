@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useCallback, useState } from "react";
 import { splitReasoning } from "@/lib/reasoning";
 import { AlertTriangle, Check, ChevronRight, Copy, Pencil, RefreshCw, X } from "lucide-react";
 import Markdown from "./Markdown";
@@ -11,14 +11,26 @@ import type { Message as MessageType } from "@/lib/types";
 interface Props {
   message: MessageType;
   isStreaming: boolean;
-  onRegenerate?: () => void;
-  onEdit?: (content: string) => void;
+  /** Whether to offer the action — separate from the handler, which is shared. */
+  canRegenerate?: boolean;
+  canEdit?: boolean;
+  /**
+   * Handlers take the message id rather than being pre-bound per message.
+   *
+   * The pre-bound version meant a fresh closure for every message on every
+   * render of the list, which is what made the memo below useless and left
+   * react-markdown re-highlighting the whole conversation on each keystroke.
+   */
+  onRegenerate?: (messageId: string) => void;
+  onEdit?: (messageId: string, content: string) => void;
   onOpenInCanvas?: (messageId: string, blockIndex: number) => void;
 }
 
-export default function Message({
+function MessageBody({
   message,
   isStreaming,
+  canRegenerate,
+  canEdit,
   onRegenerate,
   onEdit,
   onOpenInCanvas,
@@ -26,6 +38,17 @@ export default function Message({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content);
   const [copied, setCopied] = useState(false);
+
+  // Bound to this message here rather than by the list, so the props coming
+  // in stay reference-stable and the memo below can actually bail out.
+  const regenerateThis = useCallback(
+    () => onRegenerate?.(message.id),
+    [onRegenerate, message.id],
+  );
+  const openBlockInCanvas = useCallback(
+    (index: number) => onOpenInCanvas?.(message.id, index),
+    [onOpenInCanvas, message.id],
+  );
 
   // Split once per render: a thinking model's reasoning must not be rendered
   // as if it were the reply, and `forSpeech` drops it for the same reason.
@@ -44,7 +67,7 @@ export default function Message({
 
   function saveEdit() {
     const next = draft.trim();
-    if (next && next !== message.content) onEdit?.(next);
+    if (next && next !== message.content) onEdit?.(message.id, next);
     setEditing(false);
   }
 
@@ -130,9 +153,7 @@ export default function Message({
               {reasoning && <Reasoning text={reasoning} pending={thinking && isStreaming} />}
               <Markdown
                 content={answer}
-                onOpenInCanvas={
-                  onOpenInCanvas ? (index) => onOpenInCanvas(message.id, index) : undefined
-                }
+                onOpenInCanvas={onOpenInCanvas ? openBlockInCanvas : undefined}
               />
               {isStreaming && !answer && !reasoning && (
                 <span className="streaming-caret text-ink-faint">
@@ -158,7 +179,7 @@ export default function Message({
                 {copied ? <Check size={12} className="text-arc" /> : <Copy size={12} />}
                 {copied ? "Copied" : "Copy"}
               </button>
-              {isUser && onEdit && (
+              {isUser && canEdit && onEdit && (
                 <button
                   onClick={() => {
                     setDraft(message.content);
@@ -170,9 +191,9 @@ export default function Message({
                   Edit
                 </button>
               )}
-              {!isUser && onRegenerate && (
+              {!isUser && canRegenerate && onRegenerate && (
                 <button
-                  onClick={onRegenerate}
+                  onClick={regenerateThis}
                   className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-ink-faint transition hover:bg-raised hover:text-ink"
                 >
                   <RefreshCw size={12} />
@@ -187,6 +208,14 @@ export default function Message({
   );
 }
 
+/**
+ * Memoised because the list re-renders on every keystroke in the composer,
+ * and each message runs splitReasoning over its whole content and hands
+ * react-markdown — with syntax highlighting — the result. Bailing out here is
+ * the difference between doing that once and doing it for every message in
+ * the conversation, per character typed.
+ */
+export default memo(MessageBody);
 
 /**
  * A thinking model's working-out, folded away.

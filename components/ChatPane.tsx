@@ -185,21 +185,22 @@ export default function ChatPane(props: Props) {
           </div>
         ) : (
           <>
+            {/* Every prop here is a primitive or a stable reference, which is
+                what lets Message memoise. Passing `() => onRegenerate(id)` and
+                `(content) => onEditMessage(id, content)` instead — a fresh
+                closure per message per render — re-highlighted every message
+                in the conversation on each keystroke in the composer. */}
             {messages.map((message, index) => (
               <Message
                 key={message.id}
                 message={message}
                 isStreaming={streaming && message.id === streamingMessageId}
-                onRegenerate={
+                canRegenerate={
                   message.role === "assistant" && index === messages.length - 1 && !streaming
-                    ? () => onRegenerate(message.id)
-                    : undefined
                 }
-                onEdit={
-                  message.role === "user" && !streaming
-                    ? (content) => onEditMessage(message.id, content)
-                    : undefined
-                }
+                canEdit={message.role === "user" && !streaming}
+                onRegenerate={onRegenerate}
+                onEdit={onEditMessage}
                 onOpenInCanvas={onOpenInCanvas}
               />
             ))}
