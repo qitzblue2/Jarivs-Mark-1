@@ -6,6 +6,7 @@ import { runCommandTool } from "./fs/exec";
 import { computerAccessEnabled } from "./fs/workspace";
 import { webSearchTool } from "./web-search";
 import { clearDisplayTool, displayPowerTool, showOnDisplayTool } from "./display";
+import { cancelScheduledTool, listScheduledTool, scheduleTaskTool } from "./schedule";
 import { displayConnected } from "@/lib/display";
 import { deviceMode } from "@/lib/voice/device/detect";
 import type { Tool } from "./types";
@@ -65,12 +66,28 @@ const COMPUTER: Tool[] = [listFilesTool, readFileTool, writeFileTool, runCommand
  */
 const DISPLAY: Tool[] = [showOnDisplayTool, clearDisplayTool, displayPowerTool];
 
+/**
+ * Scheduling, gated on the same test and for the same reason.
+ *
+ * These three cost 391 tokens — more than the display ones — and a scheduled
+ * task is delivered by speaking it and putting it on the wall. Where neither
+ * exists, a fired reminder writes a line to a JSON file nobody is watching,
+ * which is not a reminder. So they are offered where an announcement can
+ * actually land: the appliance, or an install with a kiosk page connected.
+ *
+ * Note this gates the TOOLS, not the feature. /api/schedule and the Scheduled
+ * panel work everywhere, so a task can still be arranged by hand from a
+ * laptop — you simply cannot ask for one out loud somewhere that could not
+ * say it back.
+ */
+const SCHEDULE: Tool[] = [scheduleTaskTool, listScheduledTool, cancelScheduledTool];
+
 function displayAvailable(): boolean {
   return deviceMode() || displayConnected();
 }
 
 export function allTools(): Tool[] {
-  const base = displayAvailable() ? [...ALL, ...DISPLAY] : ALL;
+  const base = displayAvailable() ? [...ALL, ...DISPLAY, ...SCHEDULE] : ALL;
   return computerAccessEnabled() ? [...base, ...COMPUTER] : base;
 }
 

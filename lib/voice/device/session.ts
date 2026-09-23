@@ -288,6 +288,33 @@ export class DeviceVoiceSession {
     this.history = [];
   }
 
+  /**
+   * Say something nobody asked for — a reminder, a briefing, a watcher.
+   *
+   * Refused while muted: muting the box means it should not make noise, and a
+   * scheduled task is exactly the thing that would otherwise ignore that at
+   * two in the morning. Refused mid-turn too, because cutting across your own
+   * answer to read a reminder is worse than reading it a moment later.
+   *
+   * Fire-and-forget by design: the caller is a timer with nowhere to report,
+   * and a failed announcement must not take the scheduler down with it.
+   */
+  announce(text: string): boolean {
+    const spoken = text.trim();
+    if (!spoken) return false;
+    if (this.muted) return false;
+    if (this.state === "off" || this.state === "error") return false;
+    // Listening or already talking: the user has the floor.
+    if (this.state === "listening" || this.state === "thinking" || this.state === "speaking") {
+      return false;
+    }
+
+    void this.speak(spoken).catch((err) => {
+      this.events.onError?.(`Announcement failed: ${(err as Error).message}`);
+    });
+    return true;
+  }
+
   private setState(state: DeviceState): void {
     this.state = state;
     this.diagnostics.state = state;

@@ -9,6 +9,7 @@ import type { ProviderState } from "./ModelPicker";
 import MemoryEditor from "./MemoryEditor";
 import DevicePanel from "./DevicePanel";
 import DisplayPanel from "./DisplayPanel";
+import SchedulePanel from "./SchedulePanel";
 
 export interface Settings {
   persona: string;
@@ -422,6 +423,18 @@ export default function SettingsDialog({
               an image. With a projector on HDMI it can switch the projector itself on and off.
             </p>
             {open && <DisplayPanel />}
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-[12px] font-semibold uppercase tracking-wide text-ink-dim">
+              Scheduled
+            </h3>
+            <p className="text-[11px] leading-relaxed text-ink-faint">
+              Things JARVIS does without being asked — a reminder, a morning briefing, a check on
+              something every so often. It speaks them aloud and puts them on the room display.
+              Pausing or cancelling here always works, even if asking it to stop doesn&rsquo;t.
+            </p>
+            {open && <SchedulePanel />}
           </section>
 
           <section>

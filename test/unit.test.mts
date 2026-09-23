@@ -1,5 +1,7 @@
 /** Pure-function tests. Run with: npm test */
 import { readFileSync } from "node:fs";
+import { describe, nextRun, parseHhmm, setRunner, setScheduleStore, tick } from "../lib/schedule";
+import type { ScheduledTask } from "../lib/schedule";
 import {
   denyAll,
   grantWritesForRun,
@@ -665,9 +667,14 @@ console.log("\n--- what every request costs before you type ---");
   eq("tool schemas stay under budget", toolTokens <= 680, true);
 
   /**
-   * The display tools cost 287 tokens of schema, which is why they are only
-   * offered where a screen might exist — a laptop with no projector should
-   * not pay for a capability it cannot use on every single request.
+   * Two groups are gated on a screen existing: the display tools (287 tokens)
+   * and scheduling (262). Both are only useful where an announcement can land,
+   * and a laptop with no projector should not pay for either on every single
+   * request.
+   *
+   * The ceiling is what stops that gated set growing without anyone noticing.
+   * It caught scheduling arriving at 392 tokens, which is how those three
+   * schemas ended up terse instead of chatty.
    */
   const withDisplay = (() => {
     const saved = process.env.JARVIS_DEVICE_MODE;
@@ -680,7 +687,7 @@ console.log("\n--- what every request costs before you type ---");
 
   console.log(`     appliance adds the display tools: ${withDisplay} tokens`);
   eq("a machine with no screen is not charged for one", withDisplay > toolTokens, true);
-  eq("and the appliance stays under its own ceiling", withDisplay <= 960, true);
+  eq("and the appliance stays under its own ceiling", withDisplay <= 1220, true);
   eq("the persona stays under budget", personaTokens <= 330, true);
   eq("and the two together stay under a thousand", toolTokens + personaTokens < 1000, true);
 
@@ -757,6 +764,110 @@ console.log("\n--- room noise ---");
   eq("punctuation only is noise", isNoise("..."), true);
   eq("short real word survives", isNoise("hello"), false);
   eq("okay with a question survives", isNoise("okay what time is it"), false);
+}
+
+console.log("\n--- when a scheduled task is next due ---");
+{
+  const now = new Date("2026-09-23T10:30:00").getTime();
+
+  eq("a one-off in the future is due then", nextRun({ kind: "once", at: now + 5000 }, now), now + 5000);
+  // Retired rather than left in the list looking armed.
+  eq("a one-off in the past never fires again", nextRun({ kind: "once", at: now - 5000 }, now), null);
+
+  eq("a repeat counts from now", nextRun({ kind: "every", minutes: 30 }, now), now + 30 * 60_000);
+  // A zero interval would be a tight loop against a metered API.
+  eq("a zero interval is clamped, not trusted", nextRun({ kind: "every", minutes: 0 }, now), now + 60_000);
+
+  const laterToday = nextRun({ kind: "daily", hhmm: "18:00" }, now)!;
+  eq("a daily time still to come is today", new Date(laterToday).getHours(), 18);
+  eq("and is in the future", laterToday > now, true);
+
+  // The rollover: 08:00 has already passed at 10:30, so it means tomorrow.
+  const tomorrow = nextRun({ kind: "daily", hhmm: "08:00" }, now)!;
+  eq("a daily time already past rolls to tomorrow", new Date(tomorrow).getDate(), 24);
+  eq("at the same clock time", new Date(tomorrow).getHours(), 8);
+
+  /**
+   * Built from local date parts rather than by adding 24h. Adding a fixed day
+   * drifts across a daylight-saving change, and "08:00" has to stay 08:00 on
+   * the clock in the room.
+   */
+  eq("and lands exactly on the minute", new Date(tomorrow).getMinutes(), 0);
+  eq("with no seconds left over", new Date(tomorrow).getSeconds(), 0);
+
+  eq("junk times are refused", parseHhmm("25:00"), null);
+  eq("so are near-misses", parseHhmm("8:0"), null);
+  eq("but a real one parses", parseHhmm("08:05"), { hours: 8, minutes: 5 });
+  eq("a daily task with a junk time never runs", nextRun({ kind: "daily", hhmm: "nope" }, now), null);
+
+  eq("describe reads naturally", describe({ kind: "every", minutes: 120 }), "every 2 hours");
+  eq("and singularises", describe({ kind: "every", minutes: 60 }), "every 1 hour");
+}
+
+console.log("\n--- the clock fires each task once ---");
+{
+  // An in-memory store so the tests never touch the real data directory.
+  let saved: ScheduledTask[] = [];
+  setScheduleStore({
+    async list() { return saved.map((t) => ({ ...t })); },
+    async save(task) {
+      const i = saved.findIndex((t) => t.id === task.id);
+      if (i === -1) saved.push(task); else saved[i] = task;
+    },
+    async delete(id) { saved = saved.filter((t) => t.id !== id); },
+  });
+
+  const now = Date.now();
+  let fired: string[] = [];
+  setRunner(async (prompt) => {
+    fired.push(prompt);
+    return { text: `did ${prompt}` };
+  });
+
+  saved = [
+    { id: "a", prompt: "due now", label: "due", schedule: { kind: "every", minutes: 10 },
+      enabled: true, createdAt: now, nextRunAt: now - 1000 },
+    { id: "b", prompt: "not yet", label: "later", schedule: { kind: "every", minutes: 10 },
+      enabled: true, createdAt: now, nextRunAt: now + 600_000 },
+    { id: "c", prompt: "paused", label: "paused", schedule: { kind: "every", minutes: 10 },
+      enabled: false, createdAt: now, nextRunAt: now - 1000 },
+  ];
+
+  eq("only the due task fires", await tick(now), 1);
+  eq("and it was the right one", fired, ["due now"]);
+
+  // The bug this prevents: the next run is written BEFORE the task runs, so a
+  // second tick during a slow network call cannot see it as still due.
+  eq("a second tick finds nothing", await tick(now), 0);
+  eq("because its next run moved", saved.find((t) => t.id === "a")!.nextRunAt > now, true);
+  eq("the result is recorded", saved.find((t) => t.id === "a")!.lastResult, "did due now");
+  eq("a paused task never fires", fired.includes("paused"), false);
+
+  // A one-shot retires itself rather than being deleted, so you can still see
+  // that it ran and what it said.
+  fired = [];
+  saved = [
+    { id: "d", prompt: "once only", label: "once", schedule: { kind: "once", at: now - 1000 },
+      enabled: true, createdAt: now, nextRunAt: now - 1000 },
+  ];
+  await tick(now);
+  eq("a one-shot fires", fired, ["once only"]);
+  eq("then retires itself", saved[0].enabled, false);
+  eq("but stays visible with its result", saved[0].lastResult, "did once only");
+  await tick(now);
+  eq("and never fires again", fired.length, 1);
+
+  // A failing run must not lose the task or stop the clock.
+  setRunner(async () => { throw new Error("upstream died"); });
+  saved = [
+    { id: "e", prompt: "will fail", label: "fail", schedule: { kind: "every", minutes: 5 },
+      enabled: true, createdAt: now, nextRunAt: now - 1000 },
+  ];
+  await tick(now);
+  eq("a failed run records why", saved[0].lastError, "upstream died");
+  eq("and stays scheduled", saved[0].enabled, true);
+
+  setRunner(null);
 }
 
 console.log("\n--- a long run doesn't forget what it was asked ---");

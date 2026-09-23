@@ -12,6 +12,7 @@ can now use tools mid-answer instead of only talking.
   object.
 - **Tool-using.** Calls tools mid-answer and shows you exactly what it ran.
 - **Voice.** Say "Hey JARVIS" and talk to it. Wake word runs on your machine.
+- **Proactive.** Reminders, briefings and watchers it speaks aloud unasked.
 - **Yours.** Chats are plain JSON files on your disk. Nothing to sign into.
 
 ---
@@ -468,7 +469,46 @@ first use and are cached by the browser.
 If that was offline, run `npm run setup:voice`. They are deliberately not in
 git. Everything except voice works without them.
 
-## 8. Letting JARVIS use your computer
+## 8. Things JARVIS does without being asked
+
+Everything above is a reply. A box in your room that only ever answers is
+half an assistant — the other half is it speaking first.
+
+Ask for it in words: *"remind me to take the bins out at seven"*, *"every
+morning at eight, check the weather and tell me if I need a coat"*, *"check
+that page every half hour and tell me if it changes"*. Each becomes a stored
+task, and when it comes due JARVIS is asked its own prompt, then **says the
+answer aloud and puts it on the room display**.
+
+Three shapes, deliberately not cron:
+
+| | |
+|---|---|
+| **once** | a single time — a reminder |
+| **every N minutes** | a watcher |
+| **daily at HH:MM** | a briefing |
+
+Cron is a parser, a grammar and a class of bugs, and it buys nothing here.
+Anything genuinely cron-shaped is better as two tasks.
+
+**Settings → Scheduled** lists them with what each one last said, and lets you
+pause or cancel. That panel always works, even when asking JARVIS to stop
+doesn't — which is exactly when you need it.
+
+The schedule is a plain file at `data/schedule.json`, readable and
+hand-editable, like `data/memory.json`.
+
+> **A scheduled task needs a key in `.env.local`.** It runs with no browser
+> open, so a key pasted into Settings — which lives in that browser's
+> localStorage — cannot be reached. JARVIS says so plainly rather than failing
+> with a puzzling 401 at three in the morning.
+
+> The voice tools for this appear only where an announcement can land: the
+> appliance, or an install with the kiosk page connected. They cost 262 tokens
+> of schema on every request, and a laptop with no speaker shouldn't pay for a
+> reminder it can't deliver. The panel and the API work everywhere regardless.
+
+## 9. Letting JARVIS use your computer
 
 Off by default. Turn it on with `JARVIS_ALLOW_COMPUTER=1` — an environment
 variable, not a setting, so nothing with a browser session can enable it.
@@ -528,7 +568,7 @@ controls.
 Reads are unattended. A handful of catastrophic commands (`rm -rf /`, `mkfs`,
 fork bombs) are refused outright even with approval.
 
-## 9. Reaching it from your phone
+## 10. Reaching it from your phone
 
 `npm run dev` listens on **localhost only**. That is deliberate, and it is the
 actual security boundary — `Host` and `X-Forwarded-For` are both set by the
@@ -557,12 +597,12 @@ filesystem tools also only make sense on the machine that has your files. One
 local instance behind a tunnel has no timeout, needs no cloud database, and
 keeps your chats in the JSON files they already live in.
 
-## 10. Where your data lives
+## 11. Where your data lives
 
 Chats are JSON files in `./data/chats/`, one per conversation. `data/` is
 gitignored. Back them up by copying the folder; delete one to delete the chat.
 
-## 11. Deploying
+## 12. Deploying
 
 It runs on Vercel's free tier as-is, with one caveat: **serverless filesystems
 are read-only**, so the file store can't persist there. The app detects this
@@ -572,7 +612,7 @@ is a four-method interface and `fs-store.ts` is the reference implementation.
 
 Set your keys as environment variables in the host's dashboard, not in a file.
 
-## 12. Layout
+## 13. Layout
 
 ```
 app/
