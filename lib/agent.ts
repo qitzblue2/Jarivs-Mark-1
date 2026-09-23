@@ -7,11 +7,14 @@ import { extractChunk, readSSE, ToolCallAccumulator, type JarvisEvent } from "@/
 import { denyAll } from "@/lib/tools/fs/approval";
 
 /**
- * Cap on tool rounds per user turn.
+ * Cap on tool rounds for an ordinary chat turn.
  *
  * Each round is a full upstream request, so an unbounded loop would burn a
  * free-tier quota (Groq allows ~30/min) in seconds. On the last round tools are
  * withheld, which forces the model to answer with what it has.
+ *
+ * A task run raises this — see `agentRounds` in the registry — but only when
+ * the user asks for one, and only as far as the chosen provider can afford.
  */
 export const MAX_ROUNDS = 5;
 
@@ -27,6 +30,21 @@ export interface AgentOptions {
   endpoint?: string;
   /** Context and output sizes chosen in Settings, for the same slot. */
   budget?: { context?: number; maxOutput?: number };
+  /**
+   * Tool rounds this turn may use. Defaults to the ordinary chat cap; the
+   * route raises it for a task run.
+   */
+  maxRounds?: number;
+  /**
+   * The goal of a task run, pinned so trimming cannot drop it.
+   *
+   * A long run accumulates tool output until `trimToBudget` starts discarding
+   * the oldest groups — and the oldest group is the instruction itself, so
+   * the run would carry on working on something it could no longer read.
+   * Restating it as a system message is enough, because trimming preserves
+   * those unconditionally.
+   */
+  goal?: string;
 }
 
 /**
@@ -43,14 +61,25 @@ export async function* runAgentTurn(
 ): AsyncGenerator<JarvisEvent> {
   const { providerId, key, model, temperature, signal, endpoint, budget } = options;
 
+  const maxRounds = Math.max(1, options.maxRounds ?? MAX_ROUNDS);
+
   const messages = [...history];
+  // Pinned ahead of the history so it reads as standing instruction rather
+  // than the latest thing said, and survives every trim.
+  if (options.goal) {
+    messages.unshift({
+      role: "system",
+      content: `The task you are working on, in the user's words: ${options.goal}`,
+    });
+  }
+
   const tools = allTools().map(toWireTool);
   // Flips to false if the model turns out not to support tools.
   let toolsEnabled = options.useTools !== false && tools.length > 0;
 
-  for (let round = 1; round <= MAX_ROUNDS; round++) {
+  for (let round = 1; round <= maxRounds; round++) {
     // Withhold tools on the final round so the model has to conclude.
-    const offerTools = toolsEnabled && round < MAX_ROUNDS;
+    const offerTools = toolsEnabled && round < maxRounds;
 
     let upstream: ReadableStream<Uint8Array>;
     try {
@@ -102,7 +131,7 @@ export async function* runAgentTurn(
     const calls = accumulator.finish();
     if (calls.length === 0) return;
 
-    yield { type: "tool_start", round, calls };
+    yield { type: "tool_start", round, calls, maxRounds };
 
     /**
      * Approval requests arrive while runToolCalls is awaiting, so they are
@@ -139,7 +168,7 @@ export async function* runAgentTurn(
 
     const results = await resultsPromise;
 
-    yield { type: "tool_end", round, results };
+    yield { type: "tool_end", round, results, maxRounds };
 
     // Feed the exchange back so the next round sees what the tools returned.
     messages.push({

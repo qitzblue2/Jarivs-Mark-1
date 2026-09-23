@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 
 import {
   anyProviderConfigured,
+  agentRounds,
   defaultProviderId,
   fallbackOrder,
   getProvider,
@@ -19,7 +20,7 @@ import type { Attachment } from "@/lib/types";
 import { markRateLimited, skipCoolingDown } from "@/lib/providers/quota";
 import { wake } from "@/lib/wake-on-lan";
 import { encodeEvent, type JarvisEvent } from "@/lib/stream";
-import { runAgentTurn } from "@/lib/agent";
+import { MAX_ROUNDS, runAgentTurn } from "@/lib/agent";
 import { denyAll } from "@/lib/tools/fs/approval";
 import { DEFAULT_PERSONA } from "@/lib/persona";
 import { forPrompt, getMemory } from "@/lib/memory";
@@ -35,6 +36,23 @@ interface IncomingMessage {
   attachments?: Attachment[];
 }
 
+/**
+ * What the run was actually asked to do.
+ *
+ * Pinned into a task run so `trimToBudget` cannot discard it — the trim walks
+ * backwards keeping the newest groups, so the opening instruction is the very
+ * first thing to go once tool output piles up.
+ */
+function lastUserText(messages: IncomingMessage[]): string | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.role !== "user") continue;
+    const text = typeof message.content === "string" ? message.content.trim() : "";
+    if (text) return text.slice(0, 2000);
+  }
+  return undefined;
+}
+
 interface ChatBody {
   messages: IncomingMessage[];
   provider?: string;
@@ -43,6 +61,12 @@ interface ChatBody {
   persona?: string;
   /** Set false to disable tool use for this turn. */
   useTools?: boolean;
+  /**
+   * Run this turn as a task: more tool rounds, and the goal pinned so a long
+   * run cannot forget it. Opt-in from the composer, never inferred — it
+   * spends the user's quota and writes to their workspace.
+   */
+  task?: boolean;
   /** Bring-your-own keys from Settings, keyed by provider id. */
   keys?: Record<string, string>;
   /** Base URLs from Settings, for slots that allow one. */
@@ -241,6 +265,11 @@ export async function POST(req: NextRequest) {
           useTools,
           endpoint: endpoints[providerId],
           budget: budgets[providerId],
+          // Sized by whoever is actually answering — this may be a fallback
+          // provider rather than the one the user picked, and a flat-rate slot
+          // can afford a run that Groq's tokens-per-minute cannot.
+          maxRounds: agentRounds(providerId, Boolean(body.task), MAX_ROUNDS),
+          goal: body.task ? lastUserText(messages) : undefined,
         });
 
         // Pull the first event before responding: the agent's opening upstream
@@ -266,6 +295,11 @@ export async function POST(req: NextRequest) {
                 send({ type: "error", message: (err as Error).message || "Stream failed." });
               }
             } finally {
+              // Ends the run-scoped write grant, and denies anything still
+              // parked. A grant that outlived its turn would silently approve
+              // writes in the NEXT one, which is the whole thing it must not
+              // do — so the turn ending is what revokes it, however it ends.
+              denyAll();
               controller.close();
             }
           },

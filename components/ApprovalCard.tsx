@@ -27,13 +27,13 @@ export default function ApprovalCard({ approval, onSettled }: Props) {
   const [busy, setBusy] = useState<"approve" | "deny" | null>(null);
   const [expanded, setExpanded] = useState(approval.kind === "command");
 
-  async function settle(decision: "approve" | "deny") {
+  async function settle(decision: "approve" | "deny", scope: "once" | "run" = "once") {
     setBusy(decision);
     try {
       await fetch("/api/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: approval.id, decision }),
+        body: JSON.stringify({ id: approval.id, decision, scope }),
       });
     } catch {
       /* the server-side timeout will deny it anyway */
@@ -92,6 +92,19 @@ export default function ApprovalCard({ approval, onSettled }: Props) {
           <Check size={12} />
           {busy === "approve" ? "Running…" : "Approve"}
         </button>
+        {/* Offered for writes only. A write cannot leave the workspace, so a
+            standing yes is bounded; a command's reach is not, which is why it
+            keeps asking every time however long the run. */}
+        {!isCommand && (
+          <button
+            onClick={() => void settle("approve", "run")}
+            disabled={busy !== null}
+            className="flex items-center gap-1.5 rounded-md border border-arc-dim/50 px-3 py-1.5 text-[12px] text-arc transition hover:bg-arc-dim/10 disabled:opacity-50"
+          >
+            <Check size={12} />
+            Allow writes for this run
+          </button>
+        )}
         <button
           onClick={() => void settle("deny")}
           disabled={busy !== null}

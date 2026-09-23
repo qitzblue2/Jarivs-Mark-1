@@ -491,6 +491,40 @@ forgotten tab quietly approving things.
 that, `env` hands out your Groq, Cerebras and Tavily keys, which is worse than
 anything it could do to a file. Verified: `env | grep -c API_KEY` returns 0.
 
+### Task runs — "Work on this"
+
+An ordinary turn gets **four tool steps**. That is enough to answer a question
+and not nearly enough to do a job: read a file, edit it, run the test, read the
+output, and you are out, mid-task.
+
+Pressing **Work on this** instead of Send starts a *task run*, which raises the
+ceiling and pins your instruction so a long run cannot forget it. Two things
+are deliberate about it:
+
+**It is opt-in per message, never inferred.** A longer run spends more of your
+quota and writes more to your workspace. That is a decision, so it is a button,
+not a heuristic that fires when the model asks for a sixth round.
+
+**The ceiling depends on who is answering.** A tool round is a whole upstream
+request, so what it costs varies enormously — nothing on a flat-rate
+subscription, most of a minute on Groq's 6,000 tokens. NanoGPT, Arli and
+Featherless get 25 rounds; Gemini and Mistral 12; Groq stays at 5, because a
+long run there would spend the minute before it got anywhere.
+
+During a run the tool trace reads **"step 7 of 25"**, so a run going nowhere is
+visible rather than merely felt, and Stop ends the whole thing.
+
+Approvals change shape too. Twenty steps meant twenty cards, and a card denies
+on timeout — so one missed click derailed the run. The first card now also
+offers **"Allow writes for this run"**. It covers writes only, expires when the
+turn ends however it ends, and **never covers commands**: a write cannot leave
+the workspace, and a shell command's reach is bounded by nothing this process
+controls.
+
+> Small models drift badly over twenty rounds in a way they don't over four.
+> Use the picker's **"Can this model use tools?"** probe before handing one a
+> long run.
+
 Reads are unattended. A handful of catastrophic commands (`rm -rf /`, `mkfs`,
 fork bombs) are refused outright even with approval.
 

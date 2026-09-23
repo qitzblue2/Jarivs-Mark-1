@@ -25,6 +25,33 @@ export interface ApprovalRequest {
 
 export type ApprovalDecision = "approve" | "deny";
 
+/**
+ * A standing "yes" for writes, for the length of one task run.
+ *
+ * Twenty steps meant twenty cards, and one missed click denied on timeout and
+ * derailed the run — so the gate was unusable exactly where it mattered most.
+ *
+ * Deliberately narrow. It covers `write` only: a write cannot leave the
+ * workspace, because workspace.ts resolves the real path and re-checks
+ * containment after following symlinks. `command` is never covered, because a
+ * shell command's blast radius is not bounded by anything this process
+ * controls, so it stays one decision each however long the run.
+ *
+ * Module-level like `pending`, cleared by `denyAll()` — so aborting a turn or
+ * dropping the connection also revokes it, and it can never outlive the run
+ * that asked for it.
+ */
+let writeGrant = false;
+
+/** Called when the user picks "allow writes for this run" on a card. */
+export function grantWritesForRun(): void {
+  writeGrant = true;
+}
+
+export function writesGranted(): boolean {
+  return writeGrant;
+}
+
 interface Pending {
   request: ApprovalRequest;
   resolve: (decision: ApprovalDecision) => void;
@@ -41,6 +68,9 @@ export function requestApproval(
   input: Omit<ApprovalRequest, "id" | "createdAt">,
   onCreated: (request: ApprovalRequest) => void,
 ): Promise<ApprovalDecision> {
+  // A run-scoped grant answers for writes without a card. Commands always ask.
+  if (input.kind === "write" && writeGrant) return Promise.resolve("approve");
+
   const request: ApprovalRequest = { ...input, id: newId(), createdAt: Date.now() };
 
   return new Promise<ApprovalDecision>((resolve) => {
@@ -68,8 +98,15 @@ export function settleApproval(id: string, decision: ApprovalDecision): boolean 
   return true;
 }
 
-/** Deny everything outstanding — used when a turn is aborted. */
+/**
+ * Deny everything outstanding — used when a turn is aborted.
+ *
+ * Also revokes the run-scoped write grant. That pairing is the point: the
+ * grant is only ever as long as the run, and a turn that ends for any
+ * reason — finished, aborted, disconnected — ends it too.
+ */
 export function denyAll(): void {
+  writeGrant = false;
   for (const id of [...pending.keys()]) settleApproval(id, "deny");
 }
 

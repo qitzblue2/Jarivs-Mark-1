@@ -193,6 +193,32 @@ const server = http.createServer((req, res) => {
         res.end();
       };
 
+      /**
+       * A model that never stops asking, so a round budget can be measured.
+       *
+       * Every other case here answers after one tool result, which is what a
+       * well-behaved model does — and which means none of them can show
+       * whether the loop stops at 5 rounds or 25. This one keeps calling
+       * until the harness withholds tools on the final round, at which point
+       * it has to conclude. The round number comes from counting tool results
+       * already in the conversation.
+       */
+      if (/keep going|many steps/i.test(prompt)) {
+        if (!parsed.tools?.length) {
+          return streamText(
+            res,
+            `Stopped after ${messages.filter((m) => m.role === "tool").length} steps.`,
+            finish,
+          );
+        }
+        const step = messages.filter((m) => m.role === "tool").length + 1;
+        return streamToolCall(
+          res,
+          { id: `call_step${step}`, name: "get_time", args: { timezone: "UTC" } },
+          finish,
+        );
+      }
+
       // Ask for a tool the first time round, then answer using its result.
       if (parsed.tools?.length && /write.*file|create.*file/i.test(prompt) && !alreadyRanTool) {
         return streamToolCall(

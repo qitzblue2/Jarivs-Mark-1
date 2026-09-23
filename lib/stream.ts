@@ -7,9 +7,12 @@ export type JarvisEvent =
   | { type: "meta"; provider: string; model: string; fellBackFrom?: string }
   | { type: "token"; value: string }
   /** A tool round is starting; `round` is 1-based. */
-  | { type: "tool_start"; round: number; calls: { id: string; name: string; arguments: string }[] }
+  // `maxRounds` travels with the round so the UI can say "step 7 of 25". On an
+  // ordinary turn it is the usual cap; on a task run it is what the provider
+  // can afford, and a run that is going nowhere is visible rather than felt.
+  | { type: "tool_start"; round: number; maxRounds?: number; calls: { id: string; name: string; arguments: string }[] }
   /** That round's results came back. */
-  | { type: "tool_end"; round: number; results: { toolCallId: string; name: string; content: string; isError: boolean; ms: number }[] }
+  | { type: "tool_end"; round: number; maxRounds?: number; results: { toolCallId: string; name: string; content: string; isError: boolean; ms: number }[] }
   /** The model does not support tools; we retried without them. */
   | { type: "tools_unsupported"; model: string }
   /** A tool needs the user to approve something before it can run. */

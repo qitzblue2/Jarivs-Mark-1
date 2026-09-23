@@ -55,6 +55,17 @@ export interface ProviderConfig {
    */
   visionModels?: string[];
   /**
+   * Tool rounds this provider can afford in one agent run.
+   *
+   * Ordinary chat is capped at MAX_ROUNDS for everyone. This is the ceiling
+   * when the user explicitly starts a task run, and it differs by provider
+   * because a round is a whole upstream request: on a flat-rate subscription
+   * that costs nothing, while on Groq's 6,000 tokens a minute it is most of
+   * the budget. Unset means the ordinary cap applies — never raise a
+   * provider's ceiling without knowing what a round costs there.
+   */
+  maxAgentRounds?: number;
+  /**
    * Query string appended to the model-list request, without the `?`.
    *
    * Exists because "list the models" is not the same question everywhere.

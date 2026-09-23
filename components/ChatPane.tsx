@@ -14,7 +14,7 @@ interface Props {
   streamingMessageId: string | null;
   input: string;
   onInputChange: (value: string) => void;
-  onSend: () => void;
+  onSend: (task?: boolean) => void;
   onStop: () => void;
   onRegenerate: (messageId: string) => void;
   onEditMessage: (messageId: string, content: string) => void;

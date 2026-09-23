@@ -43,6 +43,12 @@ export interface Message {
 /** One request/response cycle of tool use inside a single assistant turn. */
 export interface ToolRound {
   round: number;
+  /**
+   * The ceiling this turn was given. Carried per round so the trace can say
+   * "step 7 of 25" — on a long task run, knowing whether it is making progress
+   * or about to run out is the difference between waiting and intervening.
+   */
+  maxRounds?: number;
   calls: { id: string; name: string; arguments: string }[];
   results: { toolCallId: string; name: string; content: string; isError: boolean; ms: number }[];
 }

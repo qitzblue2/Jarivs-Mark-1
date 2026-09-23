@@ -260,6 +260,8 @@ export default function Workspace() {
       history: Message[],
       /** Called with the cumulative reply as it streams, for voice mode. */
       onProgress?: (soFar: string) => void,
+      /** Run as a task: more tool rounds, and the goal pinned against trims. */
+      task = false,
     ): Promise<string> => {
       const assistantId = newId();
       const assistant: Message = {
@@ -327,6 +329,7 @@ export default function Workspace() {
             temperature: settings.temperature,
             persona: settings.persona,
             useTools: settings.useTools,
+            task,
             keys: settings.keys,
             endpoints: settings.endpoints ?? {},
             budgets: settings.budgets ?? {},
@@ -348,7 +351,10 @@ export default function Workspace() {
             paint();
           } else if (event.type === "tool_start") {
             // Show the call immediately; results fill in when the round ends.
-            toolRounds = [...toolRounds, { round: event.round, calls: event.calls, results: [] }];
+            toolRounds = [
+              ...toolRounds,
+              { round: event.round, maxRounds: event.maxRounds, calls: event.calls, results: [] },
+            ];
             paint(true);
           } else if (event.type === "tool_end") {
             toolRounds = toolRounds.map((r) =>
@@ -417,7 +423,7 @@ export default function Workspace() {
     [provider, model, settings, persist],
   );
 
-  async function send() {
+  async function send(task = false) {
     const text = input.trim();
     if ((!text && pending.length === 0) || streaming) return;
 
@@ -443,7 +449,7 @@ export default function Workspace() {
 
     setInput("");
     setPending([]);
-    await runTurn(titled, history);
+    await runTurn(titled, history, undefined, task);
   }
 
   function stop() {

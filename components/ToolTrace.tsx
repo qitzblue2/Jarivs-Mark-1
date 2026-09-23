@@ -28,6 +28,8 @@ export default function ToolTrace({ rounds, pending }: Props) {
   const failures = rounds.flatMap((r) => r.results).filter((r) => r.isError).length;
   const totalMs = rounds.flatMap((r) => r.results).reduce((sum, r) => sum + r.ms, 0);
   const names = [...new Set(calls.map((c) => c.name))];
+  // The ceiling the turn was given, if it reported one.
+  const budget = rounds[rounds.length - 1]?.maxRounds;
 
   return (
     <div className="mb-2 overflow-hidden rounded-lg border border-line bg-base/60">
@@ -42,7 +44,11 @@ export default function ToolTrace({ rounds, pending }: Props) {
         <Wrench size={11} className={`shrink-0 ${pending ? "animate-pulse text-arc" : "text-ink-faint"}`} />
         <span className="min-w-0 flex-1 truncate">
           {pending ? "Running" : "Used"} {names.join(", ")}
-          {rounds.length > 1 && ` · ${rounds.length} rounds`}
+          {/* On a task run the ceiling is what matters, not the count so far:
+              "4 rounds" reads as finished, "step 4 of 25" reads as working. */}
+          {budget && budget > rounds.length
+            ? ` · step ${rounds.length} of ${budget}`
+            : rounds.length > 1 && ` · ${rounds.length} rounds`}
         </span>
         {failures > 0 && (
           <span className="flex shrink-0 items-center gap-1 text-warn">

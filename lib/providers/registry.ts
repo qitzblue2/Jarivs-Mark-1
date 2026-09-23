@@ -42,6 +42,9 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     // these two together have to fit inside it with room for a tool round.
     maxRequestTokens: 3500,
     maxOutputTokens: 2048,
+    // 6,000 tokens/min is roughly two rounds. A long run here would spend
+    // the minute before it got anywhere, so it keeps the ordinary cap.
+    maxAgentRounds: 5,
     note: "Free, no card. Very fast. ~6K tokens/min, so replies stay brief.",
     // qwen3.6-27b takes text and images: max 3 images, 2048 tokens each,
     // and only 1,000 requests/day on the free tier.
@@ -74,6 +77,9 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     // counts toward it too — so input plus output has to fit inside that.
     maxRequestTokens: 20_000,
     maxOutputTokens: 4096,
+    // Tokens are not the constraint; 10 requests a minute is. A dozen rounds
+    // is a couple of minutes of wall clock, which is tolerable for a task.
+    maxAgentRounds: 12,
     note: "Free, no card. 250K tokens/min — by far the most headroom.",
     visionModels: ["gemini"],
   },
@@ -89,6 +95,9 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     // 8K window is the binding constraint here, not the quota.
     maxRequestTokens: 6000,
     maxOutputTokens: 1024,
+    // The 8K window is what bites: a run accumulates tool output and starts
+    // dropping it early, so a long one forgets more than it learns.
+    maxAgentRounds: 6,
     note: "Free, no card. 1M tokens/day. Fastest, but 8K context.",
   },
   mistral: {
@@ -103,6 +112,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     // a 429 that this should have avoided.
     maxRequestTokens: 16_000,
     maxOutputTokens: 2048,
+    maxAgentRounds: 12,
     note: "Free, no card. Roughly 1B tokens a month.",
   },
   /**
@@ -123,6 +133,9 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     maxOutputTokens: 2048,
     // One tool-using turn is up to five requests, so the free tier is ten
     // turns a day. A way to reach a specific model, not a workhorse.
+    // A task run is many requests against a daily request cap, and on paid
+    // models it is many charges. Deliberately short.
+    maxAgentRounds: 8,
     note: "50 requests/day free; 1,000 after a one-off $10 credit.",
     // Hundreds of models, a good number of which see. Matching by name is
     // the only option when the catalogue changes weekly.
@@ -169,6 +182,9 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     // conversation is the failure this field exists to prevent.
     maxRequestTokens: 24_000,
     maxOutputTokens: 4096,
+    // Flat rate: an extra round costs nothing, and 60 req/min is well above
+    // what a sequential loop can ask for. This is the slot to run tasks on.
+    maxAgentRounds: 25,
     note: "Paid, $8/mo. 200+ models, 60 req/min. Cheapest way off the free tiers.",
     visionModels: VISION_PATTERNS,
   },
@@ -204,6 +220,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     // Leaves room for the reply inside that window.
     maxRequestTokens: 26_000,
     maxOutputTokens: 4096,
+    maxAgentRounds: 25,
     note: "Paid, $25/mo. Unlimited tokens, ~22,000 models, every size, 32K.",
     /**
      * `available_on_current_plan` narrows 22,000 models to the ones this
@@ -247,6 +264,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     // Leaves room for the reply inside the tier's context window.
     maxRequestTokens: 13_000,
     maxOutputTokens: 2048,
+    maxAgentRounds: 25,
     note: "Paid, ~$10/mo. Unlimited tokens and requests — never rate-limits.",
     visionModels: VISION_PATTERNS,
   },
@@ -278,6 +296,9 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     maxContextTokens: 16_000,
     maxRequestTokens: 13_000,
     maxOutputTokens: 2048,
+    // Unlimited, but Llama 3.1-era models drift badly over many rounds, and a
+    // confused agent with a filesystem is worse than a short one.
+    maxAgentRounds: 12,
     note: "Paid, from ~$5/mo. Unlimited tokens; models are Llama 3.1-era.",
   },
   /**
@@ -307,6 +328,9 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     // Generous: a cold Ollama loads the weights from disk before it can even
     // start, and prefill on a CPU is slow the first time through a prompt.
     firstByteTimeoutMs: 90_000,
+    // Nothing to spend but your own time, and a task run is exactly what a
+    // machine you already own is for.
+    maxAgentRounds: 20,
     note: "Any OpenAI-compatible URL — Ollama at home, or a host you rent.",
   },
 };
@@ -462,6 +486,22 @@ export function resolveWakeMac(id: string, clientMac?: string | null): string | 
  */
 export function preferredModel(id: string): string | null {
   return envFor(id, "MODEL") || null;
+}
+
+/**
+ * How many tool rounds one turn may use on this provider.
+ *
+ * `ordinary` is the cap every normal chat turn gets, and is the answer unless
+ * the user explicitly started a task run — escalating on the model's say-so
+ * would spend their quota and touch their files without being asked.
+ *
+ * A provider that declares no ceiling keeps the ordinary one. That is the
+ * safe default for anything added later: a new slot does not silently become
+ * a place to run twenty-five requests.
+ */
+export function agentRounds(id: string, task: boolean, ordinary: number): number {
+  if (!task) return ordinary;
+  return Math.max(ordinary, PROVIDERS[id]?.maxAgentRounds ?? ordinary);
 }
 
 /** True when this model can accept image input. */

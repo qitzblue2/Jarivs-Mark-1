@@ -26,8 +26,10 @@ import {
   resolveWakeMac,
   sanitizeEndpoint,
   supportsVision,
+  agentRounds,
 } from "../lib/providers/registry";
 import { listModels, streamChat } from "../lib/providers/openai-compat";
+import { MAX_ROUNDS, runAgentTurn } from "../lib/agent";
 import {
   cachedModels,
   clearCooldowns,
@@ -286,6 +288,28 @@ console.log("\n--- what one request is allowed to cost ---");
     nano.maxRequestTokens! + nano.maxOutputTokens <= 32_000,
     true,
   );
+
+  /**
+   * Agent round budgets.
+   *
+   * A round is a whole upstream request, so what a provider can afford
+   * differs enormously: unlimited on a flat-rate subscription, two on Groq's
+   * 6,000 tokens a minute.
+   */
+  eq("ordinary chat is capped for everyone", agentRounds("nanogpt", false, 5), 5);
+  eq("a task run on a flat-rate slot gets room", agentRounds("nanogpt", true, 5) > 5, true);
+  // The point of making this per-provider rather than one constant.
+  eq(
+    "and more room than Groq, which is metered per minute",
+    agentRounds("nanogpt", true, 5) > agentRounds("groq", true, 5),
+    true,
+  );
+  eq("Groq's task run stays near the ordinary cap", agentRounds("groq", true, 5), 5);
+  // The safe default for any slot added later: no ceiling declared means no
+  // escalation, so a new provider never silently becomes a place to run 25
+  // requests.
+  eq("an unknown provider never escalates", agentRounds("nope", true, 5), 5);
+  eq("and a ceiling can never lower the ordinary cap", agentRounds("cerebras", true, 9) >= 9, true);
 
   // Text-only models. Claiming vision would fail requests that currently
   // degrade to a description and still get answered.
@@ -647,6 +671,48 @@ console.log("\n--- a catalogue of twenty-two thousand ---");
     delete process.env.JARVIS_FEATHERLESS_BASE_URL;
     delete process.env.JARVIS_LOCAL_BASE_URL;
     await new Promise((r) => huge.close(() => r(null)));
+  }
+}
+
+console.log("\n--- a task run gets past the four-round wall ---");
+{
+  /**
+   * The wall this removes. MAX_ROUNDS was 5 and tools are withheld on the
+   * last round, so an ordinary turn gets four tool steps — read a file, edit
+   * it, run the test, read the output, and you are out, mid-task.
+   *
+   * Driven against the mock's never-stopping case, which keeps asking for a
+   * tool until the harness stops offering them.
+   */
+  const loop = spawn(process.execPath, ["test/mock-provider.mjs"], {
+    env: { ...process.env, MOCK_PORT: "8911", MOCK_NO_AUTH: "1" },
+    stdio: "ignore",
+  });
+  await new Promise((r) => setTimeout(r, 500));
+
+  const countRounds = async (maxRounds?: number) => {
+    let rounds = 0;
+    const turn = runAgentTurn(
+      [{ role: "user", content: "keep going" }],
+      { providerId: "local", key: "", model: "mock-fast-8b", maxRounds },
+    );
+    for await (const event of turn) if (event.type === "tool_end") rounds++;
+    return rounds;
+  };
+
+  try {
+    process.env.JARVIS_LOCAL_BASE_URL = "http://127.0.0.1:8911/v1";
+
+    const ordinary = await countRounds();
+    eq("an ordinary turn stops at four tool rounds", ordinary, MAX_ROUNDS - 1);
+
+    // The whole point of the feature.
+    const task = await countRounds(agentRounds("local", true, MAX_ROUNDS));
+    eq("a task run goes further", task > ordinary, true);
+    eq("as far as the provider's ceiling allows", task, agentRounds("local", true, MAX_ROUNDS) - 1);
+  } finally {
+    delete process.env.JARVIS_LOCAL_BASE_URL;
+    loop.kill();
   }
 }
 

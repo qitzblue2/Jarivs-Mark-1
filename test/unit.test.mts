@@ -1,5 +1,12 @@
 /** Pure-function tests. Run with: npm test */
 import { readFileSync } from "node:fs";
+import {
+  denyAll,
+  grantWritesForRun,
+  requestApproval,
+  settleApproval,
+  writesGranted,
+} from "../lib/tools/fs/approval";
 import { extractCodeBlocks, artifactsFromMessage, buildPreviewDocument } from "../lib/codeblocks";
 import { trimToBudget, truncateMiddle, estimateTokens } from "../lib/tokens";
 import { ToolCallAccumulator, extractChunk } from "../lib/stream";
@@ -750,6 +757,77 @@ console.log("\n--- room noise ---");
   eq("punctuation only is noise", isNoise("..."), true);
   eq("short real word survives", isNoise("hello"), false);
   eq("okay with a question survives", isNoise("okay what time is it"), false);
+}
+
+console.log("\n--- a long run doesn't forget what it was asked ---");
+{
+  /**
+   * The bug this prevents. trimToBudget walks backwards keeping the newest
+   * groups, so on a long agent run the oldest group goes first — and the
+   * oldest group is the instruction. The run then carries on diligently
+   * working on something it can no longer read.
+   *
+   * The fix reuses the trim's own rule rather than adding another: system
+   * messages are kept unconditionally, so the goal is pinned as one.
+   */
+  const goal = "The task you are working on, in the user's words: rename the widget";
+  const bulky = Array.from({ length: 40 }, (_, i) => ({
+    role: i % 2 ? "tool" : "assistant",
+    content: `step ${i} ` + "x".repeat(2000),
+  }));
+
+  const unpinned = trimToBudget(
+    [{ role: "user", content: "rename the widget" }, ...bulky],
+    2000,
+  );
+  eq(
+    "without pinning, the instruction is dropped",
+    unpinned.messages.some((m) => m.content === "rename the widget"),
+    false,
+  );
+
+  const pinned = trimToBudget([{ role: "system", content: goal }, ...bulky], 2000);
+  eq("pinned as a system message it survives", pinned.messages.some((m) => m.content === goal), true);
+  // Tool output should still be dropped — it is the bulk, and dropping it is
+  // what keeps the request inside the budget at all.
+  eq("and the bulk is still trimmed", pinned.dropped > 0, true);
+}
+
+console.log("\n--- a task run's write grant is narrow ---");
+{
+  /**
+   * Twenty steps meant twenty approval cards, and a card denies on timeout,
+   * so one missed click derailed a run. The grant fixes that without becoming
+   * a blanket yes.
+   */
+  const card = () => {};
+  denyAll();
+  eq("no grant to begin with", writesGranted(), false);
+
+  grantWritesForRun();
+  eq("granting is visible", writesGranted(), true);
+
+  const write = await requestApproval({ kind: "write", summary: "write a.txt" }, card);
+  eq("a granted run approves writes without asking", write, "approve");
+
+  /**
+   * The line that matters. A write cannot leave the workspace — workspace.ts
+   * re-checks containment after resolving symlinks — but a shell command's
+   * reach is bounded by nothing this process controls, so it asks every time
+   * however long the run.
+   */
+  let commandAsked = false;
+  const command = requestApproval({ kind: "command", summary: "rm -rf /" }, (r) => {
+    commandAsked = true;
+    settleApproval(r.id, "deny");
+  });
+  eq("a command still asks", commandAsked, true);
+  eq("and is denied when refused", await command, "deny");
+
+  // The grant lives exactly as long as the run: the turn ending revokes it,
+  // however it ended.
+  denyAll();
+  eq("ending the turn revokes the grant", writesGranted(), false);
 }
 
 console.log("\n--- the voice ships with the app ---");
