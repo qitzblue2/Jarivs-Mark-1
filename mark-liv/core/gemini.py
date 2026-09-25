@@ -371,6 +371,14 @@ def call(contents, tier: str = FAST, config=None,
     a silent None during a session nobody can debug is how the original problem
     stayed hidden.
     """
+    # ── NanoGPT (added in the Jarivs-Mark-1 import — see NOTICE.md) ──────────
+    # When the install runs on NanoGPT, every side call goes there instead and
+    # nothing below reaches Google. This one branch covers all nine callers,
+    # because the author already routed them through here.
+    from core import nanogpt as _nanogpt
+    if _nanogpt.enabled():
+        return _nanogpt_call(contents, tier, config, timeout_ms)
+
     # `tier` is normally FAST or SMART. Anything else is taken to be an explicit
     # model name — screen_agent lets the user pick one in its settings — and it
     # is tried first, with the reasoning ladder behind it. So a user's choice is
@@ -409,6 +417,40 @@ def call(contents, tier: str = FAST, config=None,
             else:
                 print(f"[Gemini] {model}: {type(e).__name__}: {msg[:140]}")
     return None
+
+
+def _nanogpt_call(contents, tier: str, config, timeout_ms: int):
+    """`call`, answered by NanoGPT. Returns an object with `.text`, or None —
+    exactly what the Gemini path returns, so no caller can tell the difference.
+
+    SEARCH returns None on purpose. Grounded search is a Google feature with no
+    NanoGPT equivalent, and every search caller already treats None as "use
+    DuckDuckGo" — so it degrades to the fallback the app was built with.
+    """
+    from core import nanogpt as _nanogpt
+
+    if tier == SEARCH:
+        return None
+
+    system = ""
+    temperature = None
+    if config is not None:
+        system = getattr(config, "system_instruction", None) or (
+            config.get("system_instruction") if isinstance(config, dict) else None) or ""
+        if not isinstance(system, str):
+            system = " ".join(getattr(p, "text", "") or "" for p in getattr(system, "parts", []) or [])
+        temperature = getattr(config, "temperature", None) if not isinstance(config, dict) else config.get("temperature")
+
+    return _nanogpt.one_shot(
+        _to_live_parts(contents),
+        # Same instruction the Live one-shots use: an answer, no small talk.
+        system=system or _ONE_SHOT_SYSTEM,
+        # An explicit model name here is a Gemini one; on NanoGPT it means
+        # "the reasoning tier", which is what the user was asking for.
+        fast=(tier == FAST),
+        timeout_s=max(10.0, timeout_ms / 1000.0),
+        temperature=temperature,
+    )
 
 
 def text(contents, tier: str = FAST, config=None,

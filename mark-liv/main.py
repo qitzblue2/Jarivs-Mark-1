@@ -283,8 +283,10 @@ def _render_prompt(template: str, values: dict) -> str:
 
 
 def _get_api_key() -> str:
+    # .get, not [...]: a NanoGPT-only install has no Gemini key, and this must
+    # not be the line that crashes it. (Changed in the Jarivs-Mark-1 import.)
     with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+        return json.load(f).get("gemini_api_key", "")
 
 
 def _load_system_prompt() -> str:
@@ -911,8 +913,36 @@ class JarvisLive:
         except Exception:
             pass
 
+    def _open_session(self, config):
+        """The Live session: Gemini's, or the local NanoGPT stand-in.
+
+        Added in the Jarivs-Mark-1 import (see NOTICE.md). Everything after the
+        `async with` talks to the session through the same four methods either
+        way, which is why this is the only place that has to choose.
+        """
+        from core import nanogpt
+        if nanogpt.enabled():
+            from core.local_live import LocalLiveSession
+            print("[JARVIS] 🧠 Engine: NanoGPT — local ears and voice, no Google")
+            return LocalLiveSession(config)
+
+        # Fresh client on every reconnect — avoids stale HTTP session state
+        # v1alpha carries proactive audio; if it gets rejected we fall
+        # back to v1beta.
+        client = genai.Client(
+            api_key=_get_api_key(),
+            http_options={"api_version": "v1alpha" if self._enhanced_live else "v1beta"}
+        )
+        return client.aio.live.connect(model=LIVE_MODEL, config=config)
+
     def interrupt(self) -> None:
         """Stop JARVIS mid-speech: drain queued audio and open mic immediately."""
+        # The local session has to be told: Gemini notices an interruption on
+        # its own server, but nothing else would stop a local reply still being
+        # generated. (Added in the Jarivs-Mark-1 import.)
+        cancel = getattr(self.session, "cancel", None)
+        if callable(cancel):
+            cancel()
         self._interrupted = True
         q = self.audio_in_queue
         if q:
@@ -2085,16 +2115,8 @@ class JarvisLive:
                 _resumed_with = self._resume_handle is not None
                 config = self._build_config()
 
-                # Fresh client on every reconnect — avoids stale HTTP session state
-                # v1alpha carries proactive audio; if it gets rejected we fall
-                # back to v1beta.
-                client = genai.Client(
-                    api_key=_get_api_key(),
-                    http_options={"api_version": "v1alpha" if self._enhanced_live else "v1beta"}
-                )
-
                 async with (
-                    client.aio.live.connect(model=LIVE_MODEL, config=config) as session,
+                    self._open_session(config) as session,
                     asyncio.TaskGroup() as tg,
                 ):
                     self.session          = session

@@ -1368,7 +1368,14 @@ class _CameraPreview(QWidget):
 
 
 class SetupOverlay(QWidget):
-    done = pyqtSignal(str, str)
+    # (key, os_name, engine). The engine argument was added in the Jarivs-Mark-1
+    # import so the first run can pick NanoGPT instead of Gemini; see NOTICE.md.
+    done = pyqtSignal(str, str, str)
+
+    _ENGINES = {
+        "nanogpt": ("NANOGPT API KEY", "Paste your NanoGPT key…"),
+        "gemini":  ("GEMINI API KEY",  "AIza…"),
+    }
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1407,11 +1414,25 @@ class SetupOverlay(QWidget):
         sep.setStyleSheet(f"color: {C.BORDER};"); layout.addWidget(sep)
         layout.addSpacing(4)
 
-        layout.addWidget(_lbl("GEMINI API KEY", 8, color=C.TEXT_DIM,
+        layout.addWidget(_lbl("BRAIN", 8, color=C.TEXT_DIM,
                                align=Qt.AlignmentFlag.AlignLeft))
+        engine_row = QHBoxLayout(); engine_row.setSpacing(6)
+        self._engine_btns: dict[str, QPushButton] = {}
+        for key, label in [("nanogpt", "NanoGPT  (local voice)"), ("gemini", "Gemini Live")]:
+            btn = QPushButton(label)
+            btn.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+            btn.setFixedHeight(30)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _, k=key: self._sel_engine(k))
+            engine_row.addWidget(btn)
+            self._engine_btns[key] = btn
+        layout.addLayout(engine_row)
+        layout.addSpacing(6)
+
+        self._key_label = _lbl("", 8, color=C.TEXT_DIM, align=Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self._key_label)
         self._key_input = QLineEdit()
         self._key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self._key_input.setPlaceholderText("AIza…")
         self._key_input.setFont(QFont("Courier New", 10))
         self._key_input.setFixedHeight(32)
         self._key_input.setStyleSheet(f"""
@@ -1422,6 +1443,10 @@ class SetupOverlay(QWidget):
             QLineEdit:focus {{ border: 1px solid {C.PRI}; }}
         """)
         layout.addWidget(self._key_input)
+        # A re-prompt opens on the engine already in use (a config from before
+        # this import has no "engine" but a Gemini key); a first run on NanoGPT.
+        cfg = _read_full_config()
+        self._sel_engine(cfg.get("engine") or ("gemini" if cfg.get("gemini_api_key") else "nanogpt"))
         layout.addSpacing(12)
 
         sep2 = QFrame(); sep2.setFrameShape(QFrame.Shape.HLine)
@@ -1485,6 +1510,29 @@ class SetupOverlay(QWidget):
                     QPushButton:hover {{ color: {C.TEXT}; border: 1px solid {C.BORDER_B}; }}
                 """)
 
+    def _sel_engine(self, key: str):
+        key = key if key in self._ENGINES else "nanogpt"
+        self._engine = key
+        label, placeholder = self._ENGINES[key]
+        self._key_label.setText(label)
+        self._key_input.setPlaceholderText(placeholder)
+        for k, btn in self._engine_btns.items():
+            if k == key:
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: {C.PRI}; color: #001a22;
+                        border: none; border-radius: 3px; font-weight: bold;
+                    }}
+                """)
+            else:
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: #000d12; color: {C.TEXT_DIM};
+                        border: 1px solid {C.BORDER}; border-radius: 3px;
+                    }}
+                    QPushButton:hover {{ color: {C.TEXT}; border: 1px solid {C.BORDER_B}; }}
+                """)
+
     def _submit(self):
         key = self._key_input.text().strip()
         if not key:
@@ -1493,7 +1541,7 @@ class SetupOverlay(QWidget):
                 f" QLineEdit {{ border: 1px solid {C.RED}; }}"
             )
             return
-        self.done.emit(key, self._sel_os)
+        self.done.emit(key, self._sel_os, self._engine)
 
 
 class HueWheel(QWidget):
@@ -3542,7 +3590,7 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         cw = self.centralWidget()
         if self._overlay and self._overlay.isVisible():
-            ow, oh = 460, 390
+            ow, oh = 460, 450
             self._overlay.setGeometry(
                 (cw.width()  - ow) // 2,
                 (cw.height() - oh) // 2,
@@ -5172,6 +5220,9 @@ class MainWindow(QMainWindow):
         if not API_FILE.exists(): return False
         try:
             d = json.loads(API_FILE.read_text(encoding="utf-8"))
+            # A NanoGPT key counts as configured too (Jarivs-Mark-1 import).
+            if d.get("engine") == "nanogpt":
+                return bool(d.get("nanogpt_api_key")) and bool(d.get("os_system"))
             return bool(d.get("gemini_api_key")) and bool(d.get("os_system"))
         except Exception:
             return False
@@ -5179,7 +5230,7 @@ class MainWindow(QMainWindow):
     def _show_setup(self):
         ov = SetupOverlay(self.centralWidget())
         cw = self.centralWidget()
-        ow, oh = 460, 390
+        ow, oh = 460, 450
         ov.setGeometry(
             (cw.width()  - ow) // 2,
             (cw.height() - oh) // 2,
@@ -5189,12 +5240,15 @@ class MainWindow(QMainWindow):
         ov.show()
         self._overlay = ov
 
-    def _on_setup_done(self, key: str, os_name: str):
+    def _on_setup_done(self, key: str, os_name: str, engine: str = "gemini"):
         os.makedirs(CONFIG_DIR, exist_ok=True)
-        API_FILE.write_text(
-            json.dumps({"gemini_api_key": key, "os_system": os_name}, indent=4),
-            encoding="utf-8",
-        )
+        # Merged into what is there rather than overwriting it, so re-running
+        # setup keeps the other key and every saved setting (Jarivs-Mark-1 import).
+        data = _read_full_config()
+        data["os_system"] = os_name
+        data["engine"] = engine
+        data["nanogpt_api_key" if engine == "nanogpt" else "gemini_api_key"] = key
+        API_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
         self._ready = True
         if self._overlay:
             self._overlay.hide()

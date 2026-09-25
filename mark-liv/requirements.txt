@@ -15,6 +15,16 @@ sounddevice>=0.4,<1
 numpy>=1.24,<3
 google-genai>=2.8.0,<3
 
+# ── NanoGPT engine: local ears and voice ──────────────────────────────────────
+# Added in the Jarivs-Mark-1 import (see NOTICE.md). With "engine": "nanogpt"
+# the Gemini Live audio is replaced by faster-whisper (hearing) and Kokoro
+# (speaking), both running on this machine for free. They pull in torch, so
+# the first install is a few GB; the models download once on first use.
+# google-genai above stays: its types are used throughout main.py, but on the
+# NanoGPT engine no request is sent to Google.
+faster-whisper>=1.0,<2
+kokoro>=0.9,<1
+
 # ── Web search & browser control ──────────────────────────────────────────────
 requests>=2.31,<3
 beautifulsoup4>=4.12,<5

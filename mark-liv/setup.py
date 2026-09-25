@@ -121,7 +121,9 @@ def main() -> None:
 
     print("\n✅ Setup complete!")
     print("   1) Launch it:  python main.py")
-    print("   2) Paste your free Gemini API key when the setup screen appears.")
+    # Both engines named (Jarivs-Mark-1 import; see NOTICE.md).
+    print("   2) On the setup screen, pick NanoGPT and paste your NanoGPT key —")
+    print("      or pick Gemini Live and paste a free Gemini API key.")
     print("   3) (Optional) Enable 'Hey Jarvis' from ⚙ → WAKE WORD.")
 
 

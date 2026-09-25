@@ -44,3 +44,35 @@ or removed apart from `.pytest_cache/`.
 
 > This affects every copy of Mark LIV, not just this one. It is worth
 > reporting to FatihMakes.
+
+### A NanoGPT engine, with local hearing and speech
+
+An install can now think with a **NanoGPT subscription** instead of Gemini.
+faster-whisper hears you and Kokoro speaks, both running locally. Gemini Live
+remains available and is still what an existing config runs: nothing changes
+unless `config/api_keys.json` says `"engine": "nanogpt"`. How to use it is in
+[`readme.md`](readme.md#-running-on-nanogpt).
+
+**New files.** None of these are part of upstream Mark LIV.
+
+| File | What it is |
+|---|---|
+| `core/nanogpt.py` | NanoGPT client: streaming, tool calls, images, Gemini schema → JSON Schema, model choice |
+| `core/local_live.py` | `LocalLiveSession`, a stand-in for the Gemini Live session with the same four methods `main.py` calls, built on faster-whisper, NanoGPT and Kokoro |
+| `tests/` | pytest suite for the above, run against the parent repo's `test/mock-provider.mjs` |
+
+**Changed files.** In each code file, the main change is also marked in place
+with a comment that mentions the Jarivs-Mark-1 import.
+
+| File | Change |
+|---|---|
+| `main.py` | The Live connect goes through a new `_open_session()`, which opens a `LocalLiveSession` when NanoGPT is configured and otherwise opens Gemini exactly as before. `interrupt()` also cancels a local reply that is still being generated. `_get_api_key()` no longer raises when there is no Gemini key. |
+| `core/gemini.py` | `call()` routes to NanoGPT when that engine is configured, which covers every one-shot caller. The `SEARCH` tier returns `None` on NanoGPT, so callers use their existing DuckDuckGo fallback. |
+| `actions/computer_control.py` | `screen_find` accepts a NanoGPT key as well as a Gemini one. |
+| `ui.py` | The first-run screen chooses between NanoGPT and Gemini Live and asks for that engine's key. The first-run check accepts either engine. Saving setup now merges into `config/api_keys.json` instead of overwriting it, so re-running setup no longer erases the name, colour, devices or the other engine's key. The setup panel is 60 px taller to fit the choice. |
+| `requirements.txt` | Adds `faster-whisper` and `kokoro`. |
+| `setup.py` | The closing instructions name both engines. |
+| `readme.md` | A pointer at the top, a *Running on NanoGPT* section, and matching lines under Requirements and Your Data. |
+
+`core/stt.py` and `core/tts.py` shipped upstream but nothing used them. They
+are now used as they are, unmodified.

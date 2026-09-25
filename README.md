@@ -15,6 +15,14 @@ can now use tools mid-answer instead of only talking.
 - **Proactive.** Reminders, briefings and watchers it speaks aloud unasked.
 - **Yours.** Chats are plain JSON files on your disk. Nothing to sign into.
 
+> **Also in this repo: [`mark-liv/`](mark-liv/readme.md)**, a desktop JARVIS
+> with a lip-synced holographic head that can control your PC. It is
+> FatihMakes' Mark LIV, imported whole, with one addition: it can run on a
+> **NanoGPT subscription** with no Google. faster-whisper hears you and Kokoro
+> speaks, both on your machine for free, and NanoGPT does the thinking. It is a
+> separate Python app with its own licence (CC BY-NC 4.0, non-commercial);
+> [`mark-liv/NOTICE.md`](mark-liv/NOTICE.md) lists every change from upstream.
+
 ---
 
 ## 1. Get a free API key (about 60 seconds)
@@ -632,6 +640,7 @@ lib/
   tokens.ts         context-window trimming
 components/         Workspace (state) + Sidebar / ChatPane / CodeCanvas
 test/               mock provider, unit tests, browser e2e
+mark-liv/           Mark LIV desktop assistant (Python, separate app — see its readme)
 ```
 
 ## Testing
@@ -645,6 +654,12 @@ npm run test:device     # on-device voice, against the real ONNX models
 GROQ_API_KEY=test JARVIS_GROQ_BASE_URL=http://localhost:8899/v1 npm run dev
 npm run test:e2e    # drives a real browser against the mock
 npm run test:voice  # voice mode, with a WAV standing in for a microphone
+```
+
+Mark LIV's tests are Python and reuse the same mock as a fake NanoGPT:
+
+```bash
+cd mark-liv && python -m pytest tests/
 ```
 
 `MOCK_NO_AUTH=1` makes the mock reject any request carrying an `Authorization`

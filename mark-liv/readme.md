@@ -3,6 +3,8 @@
 
 > 📺 **[Watch the full setup video on YouTube](https://www.youtube.com/@FatihMakes)**
 
+> 🧩 **This copy lives in [Jarivs-Mark-1](../README.md) and adds one thing:** it can run on a **NanoGPT subscription** with no Google at all — see **[Running on NanoGPT](#-running-on-nanogpt)**. Everything else is FatihMakes' Mark LIV as released; every change is listed in [NOTICE.md](NOTICE.md).
+
 A real-time voice AI that can hear, see, speak, and control your computer — on any OS. Supports Windows, macOS, and Linux. Built on the Gemini Live API for native audio streaming, delivering zero subscriptions and total digital autonomy.
 
 ---
@@ -290,6 +292,80 @@ python main.py
 
 ---
 
+## 🧠 Running on NanoGPT
+
+*Added in the Jarivs-Mark-1 import — not part of upstream Mark LIV.*
+
+On the first launch, the setup screen asks which brain to use. Pick **NanoGPT**, paste your key from [nano-gpt.com](https://nano-gpt.com/api), and that is the whole setup. Pick **Gemini Live** and it behaves exactly as upstream does. You can switch later by editing `config/api_keys.json`:
+
+```json
+{
+    "engine": "nanogpt",
+    "nanogpt_api_key": "your NanoGPT key",
+    "os_system": "windows"
+}
+```
+
+### What runs where
+
+| Step | On the NanoGPT engine | On Gemini Live (upstream) |
+| --- | --- | --- |
+| Hearing you | **faster-whisper**, on your machine | Gemini, in the cloud |
+| Thinking, tools, memory | **NanoGPT**, on the subscription endpoint | Gemini |
+| Speaking | **Kokoro**, on your machine, free | Gemini |
+| Side jobs (summaries, screen reading, briefings) | NanoGPT | Gemini |
+| Web search | DuckDuckGo | Google Search grounding, then DuckDuckGo |
+
+Requests go to `https://nano-gpt.com/api/subscription/v1`, the endpoint your plan covers. The other NanoGPT endpoint, `/api/v1`, bills every token against pay-as-you-go credit instead, so it is never used unless you set it yourself.
+
+The face, lip-sync, tools, plugins, memory, briefings, undo and confirmations all work the same on both engines. The avatar is driven by the audio it plays, and Kokoro speaks at the same 24 kHz Gemini does.
+
+### Models
+
+Unless you name one, a model is picked from your plan the first time it is needed, and the log says which (`[NanoGPT] Using …`). It prefers strong tool-callers in this order: Kimi K2, GLM-4, DeepSeek V3, Qwen3. It skips "thinking" models, which go quiet for seconds before speaking. When you ask about your screen or the webcam, a model that can see is picked the same way (Qwen-VL first).
+
+To pin models, add any of these to `config/api_keys.json`:
+
+| Key | Used for | Default |
+| --- | --- | --- |
+| `nanogpt_model` | Conversation, and the "smart" side jobs | Picked from your plan |
+| `nanogpt_model_fast` | Quick side jobs | Same as `nanogpt_model` |
+| `nanogpt_model_vision` | Anything with an image | Picked from your plan |
+| `nanogpt_base_url` | Another OpenAI-compatible endpoint | The subscription endpoint |
+| `local_voice` | Kokoro voice, e.g. `bm_george`, `bm_lewis`, `am_michael`, `af_heart` | `bm_george` |
+| `local_voice_speed` | Speaking speed | `1.05` |
+| `whisper_model` | `tiny`, `base`, `small`, `medium` — bigger hears better, answers slower | `base` |
+| `whisper_language` | e.g. `en`, `tr`; leave it out to auto-detect | auto |
+
+The voice picker under ⚙ lists Gemini's voices and has no effect on the NanoGPT engine; use `local_voice` instead.
+
+### What it gives up
+
+Worth knowing before you choose:
+
+- **Speed.** Hear, transcribe, think, then speak is slower than Gemini's native audio. Sentences are spoken as soon as each one is written, so the first words arrive before the reply is finished.
+- **Grounded search.** It becomes DuckDuckGo, which Mark LIV already falls back to.
+- **Gemini's voices.** They become Kokoro's.
+
+Seeing and interrupting are unchanged. Mark LIV sends screenshots and webcam frames as single images on both engines. On NanoGPT they go to a model that can read images, so your plan has to include one. As upstream, the mic is muted while JARVIS speaks, so press **Esc** to stop it.
+
+### First run
+
+`python setup.py` installs faster-whisper and Kokoro. They bring in PyTorch, so the install is a few GB. The first time you speak, the speech models download once from Hugging Face: about 150 MB for Whisper `base` and about 330 MB for Kokoro. After that, hearing and speaking work offline. Only the thinking needs the internet.
+
+NanoGPT allows 60 requests a minute. A reply that uses tools takes one request per round, at most six, so ordinary use stays far below the limit.
+
+### Tests
+
+```bash
+pip install pytest
+python -m pytest tests/
+```
+
+The tests run against a fake NanoGPT, the parent repo's `test/mock-provider.mjs`, so they need Node.js but no key and no network. They do not load the speech models or open a microphone. Those are exercised on the first real run.
+
+---
+
 ## 📋 Requirements
 
 | Requirement | Details |
@@ -298,7 +374,7 @@ python main.py
 | **Python** | 3.11, 3.12 or 3.13 |
 | **Microphone** | Required for voice interaction (and for the "Hey Jarvis" wake word) |
 | **Speakers** | Required for voice replies |
-| **API Key** | Free Gemini API key (entered on first launch → `config/api_keys.json`) |
+| **API Key** | Free Gemini API key, **or** a NanoGPT subscription key (entered on first launch → `config/api_keys.json`; see [Running on NanoGPT](#-running-on-nanogpt)) |
 | **GPU** | **Not required.** The avatar is rendered in software |
 | **Wake word** *(optional)* | One-click download from ⚙ → WAKE WORD (`openwakeword`, a few MB, fully local) |
 
@@ -386,6 +462,8 @@ Everything stays on your machine. There is no MARK server, no telemetry and no a
 All three are listed in `.gitignore`, so a fork or a pull request cannot leak them by accident. **If you have already committed `config/api_keys.json` anywhere public, revoke that key** at [aistudio.google.com](https://aistudio.google.com/app/apikey) and generate a new one — removing the file in a later commit does not remove it from the history.
 
 Your voice is streamed to Google's Gemini Live API while a session is open; that is the one thing that leaves your computer, and it stops when you mute or close the app.
+
+On the NanoGPT engine, your voice never leaves your computer: it is transcribed locally. What reaches NanoGPT is the text of the conversation, plus any screenshot or webcam frame you ask it to look at.
 
 ---
 

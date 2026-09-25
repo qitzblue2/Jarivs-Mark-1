@@ -312,7 +312,11 @@ def _focus_window(title: str) -> str:
 
 def _screen_find(description: str) -> tuple[int, int] | None:
     api_key = _get_api_key()
-    if not api_key:
+    # The call below goes through core/gemini.call(), which answers with
+    # NanoGPT when that is configured — so a NanoGPT key is enough here too.
+    # (Changed in the Jarivs-Mark-1 import; see NOTICE.md.)
+    from core import nanogpt as _nanogpt
+    if not api_key and not _nanogpt.enabled():
         print("[ComputerControl] ⚠️ No API key for screen_find")
         return None
 
