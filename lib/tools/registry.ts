@@ -1,4 +1,5 @@
 import { calculateTool } from "./calculate";
+import { generateImageTool } from "./generate-image";
 import { fetchUrlTool } from "./fetch-url";
 import { forgetTool, recallTool, rememberTool } from "./remember";
 import { listFilesTool, readFileTool, writeFileTool } from "./fs/files";
@@ -14,6 +15,7 @@ import type { Tool } from "./types";
 /** Every tool JARVIS can reach. Adding one is a file plus a line here. */
 const ALL: Tool[] = [
   calculateTool,
+  generateImageTool,
   webSearchTool,
   fetchUrlTool,
   rememberTool,
