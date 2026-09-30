@@ -20,7 +20,7 @@ export async function runToolCall(call: ToolCall, ctx: ToolContext): Promise<Too
   const started = Date.now();
   const base = { toolCallId: call.id, name: call.name };
 
-  const tool = getTool(call.name);
+  const tool = getTool(call.name, ctx);
   if (!tool) {
     return { ...base, content: `No such tool: "${call.name}".`, isError: true, ms: 0 };
   }

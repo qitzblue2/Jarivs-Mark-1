@@ -21,6 +21,7 @@ import { markRateLimited, skipCoolingDown } from "@/lib/providers/quota";
 import { wake } from "@/lib/wake-on-lan";
 import { encodeEvent, type JarvisEvent } from "@/lib/stream";
 import { MAX_ROUNDS, runAgentTurn } from "@/lib/agent";
+import { resolveImageKey } from "@/lib/tools/generate-image";
 import { denyAll } from "@/lib/tools/fs/approval";
 import { DEFAULT_PERSONA } from "@/lib/persona";
 import { forPrompt, getMemory } from "@/lib/memory";
@@ -175,6 +176,12 @@ export async function POST(req: NextRequest) {
   // Prepend the persona unless the caller already supplied a system turn.
   const systemPrompt = (persona?.trim() || DEFAULT_PERSONA) + memoryBlock;
   const hasImages = messages.some((m) => m.attachments?.some((a) => a.kind === "image"));
+  // Pictures still carrying their bytes are the ones attached this turn —
+  // older ones are lightened before they are stored. These are what "edit
+  // the picture I sent" can mean.
+  const uploads = messages.flatMap((m) =>
+    (m.attachments ?? []).filter((a) => a.kind === "image" && a.dataUrl).map((a) => a.dataUrl!),
+  );
 
   // Try the chosen provider, then everything else that is configured. Two
   // free keys are only worth having if a rate limit on one rolls over to the
@@ -270,6 +277,8 @@ export async function POST(req: NextRequest) {
           // can afford a run that Groq's tokens-per-minute cannot.
           maxRounds: agentRounds(providerId, Boolean(body.task), MAX_ROUNDS),
           goal: body.task ? lastUserText(messages) : undefined,
+          imageKey: resolveImageKey(keys.nanogpt),
+          uploads,
         });
 
         // Pull the first event before responding: the agent's opening upstream

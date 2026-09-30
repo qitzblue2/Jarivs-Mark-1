@@ -35,6 +35,10 @@ import { attachmentsToText, lighten, formatSize, MAX_IMAGES } from "../lib/attac
 import { supportsVision } from "../lib/providers/registry";
 import { textOf } from "../lib/tokens";
 import type { Attachment } from "../lib/types";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { imageIdFrom, listImages, pruneImages, readImage, sniffMime } from "../lib/images/store";
 
 let pass = 0;
 let fail = 0;
@@ -691,6 +695,17 @@ console.log("\n--- what every request costs before you type ---");
   eq("the persona stays under budget", personaTokens <= 330, true);
   eq("and the two together stay under a thousand", toolTokens + personaTokens < 1000, true);
 
+  /**
+   * Pictures are offered only with a NanoGPT key, so an install without one
+   * pays nothing — and with one, the schema is small enough not to matter.
+   */
+  const imageTokens =
+    estimateTokens(JSON.stringify(allTools({ imageKey: "k" }).map(toWireTool))) - toolTokens;
+  console.log(`     a NanoGPT key adds pictures: ${imageTokens} tokens`);
+  eq("no key, no picture tool", allTools().some((t) => t.name === "generate_image"), false);
+  eq("a key offers pictures", allTools({ imageKey: "k" }).some((t) => t.name === "generate_image"), true);
+  eq("and pictures stay cheap", imageTokens > 0 && imageTokens <= 110, true);
+
   // Cheap to state, and it catches a tool registered with no guidance at all.
   eq("every tool says what it is for", allTools().every((t) => t.description.length > 20), true);
 }
@@ -991,6 +1006,92 @@ console.log("\n--- the voice ships with the app ---");
     /browser\.speak/.test(synthesize),
     false,
   );
+}
+
+
+console.log("\n--- pictures ---");
+{
+  const dir = mkdtempSync(join(tmpdir(), "jarvis-images-"));
+  process.env.JARVIS_IMAGE_DIR = dir;
+
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0]);
+  eq("a PNG is recognised by its bytes", sniffMime(png), "image/png");
+  eq("so is a JPEG", sniffMime(jpeg), "image/jpeg");
+  eq("an HTML page is not a picture", sniffMime(Buffer.from("<html>")), null);
+
+  const id = "0f8fad5b-d9cb-469f-a165-70867728950e";
+  eq("an id comes out of a path", imageIdFrom(`/api/images/${id}`), id);
+  eq("and out of markdown", imageIdFrom(`![x](/api/images/${id})`), id);
+  eq("a path with no id gives none", imageIdFrom("/etc/passwd"), null);
+
+  // The tool, against a stand-in for NanoGPT.
+  const realFetch = globalThis.fetch;
+  const sent: Record<string, unknown>[] = [];
+  let reply: unknown = { data: [{ b64_json: png.toString("base64") }] };
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    sent.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify(reply), { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    const made = await runToolCall(
+      { id: "i1", name: "generate_image", arguments: '{"prompt":"a red [kite]"}' },
+      { imageKey: "k" },
+    );
+    eq("a picture is made", made.isError, false);
+    const madeId = imageIdFrom(made.content);
+    eq("and the model gets a same-origin path, not the bytes", /\]\(\/api\/images\/[0-9a-f-]{36}\)/.test(made.content), true);
+    eq("brackets in the prompt can't break the markdown", made.content.includes("[kite]"), false);
+    eq("the server picks the model", sent[0].model, "hidream");
+    eq("and the bytes are on disk", (await readImage(madeId!))?.bytes.length, png.length);
+
+    const edited = await runToolCall(
+      { id: "i2", name: "generate_image", arguments: JSON.stringify({ prompt: "make it blue", edit: `/api/images/${madeId}` }) },
+      { imageKey: "k" },
+    );
+    eq("an earlier picture can be edited", edited.isError, false);
+    eq("and is sent as the source", String(sent[1].imageDataUrl).startsWith("data:image/png;base64,"), true);
+    const editedMeta = (await readImage(imageIdFrom(edited.content)!))?.meta;
+    eq("the edit remembers where it came from", editedMeta?.editedFrom, madeId);
+
+    const upload = `data:image/jpeg;base64,${jpeg.toString("base64")}`;
+    await runToolCall(
+      { id: "i3", name: "generate_image", arguments: '{"prompt":"add a hat","edit":"upload"}' },
+      { imageKey: "k", uploads: [upload] },
+    );
+    eq("an attached picture can be edited", sent[2].imageDataUrl, upload);
+
+    const noUpload = await runToolCall(
+      { id: "i4", name: "generate_image", arguments: '{"prompt":"add a hat","edit":"upload"}' },
+      { imageKey: "k" },
+    );
+    eq("editing with nothing attached says so", noUpload.isError && /attached/.test(noUpload.content), true);
+
+    const stranger = await runToolCall(
+      { id: "i5", name: "generate_image", arguments: '{"prompt":"x","edit":"/etc/passwd"}' },
+      { imageKey: "k" },
+    );
+    eq("a path that isn't ours is refused", stranger.isError, true);
+
+    reply = { data: [{ b64_json: Buffer.from("<script>alert(1)</script>").toString("base64") }] };
+    const notImage = await runToolCall(
+      { id: "i6", name: "generate_image", arguments: '{"prompt":"x"}' },
+      { imageKey: "k" },
+    );
+    eq("a reply that isn't a picture is never saved", notImage.isError, true);
+
+    eq("the gallery lists them newest first", (await listImages()).length, 3);
+    eq("pruning keeps the newest", await pruneImages(1), 2);
+    eq("and leaves one", (await listImages()).length, 1);
+
+    const keyless = await runToolCall({ id: "i7", name: "generate_image", arguments: '{"prompt":"x"}' }, {});
+    eq("with no key the tool isn't there at all", /No such tool/.test(keyless.content), true);
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.JARVIS_IMAGE_DIR;
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

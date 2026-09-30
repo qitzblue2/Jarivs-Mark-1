@@ -45,6 +45,10 @@ export interface AgentOptions {
    * those unconditionally.
    */
   goal?: string;
+  /** NanoGPT key for pictures, when there is one. See ToolContext. */
+  imageKey?: string;
+  /** Pictures attached to this turn, as data URLs, so they can be edited. */
+  uploads?: string[];
 }
 
 /**
@@ -73,7 +77,7 @@ export async function* runAgentTurn(
     });
   }
 
-  const tools = allTools().map(toWireTool);
+  const tools = allTools({ imageKey: options.imageKey }).map(toWireTool);
   // Flips to false if the model turns out not to support tools.
   let toolsEnabled = options.useTools !== false && tools.length > 0;
 
@@ -141,6 +145,8 @@ export async function* runAgentTurn(
     const queue: JarvisEvent[] = [];
     const resultsPromise = runToolCalls(calls, {
       signal,
+      imageKey: options.imageKey,
+      uploads: options.uploads,
       onApprovalRequest: (request) => {
         queue.push({
           type: "approval_request",

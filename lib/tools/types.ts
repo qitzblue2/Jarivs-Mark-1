@@ -25,6 +25,14 @@ export interface ToolContext {
    * The agent loop wires this to the SSE stream so the UI can show a card.
    */
   onApprovalRequest?: (request: import("./fs/approval").ApprovalRequest) => void;
+  /**
+   * NanoGPT key for pictures — the server's, or one pasted in Settings. Image
+   * generation is offered only when there is one, so a model is never shown a
+   * tool that can only fail.
+   */
+  imageKey?: string;
+  /** Pictures the user attached to this turn, as data URLs, for editing. */
+  uploads?: string[];
 }
 
 /** One tool call requested by the model, once its streamed fragments are whole. */

@@ -1,5 +1,5 @@
 import { calculateTool } from "./calculate";
-import { generateImageTool } from "./generate-image";
+import { generateImageTool, resolveImageKey } from "./generate-image";
 import { fetchUrlTool } from "./fetch-url";
 import { forgetTool, recallTool, rememberTool } from "./remember";
 import { listFilesTool, readFileTool, writeFileTool } from "./fs/files";
@@ -10,12 +10,11 @@ import { clearDisplayTool, displayPowerTool, showOnDisplayTool } from "./display
 import { cancelScheduledTool, listScheduledTool, scheduleTaskTool } from "./schedule";
 import { displayConnected } from "@/lib/display";
 import { deviceMode } from "@/lib/voice/device/detect";
-import type { Tool } from "./types";
+import type { Tool, ToolContext } from "./types";
 
 /** Every tool JARVIS can reach. Adding one is a file plus a line here. */
 const ALL: Tool[] = [
   calculateTool,
-  generateImageTool,
   webSearchTool,
   fetchUrlTool,
   rememberTool,
@@ -88,11 +87,21 @@ function displayAvailable(): boolean {
   return deviceMode() || displayConnected();
 }
 
-export function allTools(): Tool[] {
-  const base = displayAvailable() ? [...ALL, ...DISPLAY, ...SCHEDULE] : ALL;
-  return computerAccessEnabled() ? [...base, ...COMPUTER] : base;
+/**
+ * Pictures, offered only when there is a NanoGPT key to make them with —
+ * the server's or one from Settings. Without one the schema is a tax on every
+ * request for a call that can only fail.
+ */
+function imagesAvailable(ctx: Pick<ToolContext, "imageKey">): boolean {
+  return Boolean(ctx.imageKey ?? resolveImageKey());
 }
 
-export function getTool(name: string): Tool | undefined {
-  return allTools().find((tool) => tool.name === name);
+export function allTools(ctx: Pick<ToolContext, "imageKey"> = {}): Tool[] {
+  let tools = displayAvailable() ? [...ALL, ...DISPLAY, ...SCHEDULE] : ALL;
+  if (imagesAvailable(ctx)) tools = [...tools, generateImageTool];
+  return computerAccessEnabled() ? [...tools, ...COMPUTER] : tools;
+}
+
+export function getTool(name: string, ctx: Pick<ToolContext, "imageKey"> = {}): Tool | undefined {
+  return allTools(ctx).find((tool) => tool.name === name);
 }

@@ -175,14 +175,23 @@ export async function guardedFetch(
   throw new BlockedUrlError(`Too many redirects (more than ${MAX_REDIRECTS})`);
 }
 
-/** Read a response body as text, refusing to buffer more than MAX_BYTES. */
-export async function readCapped(response: Response): Promise<string> {
+/**
+ * Read a response body as bytes, refusing to buffer more than `limit`.
+ *
+ * With `strict`, going over is an error rather than a truncation — right for
+ * an image, where half a file is worse than none.
+ */
+export async function readCappedBytes(
+  response: Response,
+  limit = MAX_BYTES,
+  strict = false,
+): Promise<Uint8Array> {
   const declared = Number(response.headers.get("content-length") ?? 0);
-  if (declared > MAX_BYTES) {
+  if (declared > limit) {
     throw new BlockedUrlError(`Response too large (${declared} bytes)`);
   }
 
-  if (!response.body) return "";
+  if (!response.body) return new Uint8Array(0);
 
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -193,8 +202,9 @@ export async function readCapped(response: Response): Promise<string> {
       const { done, value } = await reader.read();
       if (done) break;
       total += value.length;
-      if (total > MAX_BYTES) {
+      if (total > limit) {
         await reader.cancel().catch(() => {});
+        if (strict) throw new BlockedUrlError(`Response too large (over ${limit} bytes)`);
         break;
       }
       chunks.push(value);
@@ -203,7 +213,7 @@ export async function readCapped(response: Response): Promise<string> {
     reader.releaseLock();
   }
 
-  const merged = new Uint8Array(total > MAX_BYTES ? MAX_BYTES : total);
+  const merged = new Uint8Array(total > limit ? limit : total);
   let offset = 0;
   for (const chunk of chunks) {
     if (offset + chunk.length > merged.length) {
@@ -213,6 +223,11 @@ export async function readCapped(response: Response): Promise<string> {
     merged.set(chunk, offset);
     offset += chunk.length;
   }
+  return merged;
+}
 
-  return new TextDecoder("utf-8", { fatal: false }).decode(merged);
+/** Read a response body as text, refusing to buffer more than MAX_BYTES. */
+export async function readCapped(response: Response): Promise<string> {
+  const bytes = await readCappedBytes(response);
+  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 }
