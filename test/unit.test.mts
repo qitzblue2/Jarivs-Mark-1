@@ -35,12 +35,15 @@ import { attachmentsToText, lighten, formatSize, MAX_IMAGES } from "../lib/attac
 import { supportsVision } from "../lib/providers/registry";
 import { textOf } from "../lib/tokens";
 import type { Attachment } from "../lib/types";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { imageIdFrom, listImages, pruneImages, readImage, sniffMime } from "../lib/images/store";
 import { chatToMarkdown, exportFilename, matchChat, rankChats, searchChats, sortChats } from "../lib/chat-search";
 import { getStore } from "../lib/storage";
+import { flushUsage, recordRequest, resetUsage, usageHistory, utcDay } from "../lib/providers/usage";
+import { crc32, zipStream } from "../lib/backup/zip";
+import { backupEntries } from "../lib/backup";
 import type { Chat } from "../lib/types";
 
 let pass = 0;
@@ -1196,6 +1199,87 @@ console.log("\n--- finding, pinning and exporting chats ---");
   eq("recall finds what was said in an earlier chat", /Past conversations:\n- "Weekend plans" \(\d{4}-\d\d-\d\d\): Should I fly a kite/.test(recalled.content), true);
   const listAll = await runToolCall({ id: "r2", name: "recall", arguments: "{}" }, {});
   eq("but listing memories doesn't dump every chat", listAll.content.includes("Past conversations"), false);
+}
+
+console.log("\n--- counting what was spent ---");
+{
+  const dir = mkdtempSync(join(tmpdir(), "jarvis-usage-"));
+  process.env.JARVIS_USAGE_FILE = join(dir, "usage.json");
+  resetUsage();
+
+  recordRequest("groq", 1200, 200);
+  recordRequest("groq", 800, 200);
+  recordRequest("groq", 900, 429, "Rate limit reached");
+  recordRequest("cerebras", 100, 500, "Internal error");
+  recordRequest("cerebras", 100, "network", "ECONNREFUSED");
+
+  const [today] = await usageHistory();
+  eq("counted against today in UTC", today.day, utcDay());
+  const groq = today.providers.groq;
+  eq("every request is counted", groq.requests, 3);
+  eq("answered ones apart", groq.ok, 2);
+  eq("and refusals apart", groq.rateLimited, 1);
+  eq("with the tokens they cost", groq.tokensSent, 2900);
+  eq("a rate limit isn't reported as an error", groq.lastError, undefined);
+  eq("a failure is", today.providers.cerebras.failed, 2);
+  eq("with what went wrong last", today.providers.cerebras.lastError, "ECONNREFUSED");
+
+  await flushUsage();
+  const saved = JSON.parse(readFileSync(process.env.JARVIS_USAGE_FILE, "utf8"));
+  eq("the count survives a restart", saved.days[utcDay()].groq.requests, 3);
+
+  // A restart reads the file back, and adds to it rather than starting over.
+  resetUsage();
+  const shared = globalThis as { __jarvisUsage?: { loaded: boolean } };
+  shared.__jarvisUsage!.loaded = false;
+  recordRequest("groq", 100, 200);
+  const [after] = await usageHistory();
+  eq("and carries on from where it was", after.providers.groq.requests, 4);
+
+  // Two weeks is kept; older days go.
+  saved.days["2000-01-01"] = { groq: saved.days[utcDay()].groq };
+  for (let d = 1; d <= 20; d++) saved.days[`2001-01-${String(d).padStart(2, "0")}`] = { groq: saved.days[utcDay()].groq };
+  writeFileSync(process.env.JARVIS_USAGE_FILE, JSON.stringify(saved));
+  resetUsage();
+  shared.__jarvisUsage!.loaded = false;
+  await flushUsage();
+  eq("only the last fourteen days are kept", (await usageHistory()).length, 14);
+  eq("including today", (await usageHistory())[0].day, utcDay());
+
+  resetUsage();
+  delete process.env.JARVIS_USAGE_FILE;
+  rmSync(dir, { recursive: true, force: true });
+}
+
+console.log("\n--- backing everything up ---");
+{
+  eq("CRC-32 matches the standard check value", crc32(new TextEncoder().encode("123456789")), 0xcbf43926);
+
+  const dir = mkdtempSync(join(tmpdir(), "jarvis-backup-"));
+  process.env.JARVIS_DATA_DIR = dir;
+  mkdirSync(join(dir, "chats"));
+  mkdirSync(join(dir, "images"));
+  writeFileSync(join(dir, "chats", "a.json"), '{"title":"Crêpes 🥞"}');
+  writeFileSync(join(dir, "memory.json"), "[]");
+  writeFileSync(join(dir, "images", "p.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  symlinkSync("/etc", join(dir, "outside"));
+
+  const names: string[] = [];
+  for await (const entry of backupEntries()) names.push(entry.name);
+  eq("a backup is the data folder as it sits on disk, with how to restore it", names, [
+    "RESTORE.txt", "data/chats/a.json", "data/images/p.png", "data/memory.json",
+  ]);
+
+  const bytes = new Uint8Array(await new Response(zipStream(backupEntries())).arrayBuffer());
+  const view = new DataView(bytes.buffer);
+  eq("it opens with a zip header", view.getUint32(0, true), 0x04034b50);
+  const end = bytes.length - 22;
+  eq("and closes with a directory of every file", [view.getUint32(end, true), view.getUint16(end + 10, true)], [0x06054b50, 4]);
+  const text = new TextDecoder().decode(bytes);
+  eq("names and contents survive, emoji included", text.includes("data/chats/a.json") && text.includes("Crêpes 🥞"), true);
+
+  delete process.env.JARVIS_DATA_DIR;
+  rmSync(dir, { recursive: true, force: true });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

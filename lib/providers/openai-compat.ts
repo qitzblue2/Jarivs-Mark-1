@@ -1,7 +1,8 @@
 import { getProvider } from "./registry";
 import { cachedModels } from "./quota";
 import { ProviderError, type ChatRequest, type ModelInfo, type ProviderConfig } from "./types";
-import { estimateTokens, trimToBudget, truncateMiddle } from "@/lib/tokens";
+import { estimateMessagesTokens, estimateTokens, trimToBudget, truncateMiddle } from "@/lib/tokens";
+import { recordRequest } from "./usage";
 
 /**
  * One adapter for every OpenAI-compatible provider (Groq, Cerebras, GitHub
@@ -245,6 +246,10 @@ export async function streamChat(
   // the stream opens so a slow generation is never cut short.
   const guard = deadline(req.signal, p.firstByteTimeoutMs);
 
+  // Counted here, the one place every chat request leaves, so the usage page
+  // sees tool rounds, probes and fallbacks alike.
+  const sent = estimateMessagesTokens(messages) + toolBudget;
+
   let res: Response;
   try {
     res = await fetch(`${p.baseUrl}/chat/completions`, {
@@ -254,12 +259,21 @@ export async function streamChat(
       body: JSON.stringify(body),
     });
   } catch (err) {
+    // A request the user cancelled cost nothing worth reporting.
+    if ((err as Error)?.name !== "AbortError" || guard.expired()) {
+      recordRequest(providerId, sent, "network", (err as Error)?.message);
+    }
     toNetworkError(err, p.label, p.baseUrl, guard.expired());
   } finally {
     guard.done();
   }
 
-  if (!res.ok) throw await toProviderError(res, p.label);
+  if (!res.ok) {
+    const error = await toProviderError(res, p.label);
+    recordRequest(providerId, sent, res.status, error.message);
+    throw error;
+  }
+  recordRequest(providerId, sent, res.status);
   if (!res.body) throw new ProviderError(`${p.label} returned an empty stream.`, 502, true);
 
   return res.body;

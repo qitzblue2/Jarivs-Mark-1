@@ -8,6 +8,7 @@ import CodeCanvas from "./CodeCanvas";
 import SettingsDialog, { DEFAULT_SETTINGS, type Settings } from "./SettingsDialog";
 import VoiceMode from "./VoiceMode";
 import Gallery from "./Gallery";
+import UsagePanel from "./UsagePanel";
 import type { PendingApproval } from "./ApprovalCard";
 import { kokoroEngine } from "@/lib/voice/tts";
 import type { ProviderState } from "./ModelPicker";
@@ -25,6 +26,11 @@ function deriveTitle(text: string): string {
   const line = text.trim().split("\n").find((l) => l.trim()) ?? "New chat";
   const clean = line.replace(/^[#>\-*\s]+/, "").trim();
   return clean.length > 60 ? `${clean.slice(0, 57)}…` : clean || "New chat";
+}
+
+/** The chat last talked in. The sidebar's order leads with pinned ones, so it can't be used. */
+function mostRecent(list: ChatMeta[]): ChatMeta | undefined {
+  return list.reduce<ChatMeta | undefined>((best, c) => (!best || c.updatedAt > best.updatedAt ? c : best), undefined);
 }
 
 export default function Workspace() {
@@ -50,6 +56,7 @@ export default function Workspace() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [pushToTalk, setPushToTalk] = useState(false);
@@ -164,11 +171,13 @@ export default function Workspace() {
     }
   }, []);
 
-  // Open the most recent chat on first load.
+  // Open the most recent chat on first load — by activity, not list order,
+  // which puts pinned chats first.
   useEffect(() => {
     void (async () => {
       const list = await refreshChats();
-      if (list.length > 0) void selectChat(list[0].id);
+      const latest = mostRecent(list);
+      if (latest) void selectChat(latest.id);
     })();
     // Runs once — selectChat is stable enough for a mount-time restore.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -237,7 +246,8 @@ export default function Workspace() {
     await fetch(`/api/chats/${id}`, { method: "DELETE" });
     const list = await refreshChats();
     if (chat?.id === id) {
-      if (list.length > 0) void selectChat(list[0].id);
+      const latest = mostRecent(list);
+      if (latest) void selectChat(latest.id);
       else setChat(null);
     }
   }
@@ -640,6 +650,7 @@ export default function Workspace() {
           onTogglePin={togglePin}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenGallery={() => setGalleryOpen(true)}
+          onOpenUsage={() => setUsageOpen(true)}
           storageDriver={storage}
         />
       </div>
@@ -663,6 +674,10 @@ export default function Workspace() {
               onOpenGallery={() => {
                 setSidebarOpen(false);
                 setGalleryOpen(true);
+              }}
+              onOpenUsage={() => {
+                setSidebarOpen(false);
+                setUsageOpen(true);
               }}
               storageDriver={storage}
             />
@@ -754,6 +769,8 @@ export default function Workspace() {
       />
 
       </div>
+
+      <UsagePanel open={usageOpen} onClose={() => setUsageOpen(false)} />
 
       <Gallery
         open={galleryOpen}

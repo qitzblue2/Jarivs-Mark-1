@@ -1,6 +1,7 @@
 import { imageIdFrom, imageUrl, readImage, saveImage } from "@/lib/images/store";
 import { displayConnected } from "@/lib/display";
 import { deviceMode } from "@/lib/voice/device/detect";
+import { recordRequest } from "@/lib/providers/usage";
 import { guardedFetch, readCappedBytes } from "./net-guard";
 import type { Tool, ToolContext } from "./types";
 
@@ -39,6 +40,9 @@ export const SHAPES: Record<string, string> = {
   portrait: "768x1024",
   landscape: "1024x768",
 };
+
+/** How picture requests appear on the usage page. */
+export const IMAGE_USAGE_ID = "nanogpt:images";
 
 export function imageModel(): string {
   return process.env.JARVIS_IMAGE_MODEL?.trim() || "hidream";
@@ -130,11 +134,15 @@ export const generateImageTool: Tool = {
         }),
       });
 
+    // Counted apart from chat: the subscription's picture allowance is its own
+    // number (100 a day), and mixing the two would hide both.
     let res = await request(SHAPES[shape]);
+    recordRequest(IMAGE_USAGE_ID, 0, res.status);
     let squared = false;
     if (res.status === 400 && shape !== "square") {
       await res.text().catch(() => "");
       res = await request(SHAPES.square);
+      recordRequest(IMAGE_USAGE_ID, 0, res.status);
       squared = true;
     }
 

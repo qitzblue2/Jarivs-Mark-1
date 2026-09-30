@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Download, Monitor, X } from "lucide-react";
+import { useEscape } from "@/lib/hooks/use-escape";
 
 interface Props {
   src: string;
@@ -33,11 +33,7 @@ export async function showOnDisplay(src: string, title?: string): Promise<string
  * <div> inside a <p> is invalid HTML React warns about on every render.
  */
 export default function Lightbox({ src, alt, onClose }: Props) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  useEscape(true, onClose);
 
   const own = isOwnImage(src);
 

@@ -195,6 +195,8 @@ on your own machine.
 | Search every chat | `Ctrl/Cmd + /` — matches what was said, not just titles |
 | Pin a chat to the top | The pin on its row in the sidebar |
 | Export a chat | The download button in the header — a Markdown file |
+| See what's been spent | The gauge at the top of the sidebar |
+| Back up everything | **Back up** at the bottom of the sidebar — one zip |
 | Voice mode | `Ctrl/Cmd + J` |
 | Open code in the canvas | Automatic, or the **Canvas** button on any code block |
 | Close the canvas | `Esc` |
@@ -229,7 +231,7 @@ Shipped so far:
 | `calculate` | Arithmetic, via a real parser |
 | `get_time` | The current date, which a model cannot know on its own |
 | `generate_image` | Draws a picture, or edits one — only offered with a NanoGPT key |
-| `remember` / `recall` / `forget` | Durable memory across conversations |
+| `remember` / `recall` / `forget` | Durable memory across conversations; `recall` also searches past chats |
 | `list_files` / `read_file` / `write_file` | Files in the workspace — writes need your approval |
 | `run_command` | Shell commands in the workspace — needs your approval |
 
@@ -612,8 +614,31 @@ keeps your chats in the JSON files they already live in.
 
 Chats are JSON files in `./data/chats/`, one per conversation. Pictures JARVIS
 made are in `./data/images/`, each beside a small JSON file with its prompt.
-`data/` is gitignored. Back them up by copying the folder; delete one to delete
-the chat.
+Memory, scheduled tasks and the usage count sit beside them. `data/` is
+gitignored. Delete a chat's file to delete the chat.
+
+**Back up** at the bottom of the sidebar downloads all of `data/` as one zip,
+laid out exactly as on disk. To restore, stop JARVIS and unzip it next to
+`package.json`. API keys are never in it.
+
+### What it has spent
+
+The gauge at the top of the sidebar opens **Usage**: for each provider today
+(UTC, when free tiers reset), how many requests went out, roughly how many
+tokens they carried, how many were refused, and whether the provider is being
+skipped for a rate limit right now. Picture requests are counted apart, since
+NanoGPT's 100 a day is its own allowance. The last fourteen days are kept in
+`data/usage.json`.
+
+These are JARVIS' own counts of what this server sent. A provider's dashboard
+can show more if the same key is used elsewhere.
+
+### It remembers what was said, not only what was saved
+
+Ask "what was that recipe you gave me last week?" and `recall` searches your
+earlier chats as well as stored memories. It returns the chat's title, date
+and the line that matched. It ranks by how many of the question's meaningful
+words a chat holds, so it works on questions rather than exact keywords.
 
 ## 12. Deploying
 

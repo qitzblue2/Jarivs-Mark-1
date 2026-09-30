@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, ImageIcon, MessageSquare, Pin, PinOff, Plus, Search, Settings, Trash2, X } from "lucide-react";
+import { Check, Gauge, ImageIcon, MessageSquare, Pin, PinOff, Plus, Search, Settings, Trash2, X } from "lucide-react";
 import type { ChatMeta } from "@/lib/types";
 import type { ChatHit } from "@/lib/chat-search";
 
@@ -15,6 +15,7 @@ interface Props {
   onTogglePin: (id: string, pinned: boolean) => void;
   onOpenSettings: () => void;
   onOpenGallery: () => void;
+  onOpenUsage: () => void;
   storageDriver: string;
 }
 
@@ -37,6 +38,7 @@ export default function Sidebar({
   onTogglePin,
   onOpenSettings,
   onOpenGallery,
+  onOpenUsage,
   storageDriver,
 }: Props) {
   const [query, setQuery] = useState("");
@@ -97,6 +99,13 @@ export default function Sidebar({
           <div className="truncate text-sm font-semibold tracking-wide">JARVIS</div>
           <div className="text-[10px] uppercase tracking-widest text-ink-faint">Mark 6</div>
         </div>
+        <button
+          onClick={onOpenUsage}
+          className="rounded-md p-1.5 text-ink-faint transition hover:bg-raised hover:text-ink"
+          title="Usage"
+        >
+          <Gauge size={16} />
+        </button>
         <button
           onClick={onOpenGallery}
           className="rounded-md p-1.5 text-ink-faint transition hover:bg-raised hover:text-ink"
@@ -254,7 +263,18 @@ export default function Sidebar({
 
       <div className="border-t border-line-soft px-3 py-2 text-[10px] text-ink-faint">
         {storageDriver === "fs" ? (
-          <>Chats saved to <code className="font-mono">./data/chats</code></>
+          <span className="flex items-center justify-between gap-2">
+            <span>
+              Chats saved to <code className="font-mono">./data/chats</code>
+            </span>
+            <a
+              href="/api/backup"
+              className="shrink-0 text-ink-dim underline-offset-2 hover:text-arc hover:underline"
+              title="Download every chat, memory and picture as one zip"
+            >
+              Back up
+            </a>
+          </span>
         ) : (
           <span className="text-warn">In-memory storage — chats vanish on restart</span>
         )}

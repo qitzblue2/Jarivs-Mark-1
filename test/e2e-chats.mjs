@@ -82,6 +82,31 @@ check("export downloads a Markdown file", download.suggestedFilename() === "holi
 const body = await (await fetch(`${BASE}/api/chats/${deepId}/export`)).text();
 check("with the conversation in it", body.includes("# Holiday ideas") && body.includes(marker));
 
+// --- what's been spent ---
+// Send one message so there is something to count.
+await page.locator("button", { hasText: "New chat" }).first().click();
+await page.locator("textarea").first().fill("bouncing ball");
+await page.keyboard.press("Enter");
+await page.waitForFunction(() => document.body.innerText.includes("runs standalone"), { timeout: 20000 });
+await page.locator('button[title="Usage"]').first().click();
+const usage = page.locator('[role="dialog"][aria-label="Usage"]');
+await usage.waitFor({ timeout: 5000 });
+await usage.getByText("Groq").first().waitFor({ timeout: 5000 });
+const usageText = await usage.innerText();
+check("the usage page counts requests to the provider", /Groq\s+\d+/.test(usageText), usageText.split("\n").slice(0, 8).join(" | "));
+check("and says when it can answer", usageText.includes("Ready"));
+await page.screenshot({ path: `${OUT}/chats-usage.png` });
+await page.keyboard.press("Escape");
+await page.waitForTimeout(200);
+check("escape closes it", (await usage.count()) === 0);
+check("and only it — the code canvas behind stays open", (await page.locator('iframe[title="Code preview"]').count()) === 1);
+
+// --- everything, in one file ---
+const [backup] = await Promise.all([page.waitForEvent("download"), page.locator("a", { hasText: "Back up" }).first().click()]);
+check("back up downloads a zip", /^jarvis-backup-\d{4}-\d\d-\d\d\.zip$/.test(backup.suggestedFilename()), backup.suggestedFilename());
+const zip = Buffer.from(await (await fetch(`${BASE}/api/backup`)).arrayBuffer());
+check("holding the chats", zip.readUInt32LE(0) === 0x04034b50 && zip.includes(`data/chats/${deepId}.json`));
+
 // --- still fits a phone ---
 await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(400);

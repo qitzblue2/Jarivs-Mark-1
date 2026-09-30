@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Download, ImageIcon, Monitor, Pencil, Trash2, X } from "lucide-react";
 import Lightbox, { showOnDisplay } from "./Lightbox";
+import { useEscape } from "@/lib/hooks/use-escape";
 
 interface Picture {
   id: string;
@@ -49,12 +50,7 @@ export default function Gallery({ open, onClose, onEdit }: Props) {
     if (open) void refresh();
   }, [open, refresh]);
 
-  useEffect(() => {
-    if (!open || viewing) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, viewing, onClose]);
+  useEscape(open && !viewing, onClose);
 
   async function remove(id: string) {
     const res = await fetch(`/api/images/${id}`, { method: "DELETE" });

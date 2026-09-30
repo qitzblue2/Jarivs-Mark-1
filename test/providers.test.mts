@@ -9,6 +9,11 @@
  *
  * Run: npx tsx test/providers.test.mts
  */
+
+// Requests made here are counted by lib/providers/usage.ts; keep the count
+// out of the real data/usage.json.
+import { tmpdir as usageTmp } from "node:os";
+process.env.JARVIS_USAGE_FILE ??= `${usageTmp()}/jarvis-usage-test-${process.pid}.json`;
 import http from "node:http";
 import dgram from "node:dgram";
 import { spawn } from "node:child_process";
