@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, AudioLines, Code2, Info, Menu, Mic, Sparkles, X } from "lucide-react";
+import { ArrowDown, AudioLines, Code2, FileDown, Info, Menu, Mic, Sparkles, X } from "lucide-react";
 import Message from "./Message";
 import Composer from "./Composer";
 import ApprovalCard, { type PendingApproval } from "./ApprovalCard";
@@ -104,6 +104,16 @@ export default function ChatPane(props: Props) {
           onChange={onModelChange}
           onOpenSettings={onOpenSettings}
         />
+
+        {chat && chat.messages.length > 0 && (
+          <a
+            href={`/api/chats/${chat.id}/export`}
+            className="rounded-md p-1.5 text-ink-faint transition hover:bg-raised hover:text-ink"
+            title="Export this chat as Markdown"
+          >
+            <FileDown size={16} />
+          </a>
+        )}
 
         <button
           onClick={() => onStartVoice(true)}

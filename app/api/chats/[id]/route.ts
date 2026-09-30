@@ -36,6 +36,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
     const body = await req.json().catch(() => ({}));
 
+    // Pinning alone is not activity: bumping updatedAt for it would reshuffle
+    // the "recent" order the moment you tidied it.
+    const onlyPin = typeof body?.pinned === "boolean" && Object.keys(body).length === 1;
+    if (onlyPin) {
+      const pinned: Chat = { ...existing, pinned: body.pinned || undefined };
+      await store.save(pinned);
+      return Response.json({ chat: pinned });
+    }
+
     const updated: Chat = {
       ...existing,
       title: typeof body?.title === "string" && body.title.trim()
@@ -44,6 +53,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       messages: Array.isArray(body?.messages) ? (body.messages as Message[]) : existing.messages,
       provider: typeof body?.provider === "string" ? body.provider : existing.provider,
       model: typeof body?.model === "string" ? body.model : existing.model,
+      pinned: typeof body?.pinned === "boolean" ? body.pinned || undefined : existing.pinned,
       updatedAt: Date.now(),
     };
 

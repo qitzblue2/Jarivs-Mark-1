@@ -39,6 +39,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { imageIdFrom, listImages, pruneImages, readImage, sniffMime } from "../lib/images/store";
+import { chatToMarkdown, exportFilename, matchChat, searchChats, sortChats } from "../lib/chat-search";
+import type { Chat } from "../lib/types";
 
 let pass = 0;
 let fail = 0;
@@ -697,14 +699,16 @@ console.log("\n--- what every request costs before you type ---");
 
   /**
    * Pictures are offered only with a NanoGPT key, so an install without one
-   * pays nothing — and with one, the schema is small enough not to matter.
+   * pays nothing. With one, the requests go to a flat-rate plan metered in
+   * requests rather than per-minute tokens. The ceiling was 110 until the
+   * shape option (square/portrait/landscape) earned the last few tokens.
    */
   const imageTokens =
     estimateTokens(JSON.stringify(allTools({ imageKey: "k" }).map(toWireTool))) - toolTokens;
   console.log(`     a NanoGPT key adds pictures: ${imageTokens} tokens`);
   eq("no key, no picture tool", allTools().some((t) => t.name === "generate_image"), false);
   eq("a key offers pictures", allTools({ imageKey: "k" }).some((t) => t.name === "generate_image"), true);
-  eq("and pictures stay cheap", imageTokens > 0 && imageTokens <= 110, true);
+  eq("and pictures stay cheap", imageTokens > 0 && imageTokens <= 120, true);
 
   // Cheap to state, and it catches a tool registered with no guidance at all.
   eq("every tool says what it is for", allTools().every((t) => t.description.length > 20), true);
@@ -1074,6 +1078,38 @@ console.log("\n--- pictures ---");
     );
     eq("a path that isn't ours is refused", stranger.isError, true);
 
+    eq("an unasked shape is square", sent[0].size, "1024x1024");
+    await runToolCall(
+      { id: "s1", name: "generate_image", arguments: '{"prompt":"a tall tower","shape":"portrait"}' },
+      { imageKey: "k" },
+    );
+    eq("portrait is taller than wide", sent[sent.length - 1].size, "768x1024");
+
+    // A model that refuses the size: the picture still comes, square.
+    let refuseOnce = true;
+    const okFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (refuseOnce && body.size !== "1024x1024") {
+        refuseOnce = false;
+        sent.push(body);
+        return new Response('{"error":"unsupported size"}', { status: 400 });
+      }
+      return okFetch(url as string, init);
+    }) as typeof fetch;
+    const refused = await runToolCall(
+      { id: "s2", name: "generate_image", arguments: '{"prompt":"a wide beach","shape":"landscape"}' },
+      { imageKey: "k" },
+    );
+    globalThis.fetch = okFetch;
+    eq("a refused shape falls back to square", refused.isError, false);
+    eq("and says so", /refused a landscape size/.test(refused.content), true);
+    eq("an unknown shape is square", (await runToolCall(
+      { id: "s3", name: "generate_image", arguments: '{"prompt":"x","shape":"hexagon"}' },
+      { imageKey: "k" },
+    )).isError, false);
+    eq("rather than passed through", sent[sent.length - 1].size, "1024x1024");
+
     reply = { data: [{ b64_json: Buffer.from("<script>alert(1)</script>").toString("base64") }] };
     const notImage = await runToolCall(
       { id: "i6", name: "generate_image", arguments: '{"prompt":"x"}' },
@@ -1081,13 +1117,13 @@ console.log("\n--- pictures ---");
     );
     eq("a reply that isn't a picture is never saved", notImage.isError, true);
 
-    eq("the gallery lists them newest first", (await listImages()).length, 3);
+    eq("the gallery lists them newest first", (await listImages()).length, 6);
     eq(
     "a picture is announced, not read out as a URL",
     forSpeech(`Here. ![a kite](/api/images/${id})`),
     "Here. (picture shown on screen)",
   );
-  eq("pruning keeps the newest", await pruneImages(1), 2);
+  eq("pruning keeps the newest", await pruneImages(1), 5);
     eq("and leaves one", (await listImages()).length, 1);
 
     const keyless = await runToolCall({ id: "i7", name: "generate_image", arguments: '{"prompt":"x"}' }, {});
@@ -1097,6 +1133,52 @@ console.log("\n--- pictures ---");
     delete process.env.JARVIS_IMAGE_DIR;
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+console.log("\n--- finding, pinning and exporting chats ---");
+{
+  const msg = (role: "user" | "assistant", content: string, extra = {}) => ({
+    id: `${role}-${content.length}`, role, content, createdAt: 0, ...extra,
+  });
+  const chat = (id: string, title: string, updatedAt: number, messages: ReturnType<typeof msg>[], pinned?: boolean): Chat => ({
+    id, title, createdAt: 1_700_000_000_000, updatedAt, messages, ...(pinned ? { pinned } : {}),
+  });
+
+  const kite = chat("a", "Weekend plans", 3, [
+    msg("user", "Should I fly a kite on Saturday?"),
+    msg("assistant", "<think>the user wants weather</think>A storm is forecast, so maybe not."),
+  ]);
+  const recipe = chat("b", "Pancake recipe", 2, [msg("user", "How do I make pancakes?")]);
+  const pinnedOld = chat("c", "Server passwords location", 1, [msg("user", "where did I put the notes")], true);
+
+  eq("a word said in a message finds the chat", matchChat(kite, "kite")?.id, "a");
+  eq("every word must appear, across messages", matchChat(kite, "KITE storm")?.id, "a");
+  eq("but all of them", matchChat(kite, "kite pancake"), null);
+  eq("with the line that matched", matchChat(kite, "saturday")?.snippet, "Should I fly a kite on Saturday?");
+  eq("a title match needs no snippet", matchChat(recipe, "pancake")?.snippet, undefined);
+  eq("hidden reasoning is not searched", matchChat(kite, "weather"), null);
+  eq("an empty query matches nothing", matchChat(kite, "   "), null);
+
+  const sorted = sortChats([kite, recipe, pinnedOld].map((c) => ({ ...c, messageCount: 0 })));
+  eq("pinned leads, then newest", sorted.map((c) => c.id), ["c", "a", "b"]);
+  eq("search results follow the same order", searchChats([recipe, kite, pinnedOld], "o").map((c) => c.id), ["c", "a", "b"]);
+
+  const id = "0f8fad5b-d9cb-469f-a165-70867728950e";
+  const drawn = chat("d", "Draw: a kite / at night?", 4, [
+    msg("user", "draw a kite"),
+    msg("assistant", `Here.\n\n![kite](/api/images/${id})`, {
+      model: "mock-8b",
+      toolRounds: [{ round: 1, calls: [{ id: "1", name: "generate_image", arguments: "{}" }], results: [] }],
+    }),
+  ]);
+  const md = chatToMarkdown(drawn, "https://jarvis.local");
+  eq("an export is titled", md.startsWith("# Draw: a kite / at night?\n"), true);
+  eq("says who spoke", md.includes("## You") && md.includes("## JARVIS (mock-8b)"), true);
+  eq("names the tools used, not their output", md.includes("> Used generate_image"), true);
+  eq("and makes picture links whole", md.includes(`](https://jarvis.local/api/images/${id})`), true);
+  eq("never exports reasoning", chatToMarkdown(kite).includes("the user wants weather"), false);
+  eq("a filename any OS accepts", exportFilename(drawn), "draw-a-kite-at-night.md");
+  eq("even from a title of symbols", exportFilename(chat("e", "???", 0, [])), "chat.md");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

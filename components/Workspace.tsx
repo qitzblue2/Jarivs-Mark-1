@@ -242,6 +242,17 @@ export default function Workspace() {
     }
   }
 
+  async function togglePin(id: string, pinned: boolean) {
+    // Shown at once; the list re-sorts when the server confirms.
+    setChats((all) => all.map((c) => (c.id === id ? { ...c, pinned } : c)));
+    await fetch(`/api/chats/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pinned }),
+    });
+    await refreshChats();
+  }
+
   async function renameChat(id: string, title: string) {
     await fetch(`/api/chats/${id}`, {
       method: "PATCH",
@@ -577,6 +588,19 @@ export default function Workspace() {
         e.preventDefault();
         newChat();
       }
+      // Cmd/Ctrl+/ searches every chat. On a narrow screen the list is a
+      // drawer, so open it first; the box exists once it has rendered.
+      if ((e.metaKey || e.ctrlKey) && e.key === "/") {
+        e.preventDefault();
+        const visible = () =>
+          [...document.querySelectorAll<HTMLInputElement>("[data-chat-search]")].find((el) => el.offsetParent);
+        const box = visible();
+        if (box) box.focus();
+        else {
+          setSidebarOpen(true);
+          setTimeout(() => visible()?.focus(), 0);
+        }
+      }
       if (e.key === "Escape" && canvasOpen) setCanvasOpen(false);
       // Cmd/Ctrl+J drops straight into voice mode.
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
@@ -613,6 +637,7 @@ export default function Workspace() {
           onNew={newChat}
           onDelete={deleteChat}
           onRename={renameChat}
+          onTogglePin={togglePin}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenGallery={() => setGalleryOpen(true)}
           storageDriver={storage}
@@ -630,6 +655,7 @@ export default function Workspace() {
               onNew={newChat}
               onDelete={deleteChat}
               onRename={renameChat}
+              onTogglePin={togglePin}
               onOpenSettings={() => {
                 setSidebarOpen(false);
                 setSettingsOpen(true);

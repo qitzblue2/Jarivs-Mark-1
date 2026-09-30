@@ -23,7 +23,8 @@
     "test:device": "tsx test/device.test.mts",
     "test:providers": "tsx test/providers.test.mts",
     "test:display": "node test/e2e-display.mjs",
-    "test:images": "node test/e2e-images.mjs"
+    "test:images": "node test/e2e-images.mjs",
+    "test:chats": "node test/e2e-chats.mjs"
   },
   "dependencies": {
     "@ricky0123/vad-web": "^0.0.31",

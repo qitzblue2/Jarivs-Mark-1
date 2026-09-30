@@ -29,6 +29,17 @@ const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 /** NanoGPT's own ceiling on an input picture, after base64 encoding. */
 export const MAX_EDIT_INPUT_CHARS = 4 * 1024 * 1024;
 
+/**
+ * Pixel sizes per shape. NanoGPT does not publish which sizes each model
+ * takes, so these stay within a square's pixel count on multiples of 64, and
+ * a refused shape falls back to square rather than failing the picture.
+ */
+export const SHAPES: Record<string, string> = {
+  square: "1024x1024",
+  portrait: "768x1024",
+  landscape: "1024x768",
+};
+
 export function imageModel(): string {
   return process.env.JARVIS_IMAGE_MODEL?.trim() || "hidream";
 }
@@ -73,8 +84,9 @@ export const generateImageTool: Tool = {
   parameters: {
     type: "object",
     properties: {
-      prompt: { type: "string", description: "What the picture should show, or the change to make." },
-      edit: { type: "string", description: '"upload" or an /api/images/ path, to change that picture.' },
+      prompt: { type: "string", description: "What to show, or what to change." },
+      edit: { type: "string", description: 'To change one: "upload" or its /api/images/ path.' },
+      shape: { type: "string", enum: ["square", "portrait", "landscape"] },
     },
     required: ["prompt"],
   },
@@ -94,27 +106,37 @@ export const generateImageTool: Tool = {
       throw new Error("That picture is too large to edit (4MB limit). Ask for a smaller one.");
     }
     const model = source ? editModel() : imageModel();
+    const shape = typeof args.shape === "string" && SHAPES[args.shape] ? args.shape : "square";
 
     const signal = ctx.signal
       ? AbortSignal.any([ctx.signal, AbortSignal.timeout(TIMEOUT_MS)])
       : AbortSignal.timeout(TIMEOUT_MS);
 
-    const res = await fetch(endpoint(), {
-      method: "POST",
-      signal,
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        prompt,
-        n: 1,
-        size: "1024x1024",
-        response_format: "b64_json",
-        ...(source ? { imageDataUrl: source.dataUrl } : {}),
-      }),
-    });
+    const request = (size: string) =>
+      fetch(endpoint(), {
+        method: "POST",
+        signal,
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          prompt,
+          n: 1,
+          size,
+          response_format: "b64_json",
+          ...(source ? { imageDataUrl: source.dataUrl } : {}),
+        }),
+      });
+
+    let res = await request(SHAPES[shape]);
+    let squared = false;
+    if (res.status === 400 && shape !== "square") {
+      await res.text().catch(() => "");
+      res = await request(SHAPES.square);
+      squared = true;
+    }
 
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
@@ -147,7 +169,8 @@ export const generateImageTool: Tool = {
     const wall = deviceMode() || displayConnected()
       ? ` A room screen is available: show_on_display with kind "image" and body "${url}" puts it there.`
       : "";
-    return `Saved. Show it with: ![${alt}](${url})${wall}`;
+    const note = squared ? ` (${model} refused a ${shape} size, so it is square.)` : "";
+    return `Saved. Show it with: ![${alt}](${url})${note}${wall}`;
   },
 };
 

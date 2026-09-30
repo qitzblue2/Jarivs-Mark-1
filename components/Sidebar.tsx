@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Check, ImageIcon, MessageSquare, Plus, Search, Settings, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Check, ImageIcon, MessageSquare, Pin, PinOff, Plus, Search, Settings, Trash2, X } from "lucide-react";
 import type { ChatMeta } from "@/lib/types";
+import type { ChatHit } from "@/lib/chat-search";
 
 interface Props {
   chats: ChatMeta[];
@@ -11,6 +12,7 @@ interface Props {
   onNew: () => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
+  onTogglePin: (id: string, pinned: boolean) => void;
   onOpenSettings: () => void;
   onOpenGallery: () => void;
   storageDriver: string;
@@ -32,6 +34,7 @@ export default function Sidebar({
   onNew,
   onDelete,
   onRename,
+  onTogglePin,
   onOpenSettings,
   onOpenGallery,
   storageDriver,
@@ -41,10 +44,42 @@ export default function Sidebar({
   const [draft, setDraft] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return q ? chats.filter((c) => c.title.toLowerCase().includes(q)) : chats;
-  }, [chats, query]);
+  /**
+   * Titles filter instantly as you type; the server's search of what was
+   * actually said lands a moment later and replaces them. Results for a query
+   * you have since changed are thrown away, so a slow reply can't overwrite a
+   * newer one.
+   */
+  const [hits, setHits] = useState<{ query: string; chats: ChatHit[] } | null>(null);
+  const q = query.trim();
+
+  useEffect(() => {
+    if (!q) return;
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/chats?q=${encodeURIComponent(q)}`, { signal: controller.signal });
+        const data = await res.json();
+        if (Array.isArray(data.chats)) setHits({ query: q, chats: data.chats });
+      } catch {
+        /* aborted, or offline — the title filter still stands */
+      }
+    }, 250);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [q]);
+
+  const filtered: ChatHit[] = useMemo(() => {
+    if (!q) return chats;
+    if (hits?.query === q) return hits.chats;
+    const lower = q.toLowerCase();
+    return chats.filter((c) => c.title.toLowerCase().includes(lower));
+  }, [chats, q, hits]);
+
+  const firstUnpinned = filtered.findIndex((c) => !c.pinned);
+  const hasPinned = filtered.some((c) => c.pinned);
 
   function commitRename(id: string) {
     const next = draft.trim();
@@ -94,7 +129,8 @@ export default function Sidebar({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search chats"
+            placeholder="Search chats (Ctrl+/)"
+            data-chat-search
             className="w-full bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-faint"
           />
           {query && (
@@ -112,10 +148,16 @@ export default function Sidebar({
           </p>
         ) : (
           <ul className="space-y-0.5">
-            {filtered.map((chat) => {
+            {filtered.map((chat, index) => {
               const active = chat.id === activeId;
               return (
                 <li key={chat.id}>
+                  {hasPinned && index === 0 && (
+                    <div className="px-2.5 pb-1 pt-1 text-[10px] uppercase tracking-widest text-ink-faint">Pinned</div>
+                  )}
+                  {hasPinned && index === firstUnpinned && (
+                    <div className="px-2.5 pb-1 pt-3 text-[10px] uppercase tracking-widest text-ink-faint">Recent</div>
+                  )}
                   {renamingId === chat.id ? (
                     <div className="flex items-center gap-1 px-1.5 py-1">
                       <input
@@ -151,9 +193,13 @@ export default function Sidebar({
                         />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[13px]">{chat.title}</span>
-                          <span className="block text-[10px] text-ink-faint">
-                            {relativeTime(chat.updatedAt)} · {chat.messageCount} msg
-                          </span>
+                          {chat.snippet ? (
+                            <span className="line-clamp-2 block text-[11px] text-ink-dim">{chat.snippet}</span>
+                          ) : (
+                            <span className="block text-[10px] text-ink-faint">
+                              {relativeTime(chat.updatedAt)} · {chat.messageCount} msg
+                            </span>
+                          )}
                         </span>
                       </button>
 
@@ -178,6 +224,16 @@ export default function Sidebar({
                           </button>
                         </span>
                       ) : (
+                        <>
+                        <button
+                          onClick={() => onTogglePin(chat.id, !chat.pinned)}
+                          className={`shrink-0 rounded p-1 transition hover:bg-line hover:text-arc ${
+                            chat.pinned ? "text-arc" : "text-ink-faint opacity-0 group-hover:opacity-100"
+                          }`}
+                          title={chat.pinned ? "Unpin" : "Pin to top"}
+                        >
+                          {chat.pinned ? <PinOff size={13} /> : <Pin size={13} />}
+                        </button>
                         <button
                           onClick={() => setConfirmId(chat.id)}
                           className="shrink-0 rounded p-1 text-ink-faint opacity-0 transition hover:bg-line hover:text-danger group-hover:opacity-100"
@@ -185,6 +241,7 @@ export default function Sidebar({
                         >
                           <Trash2 size={13} />
                         </button>
+                        </>
                       )}
                     </div>
                   )}

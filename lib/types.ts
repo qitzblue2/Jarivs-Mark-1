@@ -62,6 +62,8 @@ export interface Chat {
   /** Remembers the provider/model this chat was last using. */
   provider?: string;
   model?: string;
+  /** Kept at the top of the sidebar regardless of age. */
+  pinned?: boolean;
 }
 
 /** Lightweight row for the sidebar — avoids shipping every message. */
@@ -71,6 +73,7 @@ export interface ChatMeta {
   createdAt: number;
   updatedAt: number;
   messageCount: number;
+  pinned?: boolean;
 }
 
 /** A fenced code block lifted out of a message and into the canvas. */
@@ -91,6 +94,7 @@ export function chatMeta(chat: Chat): ChatMeta {
     createdAt: chat.createdAt,
     updatedAt: chat.updatedAt,
     messageCount: chat.messages.length,
+    ...(chat.pinned ? { pinned: true } : {}),
   };
 }
 

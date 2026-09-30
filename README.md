@@ -192,10 +192,19 @@ on your own machine.
 | Send | `Enter` (`Shift+Enter` for a newline) |
 | Stop generating | The stop button in the composer |
 | Rename a chat | Double-click it in the sidebar |
+| Search every chat | `Ctrl/Cmd + /` — matches what was said, not just titles |
+| Pin a chat to the top | The pin on its row in the sidebar |
+| Export a chat | The download button in the header — a Markdown file |
+| Voice mode | `Ctrl/Cmd + J` |
 | Open code in the canvas | Automatic, or the **Canvas** button on any code block |
 | Close the canvas | `Esc` |
 | Resize the canvas | Drag its left edge |
 | Switch model | The model pill in the header |
+
+**Search** looks inside every message: each word you type must appear
+somewhere in the chat, in any order, and the matching line is shown under the
+title. A thinking model's hidden reasoning is not searched or exported — you
+are looking for what you saw.
 
 The **code canvas** takes any code JARVIS writes, gives it a tab, and lets you
 edit it. HTML, CSS, JS and SVG run live in a sandboxed iframe next to the
@@ -649,6 +658,7 @@ npm run test:device     # on-device voice, against the real ONNX models
 GROQ_API_KEY=test JARVIS_GROQ_BASE_URL=http://localhost:8899/v1 npm run dev
 npm run test:e2e    # drives a real browser against the mock
 npm run test:voice  # voice mode, with a WAV standing in for a microphone
+npm run test:chats  # search, pinning and export
 
 # Pictures, against a production build (next dev would hide the bug it guards):
 npm run build
@@ -898,7 +908,9 @@ image, its name is the thing to check.
 
 With a NanoGPT key — in `.env.local` or pasted into Settings — JARVIS can draw.
 "Draw a lighthouse in a storm" makes one; "make it night-time" edits the last
-one; attach a photo and say "put a hat on him" to edit yours.
+one; attach a photo and say "put a hat on him" to edit yours. Ask for a
+portrait or landscape picture and it will be one — if a model refuses that
+size, you get a square one and are told why, rather than an error.
 
 - Pictures are saved to `data/images/` and served from `/api/images/<id>`,
   behind the same login as your chats. Only a short path goes back to the
