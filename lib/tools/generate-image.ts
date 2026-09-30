@@ -1,4 +1,6 @@
 import { imageIdFrom, imageUrl, readImage, saveImage } from "@/lib/images/store";
+import { displayConnected } from "@/lib/display";
+import { deviceMode } from "@/lib/voice/device/detect";
 import { guardedFetch, readCappedBytes } from "./net-guard";
 import type { Tool, ToolContext } from "./types";
 
@@ -15,6 +17,11 @@ import type { Tool, ToolContext } from "./types";
  * thing on the menu.
  */
 const ENDPOINT = "https://nano-gpt.com/api/v1/images/generations";
+
+/** Overridable so the tests can point it at the mock provider. */
+function endpoint(): string {
+  return process.env.JARVIS_NANOGPT_IMAGES_URL || ENDPOINT;
+}
 /** Generation takes a while; a hung request should still end. */
 const TIMEOUT_MS = 120_000;
 /** A PNG at 1024² is 1-3MB. Anything past this is not a picture we asked for. */
@@ -92,7 +99,7 @@ export const generateImageTool: Tool = {
       ? AbortSignal.any([ctx.signal, AbortSignal.timeout(TIMEOUT_MS)])
       : AbortSignal.timeout(TIMEOUT_MS);
 
-    const res = await fetch(ENDPOINT, {
+    const res = await fetch(endpoint(), {
       method: "POST",
       signal,
       headers: {
@@ -134,7 +141,13 @@ export const generateImageTool: Tool = {
 
     const meta = await saveImage(bytes, { prompt, model, editedFrom: source?.fromId });
     const alt = prompt.replace(/[[\]\n]/g, " ").slice(0, 80).trim();
-    return `Saved. Show it with: ![${alt}](${imageUrl(meta.id)})`;
+    const url = imageUrl(meta.id);
+    // Said here rather than in the schema, so only a turn that made a picture
+    // pays for the hint, and only where a wall exists to put it on.
+    const wall = deviceMode() || displayConnected()
+      ? ` A room screen is available: show_on_display with kind "image" and body "${url}" puts it there.`
+      : "";
+    return `Saved. Show it with: ![${alt}](${url})${wall}`;
   },
 };
 

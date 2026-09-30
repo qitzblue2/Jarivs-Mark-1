@@ -1082,7 +1082,12 @@ console.log("\n--- pictures ---");
     eq("a reply that isn't a picture is never saved", notImage.isError, true);
 
     eq("the gallery lists them newest first", (await listImages()).length, 3);
-    eq("pruning keeps the newest", await pruneImages(1), 2);
+    eq(
+    "a picture is announced, not read out as a URL",
+    forSpeech(`Here. ![a kite](/api/images/${id})`),
+    "Here. (picture shown on screen)",
+  );
+  eq("pruning keeps the newest", await pruneImages(1), 2);
     eq("and leaves one", (await listImages()).length, 1);
 
     const keyless = await runToolCall({ id: "i7", name: "generate_image", arguments: '{"prompt":"x"}' }, {});

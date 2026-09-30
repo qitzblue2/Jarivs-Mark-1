@@ -67,7 +67,7 @@ await page.addInitScript(() => {
 });
 
 await page.goto("http://localhost:3000", { waitUntil: "networkidle" });
-check("app loads", (await page.title()) === "JARVIS Mark 5");
+check("app loads", (await page.title()) === "JARVIS Mark 6");
 
 // Pin the speech engine for determinism; Kokoro's own fallback is asserted
 // separately below.

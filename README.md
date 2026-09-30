@@ -1,4 +1,4 @@
-# JARVIS Mark 5
+# JARVIS Mark 6
 
 A self-hosted AI workspace that runs on **free, fast inference**. Chat list on
 the left, conversation in the middle, live code canvas on the right — and it
@@ -13,6 +13,7 @@ can now use tools mid-answer instead of only talking.
 - **Tool-using.** Calls tools mid-answer and shows you exactly what it ran.
 - **Voice.** Say "Hey JARVIS" and talk to it. Wake word runs on your machine.
 - **Proactive.** Reminders, briefings and watchers it speaks aloud unasked.
+- **Pictures.** With a NanoGPT key it draws, and edits pictures you attach.
 - **Yours.** Chats are plain JSON files on your disk. Nothing to sign into.
 
 ---
@@ -218,6 +219,7 @@ Shipped so far:
 | `fetch_url` | Reads a page in full, as text |
 | `calculate` | Arithmetic, via a real parser |
 | `get_time` | The current date, which a model cannot know on its own |
+| `generate_image` | Draws a picture, or edits one — only offered with a NanoGPT key |
 | `remember` / `recall` / `forget` | Durable memory across conversations |
 | `list_files` / `read_file` / `write_file` | Files in the workspace — writes need your approval |
 | `run_command` | Shell commands in the workspace — needs your approval |
@@ -599,8 +601,10 @@ keeps your chats in the JSON files they already live in.
 
 ## 11. Where your data lives
 
-Chats are JSON files in `./data/chats/`, one per conversation. `data/` is
-gitignored. Back them up by copying the folder; delete one to delete the chat.
+Chats are JSON files in `./data/chats/`, one per conversation. Pictures JARVIS
+made are in `./data/images/`, each beside a small JSON file with its prompt.
+`data/` is gitignored. Back them up by copying the folder; delete one to delete
+the chat.
 
 ## 12. Deploying
 
@@ -645,6 +649,13 @@ npm run test:device     # on-device voice, against the real ONNX models
 GROQ_API_KEY=test JARVIS_GROQ_BASE_URL=http://localhost:8899/v1 npm run dev
 npm run test:e2e    # drives a real browser against the mock
 npm run test:voice  # voice mode, with a WAV standing in for a microphone
+
+# Pictures, against a production build (next dev would hide the bug it guards):
+npm run build
+GROQ_API_KEY=test JARVIS_GROQ_BASE_URL=http://localhost:8899/v1 \
+  NANOGPT_API_KEY=test JARVIS_NANOGPT_IMAGES_URL=http://localhost:8899/v1/images/generations \
+  npm start
+npm run test:images
 ```
 
 `MOCK_NO_AUTH=1` makes the mock reject any request carrying an `Authorization`
@@ -882,6 +893,27 @@ The matching is deliberately narrow, because the two mistakes are not equal:
 claiming vision a model lacks **fails the request outright**, while claiming
 none still gets you an answer. If a model you know sees isn't being given the
 image, its name is the thing to check.
+
+### Making pictures
+
+With a NanoGPT key — in `.env.local` or pasted into Settings — JARVIS can draw.
+"Draw a lighthouse in a storm" makes one; "make it night-time" edits the last
+one; attach a photo and say "put a hat on him" to edit yours.
+
+- Pictures are saved to `data/images/` and served from `/api/images/<id>`,
+  behind the same login as your chats. Only a short path goes back to the
+  model — never the image itself, which would be a megabyte of text.
+- Click one in the chat to enlarge it, or use its download button. The
+  **Pictures** button at the top of the sidebar lists every one, to view,
+  download, send to the room display, or delete.
+- The model is picked by the server, not the chat model: `JARVIS_IMAGE_MODEL`
+  (default `hidream`), and `JARVIS_IMAGE_EDIT_MODEL` for edits. The oldest
+  pictures are removed past `JARVIS_IMAGE_KEEP` (default 200; 0 keeps all).
+- With no key the tool isn't offered at all, so it costs nothing on the free
+  tiers' per-minute token limits.
+- In voice mode a picture is announced as "picture shown on screen" rather
+  than read out as a URL, and if a room display is connected JARVIS can put
+  it there.
 
 ## The room display
 

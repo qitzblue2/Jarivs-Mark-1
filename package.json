@@ -1,8 +1,8 @@
 {
-  "name": "jarvis-mark-5",
+  "name": "jarvis-mark-6",
   "version": "1.0.0",
   "private": true,
-  "description": "JARVIS Mark 5 \u2014 a self-hosted AI workspace running on free, fast inference.",
+  "description": "JARVIS Mark 6 \u2014 a self-hosted AI workspace running on free, fast inference.",
   "license": "GPL-3.0",
   "scripts": {
     "dev": "next dev -H 127.0.0.1",
@@ -22,7 +22,8 @@
     "setup:device": "node scripts/setup-device.mjs",
     "test:device": "tsx test/device.test.mts",
     "test:providers": "tsx test/providers.test.mts",
-    "test:display": "node test/e2e-display.mjs"
+    "test:display": "node test/e2e-display.mjs",
+    "test:images": "node test/e2e-images.mjs"
   },
   "dependencies": {
     "@ricky0123/vad-web": "^0.0.31",

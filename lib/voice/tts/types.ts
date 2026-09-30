@@ -56,7 +56,7 @@ export function forSpeech(markdown: string, maxChars = Infinity): string {
   let text = withoutReasoning(markdown)
     .replace(/```[\s\S]*?```/g, " (code shown on screen) ")
     .replace(/`([^`]+)`/g, "$1")
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " (picture shown on screen) ")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
     .replace(/^#{1,6}\s+/gm, "")
     .replace(/(\*\*|__)(.*?)\1/g, "$2")

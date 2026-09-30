@@ -7,6 +7,7 @@ import ChatPane from "./ChatPane";
 import CodeCanvas from "./CodeCanvas";
 import SettingsDialog, { DEFAULT_SETTINGS, type Settings } from "./SettingsDialog";
 import VoiceMode from "./VoiceMode";
+import Gallery from "./Gallery";
 import type { PendingApproval } from "./ApprovalCard";
 import { kokoroEngine } from "@/lib/voice/tts";
 import type { ProviderState } from "./ModelPicker";
@@ -48,6 +49,7 @@ export default function Workspace() {
 
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [galleryOpen, setGalleryOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [pushToTalk, setPushToTalk] = useState(false);
@@ -612,6 +614,7 @@ export default function Workspace() {
           onDelete={deleteChat}
           onRename={renameChat}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenGallery={() => setGalleryOpen(true)}
           storageDriver={storage}
         />
       </div>
@@ -630,6 +633,10 @@ export default function Workspace() {
               onOpenSettings={() => {
                 setSidebarOpen(false);
                 setSettingsOpen(true);
+              }}
+              onOpenGallery={() => {
+                setSidebarOpen(false);
+                setGalleryOpen(true);
               }}
               storageDriver={storage}
             />
@@ -721,6 +728,8 @@ export default function Workspace() {
       />
 
       </div>
+
+      <Gallery open={galleryOpen} onClose={() => setGalleryOpen(false)} />
 
       <SettingsDialog
         open={settingsOpen}

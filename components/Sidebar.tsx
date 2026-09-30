@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Check, MessageSquare, Plus, Search, Settings, Trash2, X } from "lucide-react";
+import { Check, ImageIcon, MessageSquare, Plus, Search, Settings, Trash2, X } from "lucide-react";
 import type { ChatMeta } from "@/lib/types";
 
 interface Props {
@@ -12,6 +12,7 @@ interface Props {
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onOpenSettings: () => void;
+  onOpenGallery: () => void;
   storageDriver: string;
 }
 
@@ -32,6 +33,7 @@ export default function Sidebar({
   onDelete,
   onRename,
   onOpenSettings,
+  onOpenGallery,
   storageDriver,
 }: Props) {
   const [query, setQuery] = useState("");
@@ -58,8 +60,15 @@ export default function Sidebar({
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold tracking-wide">JARVIS</div>
-          <div className="text-[10px] uppercase tracking-widest text-ink-faint">Mark 5</div>
+          <div className="text-[10px] uppercase tracking-widest text-ink-faint">Mark 6</div>
         </div>
+        <button
+          onClick={onOpenGallery}
+          className="rounded-md p-1.5 text-ink-faint transition hover:bg-raised hover:text-ink"
+          title="Pictures"
+        >
+          <ImageIcon size={16} />
+        </button>
         <button
           onClick={onOpenSettings}
           className="rounded-md p-1.5 text-ink-faint transition hover:bg-raised hover:text-ink"

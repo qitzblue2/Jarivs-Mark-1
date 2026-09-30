@@ -4,7 +4,8 @@ import { memo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { Check, Copy, PanelRightOpen } from "lucide-react";
+import { Check, Copy, Download, Maximize2, PanelRightOpen } from "lucide-react";
+import Lightbox, { isOwnImage } from "./Lightbox";
 
 interface Props {
   content: string;
@@ -46,6 +47,57 @@ function nodeText(node: ReactNode): string {
   return el?.props?.children ? nodeText(el.props.children) : "";
 }
 
+/**
+ * A picture in a reply: shown at a readable size, enlarged on click, and —
+ * for ones JARVIS made — downloadable without leaving the chat.
+ */
+function ChatImage({ src, alt }: { src?: string; alt?: string }) {
+  const [open, setOpen] = useState(false);
+  const [broken, setBroken] = useState(false);
+  if (!src) return null;
+
+  if (broken) {
+    return (
+      <span className="my-2 inline-block rounded-lg border border-line px-3 py-2 text-[12px] text-ink-faint">
+        Picture unavailable{alt ? `: ${alt}` : ""} — it may have been deleted.
+      </span>
+    );
+  }
+
+  return (
+    <span className="group/img relative my-2 inline-block max-w-full">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={alt ?? ""}
+        loading="lazy"
+        onError={() => setBroken(true)}
+        onClick={() => setOpen(true)}
+        className="max-h-[420px] max-w-full cursor-zoom-in rounded-lg border border-line"
+      />
+      <span className="absolute right-2 top-2 flex gap-1 opacity-0 transition group-hover/img:opacity-100">
+        <button
+          onClick={() => setOpen(true)}
+          className="rounded bg-black/60 p-1.5 text-white hover:bg-black/80"
+          title="Enlarge"
+        >
+          <Maximize2 size={13} />
+        </button>
+        {isOwnImage(src) && (
+          <a
+            href={`${src}?download=1`}
+            className="rounded bg-black/60 p-1.5 text-white hover:bg-black/80"
+            title="Download"
+          >
+            <Download size={13} />
+          </a>
+        )}
+      </span>
+      {open && <Lightbox src={src} alt={alt} onClose={() => setOpen(false)} />}
+    </span>
+  );
+}
+
 function MarkdownBody({ content, onOpenInCanvas }: Props) {
   // Code blocks are numbered in document order so "open in canvas" can point
   // at the right artifact — the same order lib/codeblocks.ts produces.
@@ -57,6 +109,9 @@ function MarkdownBody({ content, onOpenInCanvas }: Props) {
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
         components={{
+          img({ src, alt }) {
+            return <ChatImage src={typeof src === "string" ? src : undefined} alt={alt} />;
+          },
           pre({ children }) {
             blockIndex += 1;
             const index = blockIndex;

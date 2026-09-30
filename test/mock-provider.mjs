@@ -8,8 +8,44 @@
  *   JARVIS_GROQ_BASE_URL=http://localhost:8899/v1 GROQ_API_KEY=test npm run dev
  */
 import http from "node:http";
+import { deflateSync } from "node:zlib";
 
 const PORT = Number(process.env.MOCK_PORT ?? 8899);
+
+/** A real, decodable PNG of one colour — enough for a browser to render. */
+function solidPng(width, height, [r, g, b]) {
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc = (buf) => {
+    let c = 0xffffffff;
+    for (const byte of buf) c = crcTable[(c ^ byte) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const sum = Buffer.alloc(4);
+    sum.writeUInt32BE(crc(body));
+    return Buffer.concat([len, body, sum]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // bit depth
+  header[9] = 2; // truecolour
+  const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array(width).fill([r, g, b]).flat())]);
+  const pixels = Buffer.concat(Array(height).fill(row));
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(pixels)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
 
 const CODE_REPLY = `Here's a bouncing ball.
 
@@ -126,6 +162,22 @@ const server = http.createServer((req, res) => {
         { title: "Cerebras wafer-scale", url: "https://cerebras.ai/wse", content: "A single wafer holds the whole model." },
       ],
     }));
+  }
+
+  // Stands in for NanoGPT's image endpoint: point JARVIS_NANOGPT_IMAGES_URL
+  // at http://localhost:8899/v1/images/generations
+  if (req.url.endsWith("/images/generations")) {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      const parsed = JSON.parse(body || "{}");
+      process.stdout.write(`[mock] image model=${parsed.model} edit=${Boolean(parsed.imageDataUrl)}\n`);
+      // Blue for an edit, amber for a fresh picture, so a screenshot shows which ran.
+      const png = solidPng(256, 256, parsed.imageDataUrl ? [56, 189, 248] : [251, 191, 36]);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ data: [{ b64_json: png.toString("base64") }] }));
+    });
+    return;
   }
 
   // Stands in for Groq's Whisper endpoint.
@@ -263,12 +315,22 @@ const server = http.createServer((req, res) => {
         );
       }
 
+      if (parsed.tools?.some((t) => t.function?.name === "generate_image") && /draw|picture of/i.test(prompt) && !alreadyRanTool) {
+        return streamToolCall(
+          res,
+          { id: "call_img1", name: "generate_image", args: { prompt: "a lighthouse in a storm" } },
+          finish,
+        );
+      }
+
       if (/long answer|explain at length/i.test(prompt)) {
         return streamText(res, LONG_REPLY, finish);
       }
 
       if (alreadyRanTool) {
         const toolMessage = [...messages].reverse().find((m) => m.role === "tool");
+        const picture = /!\[[^\]]*\]\([^)]*\)/.exec(String(toolMessage?.content ?? ""));
+        if (picture) return streamText(res, `Here it is.\n\n${picture[0]}`, finish);
         return streamText(res, `The calculator says: ${toolMessage?.content ?? "?"}`, finish);
       }
 
