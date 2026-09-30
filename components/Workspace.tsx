@@ -729,7 +729,22 @@ export default function Workspace() {
 
       </div>
 
-      <Gallery open={galleryOpen} onClose={() => setGalleryOpen(false)} />
+      <Gallery
+        open={galleryOpen}
+        onClose={() => setGalleryOpen(false)}
+        onEdit={(url) => {
+          setGalleryOpen(false);
+          setInput(`Edit the picture ${url} — `);
+          // After the dialog unmounts and the draft renders, so focus isn't
+          // stolen back and the cursor lands after the text, not before it.
+          setTimeout(() => {
+            const box = document.querySelector<HTMLTextAreaElement>("main textarea");
+            if (!box) return;
+            box.focus();
+            box.setSelectionRange(box.value.length, box.value.length);
+          }, 0);
+        }}
+      />
 
       <SettingsDialog
         open={settingsOpen}

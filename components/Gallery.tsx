@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Download, ImageIcon, Monitor, Trash2, X } from "lucide-react";
+import { Download, ImageIcon, Monitor, Pencil, Trash2, X } from "lucide-react";
 import Lightbox, { showOnDisplay } from "./Lightbox";
 
 interface Picture {
@@ -16,10 +16,16 @@ interface Picture {
 interface Props {
   open: boolean;
   onClose: () => void;
+  /**
+   * Start a message asking for a change to this picture. The path goes in
+   * the text so the model has it, rather than hoping it recalls one from
+   * three chats ago.
+   */
+  onEdit?: (url: string) => void;
 }
 
 /** Every picture JARVIS has made, to look back at, download, or clear out. */
-export default function Gallery({ open, onClose }: Props) {
+export default function Gallery({ open, onClose, onEdit }: Props) {
   const [pictures, setPictures] = useState<Picture[]>([]);
   const [viewing, setViewing] = useState<Picture | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -107,6 +113,15 @@ export default function Gallery({ open, onClose }: Props) {
                     </p>
                   </div>
                   <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-0 transition group-hover:opacity-100">
+                    {onEdit && (
+                      <button
+                        onClick={() => onEdit(picture.url)}
+                        className="rounded bg-black/60 p-1.5 text-white hover:bg-black/80"
+                        title="Ask for a change to this picture"
+                      >
+                        <Pencil size={12} />
+                      </button>
+                    )}
                     <a
                       href={`${picture.url}?download=1`}
                       className="rounded bg-black/60 p-1.5 text-white hover:bg-black/80"

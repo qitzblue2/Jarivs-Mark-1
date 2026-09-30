@@ -271,6 +271,25 @@ const server = http.createServer((req, res) => {
         );
       }
 
+      // Pictures first: an image id is full of digit-hyphen-digit, which the
+      // calculator rule below would otherwise claim.
+      const offersImages = parsed.tools?.some((t) => t.function?.name === "generate_image");
+      const picturePath = /\/api\/images\/[0-9a-f-]{36}/.exec(prompt)?.[0];
+      if (offersImages && picturePath && !alreadyRanTool) {
+        return streamToolCall(
+          res,
+          { id: "call_img2", name: "generate_image", args: { prompt: "the same, at night", edit: picturePath } },
+          finish,
+        );
+      }
+      if (offersImages && /draw|picture of/i.test(prompt) && !alreadyRanTool) {
+        return streamToolCall(
+          res,
+          { id: "call_img1", name: "generate_image", args: { prompt: "a lighthouse in a storm" } },
+          finish,
+        );
+      }
+
       // Ask for a tool the first time round, then answer using its result.
       if (parsed.tools?.length && /write.*file|create.*file/i.test(prompt) && !alreadyRanTool) {
         return streamToolCall(
@@ -311,14 +330,6 @@ const server = http.createServer((req, res) => {
         return streamToolCall(
           res,
           { id: "call_abc123", name: "calculate", args: { expression: "(2+3)*sqrt(16)" } },
-          finish,
-        );
-      }
-
-      if (parsed.tools?.some((t) => t.function?.name === "generate_image") && /draw|picture of/i.test(prompt) && !alreadyRanTool) {
-        return streamToolCall(
-          res,
-          { id: "call_img1", name: "generate_image", args: { prompt: "a lighthouse in a storm" } },
           finish,
         );
       }

@@ -69,6 +69,24 @@ await page.getByText("a lighthouse in a storm").first().waitFor({ timeout: 5000 
 check("the gallery lists it", true);
 await page.screenshot({ path: `${OUT}/images-gallery.png` });
 
+// --- ask for a change from the gallery ---
+await page.locator('button[title="Ask for a change to this picture"]').first().click({ force: true });
+const draft = await page.locator("textarea").first().inputValue();
+check("the gallery starts an edit request", draft.includes(src), draft);
+await page.waitForFunction(() => document.activeElement?.tagName === "TEXTAREA", null, { timeout: 5000 });
+check("and puts the cursor there", true);
+await page.keyboard.type("make it night");
+const typed = await page.locator("textarea").first().inputValue();
+check("typing continues after the path, not before it", typed.endsWith("make it night"), typed);
+await page.keyboard.press("Enter");
+await page.waitForFunction(
+  (first) => [...document.querySelectorAll(".prose-jarvis img")].some((i) => i.getAttribute("src") !== first && i.naturalWidth > 0),
+  src,
+  { timeout: 30000 },
+);
+check("and the edit comes back as a new picture", true);
+await page.screenshot({ path: `${OUT}/images-edit.png` });
+
 // --- only our pictures are served, and only by id ---
 const bad = await page.request.get(`${BASE}/api/images/..%2F..%2Fpackage.json`);
 check("a path in place of an id is refused", bad.status() === 400 || bad.status() === 404, String(bad.status()));
