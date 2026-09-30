@@ -1,4 +1,6 @@
 import { getMemory, rank } from "@/lib/memory";
+import { getStore } from "@/lib/storage";
+import { rankChats } from "@/lib/chat-search";
 import { newId } from "@/lib/types";
 import type { Tool } from "./types";
 
@@ -47,8 +49,8 @@ export const rememberTool: Tool = {
 export const recallTool: Tool = {
   name: "recall",
   description:
-    "Search stored memories. Relevant ones are already in your context, so use " +
-    "this only to dig for something specific, or when asked what you remember.",
+    "Search stored memories and past conversations. Relevant memories are " +
+    "already in your context; use this to dig, or when asked what was said before.",
   parameters: {
     type: "object",
     properties: {
@@ -60,14 +62,20 @@ export const recallTool: Tool = {
     const query = String(args.query ?? "").trim();
     const entries = await getMemory().list();
 
-    if (entries.length === 0) return "Nothing stored in memory yet.";
-
     const matches = query ? rank(entries, query, 15) : entries.slice(-20).reverse();
-    if (matches.length === 0) return `No memories match "${query}".`;
+    const memories = matches.length
+      ? matches
+          .map((e) => `- ${e.text}${e.tags.length ? ` [${e.tags.join(", ")}]` : ""} (id ${e.id.slice(0, 8)})`)
+          .join("\n")
+      : entries.length === 0
+        ? "Nothing stored in memory yet."
+        : `No memories match "${query}".`;
 
-    return matches
-      .map((e) => `- ${e.text}${e.tags.length ? ` [${e.tags.join(", ")}]` : ""} (id ${e.id.slice(0, 8)})`)
-      .join("\n");
+    // Past conversations only for a query: "list everything" means memories,
+    // and dumping every chat title would be a page of noise.
+    if (!query) return memories;
+    const talk = await pastConversations(query);
+    return talk ? `Memories:\n${memories}\n\nPast conversations:\n${talk}` : memories;
   },
 };
 
@@ -98,3 +106,29 @@ export const forgetTool: Tool = {
     return `Forgotten: "${match.text}"`;
   },
 };
+
+/**
+ * What was said before, found in the chat files themselves.
+ *
+ * Memories hold what someone decided was worth keeping; conversations hold
+ * everything else. "What was that recipe you gave me last week" is rarely a
+ * memory, but it is always in a chat. Reads every chat, which for a personal
+ * install is a few hundred small files, and never fails the recall: memories
+ * are the part that has to work.
+ */
+async function pastConversations(query: string): Promise<string> {
+  try {
+    const store = getStore();
+    const metas = await store.list();
+    const chats = (await Promise.all(metas.slice(0, 500).map((m) => store.get(m.id)))).filter((c) => c !== null);
+    const hits = rankChats(chats, query, 5);
+    return hits
+      .map((h) => {
+        const when = new Date(h.updatedAt).toISOString().slice(0, 10);
+        return `- "${h.title}" (${when})${h.snippet ? `: ${h.snippet}` : ""}`;
+      })
+      .join("\n");
+  } catch {
+    return "";
+  }
+}

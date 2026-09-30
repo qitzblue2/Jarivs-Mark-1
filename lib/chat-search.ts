@@ -9,6 +9,13 @@ export interface ChatHit extends ChatMeta {
 
 const SNIPPET_RADIUS = 60;
 
+/** What the user saw in each turn: their words and the answers, never hidden reasoning. */
+function shownTexts(chat: Chat): string[] {
+  return chat.messages
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => (m.role === "assistant" ? splitReasoning(m.content).answer || m.content : m.content));
+}
+
 function excerpt(text: string, at: number, length: number): string {
   const start = Math.max(0, at - SNIPPET_RADIUS);
   const end = Math.min(text.length, at + length + SNIPPET_RADIUS);
@@ -28,9 +35,7 @@ export function matchChat(chat: Chat, query: string): ChatHit | null {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return null;
 
-  const texts = chat.messages
-    .filter((m) => m.role === "user" || m.role === "assistant")
-    .map((m) => (m.role === "assistant" ? splitReasoning(m.content).answer || m.content : m.content));
+  const texts = shownTexts(chat);
   const haystack = `${chat.title}\n${texts.join("\n")}`.toLowerCase();
   if (!words.every((w) => haystack.includes(w))) return null;
 
@@ -43,6 +48,52 @@ export function matchChat(chat: Chat, query: string): ChatHit | null {
     if (at >= 0) return { ...meta, snippet: excerpt(text, at, words[0].length) };
   }
   return meta;
+}
+
+/** Words too common to say anything about which chat is meant. */
+const STOPWORDS = new Set(
+  "the and for that this with what was were did about have from you your our we they them then than when where which who how why are but not can could would should will just into onto over any all its it's".split(" "),
+);
+
+/**
+ * Rank chats for the model, which asks in phrases rather than keywords.
+ *
+ * `searchChats` wants every word, which is right for a person typing into a
+ * box and wrong for "what did we decide about the holiday" — no chat contains
+ * "decide". Here a chat scores by how many of the meaningful words it holds,
+ * must hold at least half of them, and ties go to the more recent.
+ */
+export function rankChats(chats: Chat[], query: string, limit = 5): ChatHit[] {
+  const words = [...new Set(
+    query.toLowerCase().split(/[^a-z0-9\u00c0-\uffff]+/).filter((w) => w.length > 2 && !STOPWORDS.has(w)),
+  )];
+  if (words.length === 0) return [];
+  const needed = Math.max(1, Math.ceil(words.length / 2));
+
+  const scored: { hit: ChatHit; score: number }[] = [];
+  for (const chat of chats) {
+    const texts = shownTexts(chat);
+    const haystack = `${chat.title}\n${texts.join("\n")}`.toLowerCase();
+    const found = words.filter((w) => haystack.includes(w));
+    if (found.length < needed) continue;
+
+    // Show the message that holds the most of the words, not merely the first.
+    let best = "";
+    let bestCount = 0;
+    for (const text of texts) {
+      const lower = text.toLowerCase();
+      const count = found.filter((w) => lower.includes(w)).length;
+      if (count > bestCount) [best, bestCount] = [text, count];
+    }
+    const at = best ? Math.max(0, found.map((w) => best.toLowerCase().indexOf(w)).filter((i) => i >= 0).sort((a, b) => a - b)[0]) : -1;
+    const hit: ChatHit = { ...chatMeta(chat), ...(best ? { snippet: excerpt(best, at, 0) } : {}) };
+    scored.push({ hit, score: found.length });
+  }
+
+  return scored
+    .sort((a, b) => b.score - a.score || b.hit.updatedAt - a.hit.updatedAt)
+    .slice(0, limit)
+    .map((s) => s.hit);
 }
 
 /** Newest first, same as the sidebar, pinned chats leading. */

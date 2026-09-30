@@ -39,7 +39,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { imageIdFrom, listImages, pruneImages, readImage, sniffMime } from "../lib/images/store";
-import { chatToMarkdown, exportFilename, matchChat, searchChats, sortChats } from "../lib/chat-search";
+import { chatToMarkdown, exportFilename, matchChat, rankChats, searchChats, sortChats } from "../lib/chat-search";
+import { getStore } from "../lib/storage";
 import type { Chat } from "../lib/types";
 
 let pass = 0;
@@ -1179,6 +1180,22 @@ console.log("\n--- finding, pinning and exporting chats ---");
   eq("never exports reasoning", chatToMarkdown(kite).includes("the user wants weather"), false);
   eq("a filename any OS accepts", exportFilename(drawn), "draw-a-kite-at-night.md");
   eq("even from a title of symbols", exportFilename(chat("e", "???", 0, [])), "chat.md");
+
+  // The model asks in phrases; "decide" appears in no chat, and must not sink it.
+  const ranked = rankChats([recipe, kite, pinnedOld], "what did we decide about flying the kite saturday?");
+  eq("a phrase finds the chat holding most of its words", ranked[0]?.id, "a");
+  eq("and shows the line that holds them", ranked[0]?.snippet, "Should I fly a kite on Saturday?");
+  eq("a chat with too few of the words is left out", ranked.some((c) => c.id === "b"), false);
+  eq("words everyone uses find nothing", rankChats([kite, recipe], "what did you do").length, 0);
+  eq("hidden reasoning is not recalled either", rankChats([kite], "user wants weather").length, 0);
+
+  // recall reaches the chat files, through the same store the app uses.
+  process.env.JARVIS_STORAGE = "memory";
+  await getStore().save(kite);
+  const recalled = await runToolCall({ id: "r1", name: "recall", arguments: '{"query":"kite on saturday"}' }, {});
+  eq("recall finds what was said in an earlier chat", /Past conversations:\n- "Weekend plans" \(\d{4}-\d\d-\d\d\): Should I fly a kite/.test(recalled.content), true);
+  const listAll = await runToolCall({ id: "r2", name: "recall", arguments: "{}" }, {});
+  eq("but listing memories doesn't dump every chat", listAll.content.includes("Past conversations"), false);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
