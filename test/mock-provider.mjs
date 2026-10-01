@@ -271,6 +271,23 @@ const server = http.createServer((req, res) => {
         );
       }
 
+      // Self-editing: the model changing its own welcome screen, in the sandbox.
+      if (parsed.tools?.some((t) => t.function?.name === "code_edit") && /change your (welcome )?title/i.test(prompt) && !alreadyRanTool) {
+        return streamToolCall(
+          res,
+          {
+            id: "call_self1",
+            name: "code_edit",
+            args: {
+              path: "components/ChatPane.tsx",
+              find: '<h2 className="mb-1 text-lg font-semibold">JARVIS Mark 6</h2>',
+              replace: '<h2 className="mb-1 text-lg font-semibold">JARVIS Mark 6 · edited by itself</h2>',
+            },
+          },
+          finish,
+        );
+      }
+
       // Pictures first: an image id is full of digit-hyphen-digit, which the
       // calculator rule below would otherwise claim.
       const offersImages = parsed.tools?.some((t) => t.function?.name === "generate_image");
@@ -342,6 +359,9 @@ const server = http.createServer((req, res) => {
         const toolMessage = [...messages].reverse().find((m) => m.role === "tool");
         const picture = /!\[[^\]]*\]\([^)]*\)/.exec(String(toolMessage?.content ?? ""));
         if (picture) return streamText(res, `Here it is.\n\n${picture[0]}`, finish);
+        if (/sandbox|did not approve/.test(String(toolMessage?.content ?? ""))) {
+          return streamText(res, `Done. ${toolMessage.content}`, finish);
+        }
         return streamText(res, `The calculator says: ${toolMessage?.content ?? "?"}`, finish);
       }
 

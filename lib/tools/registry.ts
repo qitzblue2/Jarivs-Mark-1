@@ -8,6 +8,8 @@ import { computerAccessEnabled } from "./fs/workspace";
 import { webSearchTool } from "./web-search";
 import { clearDisplayTool, displayPowerTool, showOnDisplayTool } from "./display";
 import { cancelScheduledTool, listScheduledTool, scheduleTaskTool } from "./schedule";
+import { codeCheckTool, codeEditTool, codeReadTool } from "./code";
+import { selfEditEnabled } from "@/lib/sandbox/paths";
 import { displayConnected } from "@/lib/display";
 import { deviceMode } from "@/lib/voice/device/detect";
 import type { Tool, ToolContext } from "./types";
@@ -83,6 +85,13 @@ const DISPLAY: Tool[] = [showOnDisplayTool, clearDisplayTool, displayPowerTool];
  */
 const SCHEDULE: Tool[] = [scheduleTaskTool, listScheduledTool, cancelScheduledTool];
 
+/**
+ * JARVIS editing its own code, behind its own env-var gate for the same
+ * reason as the computer tools — and then only ever in the sandbox copy.
+ * Applying a change to the running app is a button, never a tool.
+ */
+const SELF_EDIT: Tool[] = [codeReadTool, codeEditTool, codeCheckTool];
+
 function displayAvailable(): boolean {
   return deviceMode() || displayConnected();
 }
@@ -99,6 +108,7 @@ function imagesAvailable(ctx: Pick<ToolContext, "imageKey">): boolean {
 export function allTools(ctx: Pick<ToolContext, "imageKey"> = {}): Tool[] {
   let tools = displayAvailable() ? [...ALL, ...DISPLAY, ...SCHEDULE] : ALL;
   if (imagesAvailable(ctx)) tools = [...tools, generateImageTool];
+  if (selfEditEnabled()) tools = [...tools, ...SELF_EDIT];
   return computerAccessEnabled() ? [...tools, ...COMPUTER] : tools;
 }
 

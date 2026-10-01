@@ -37,19 +37,17 @@ export type ApprovalDecision = "approve" | "deny";
  * shell command's blast radius is not bounded by anything this process
  * controls, so it stays one decision each however long the run.
  *
- * Module-level like `pending`, cleared by `denyAll()` — so aborting a turn or
+ * Held beside `pending` in the shared gate below, cleared by `denyAll()` — so aborting a turn or
  * dropping the connection also revokes it, and it can never outlive the run
  * that asked for it.
  */
-let writeGrant = false;
-
 /** Called when the user picks "allow writes for this run" on a card. */
 export function grantWritesForRun(): void {
-  writeGrant = true;
+  gate().writeGrant = true;
 }
 
 export function writesGranted(): boolean {
-  return writeGrant;
+  return gate().writeGrant;
 }
 
 interface Pending {
@@ -60,40 +58,52 @@ interface Pending {
 
 const TIMEOUT_MS = 5 * 60 * 1000;
 
-// Module-level: the route handler and the tool handler run in the same
-// process, so a shared map is all the coordination needed.
-const pending = new Map<string, Pending>();
+/**
+ * One gate per process, on globalThis rather than in module variables.
+ *
+ * The tool asking and the /api/approve route answering run in the same
+ * process, but not necessarily with the same copy of this module: a bundler
+ * can give separate routes their own copy, and tsx loads a file twice when
+ * it is reached as both ESM and CommonJS. Two copies means two maps, and an
+ * approval that lands in the one nobody is waiting on — the request then
+ * sits until it times out and is denied.
+ */
+const shared = globalThis as { __jarvisApprovals?: { pending: Map<string, Pending>; writeGrant: boolean } };
+function gate() {
+  shared.__jarvisApprovals ??= { pending: new Map(), writeGrant: false };
+  return shared.__jarvisApprovals;
+}
 
 export function requestApproval(
   input: Omit<ApprovalRequest, "id" | "createdAt">,
   onCreated: (request: ApprovalRequest) => void,
 ): Promise<ApprovalDecision> {
   // A run-scoped grant answers for writes without a card. Commands always ask.
-  if (input.kind === "write" && writeGrant) return Promise.resolve("approve");
+  if (input.kind === "write" && gate().writeGrant) return Promise.resolve("approve");
 
   const request: ApprovalRequest = { ...input, id: newId(), createdAt: Date.now() };
 
   return new Promise<ApprovalDecision>((resolve) => {
     const timer = setTimeout(() => {
-      pending.delete(request.id);
+      gate().pending.delete(request.id);
       resolve("deny");
     }, TIMEOUT_MS);
 
     // Don't hold the process open just for a pending approval.
     timer.unref?.();
 
-    pending.set(request.id, { request, resolve, timer });
+    gate().pending.set(request.id, { request, resolve, timer });
     onCreated(request);
   });
 }
 
 /** Called by the API route. Returns false if the id is unknown or expired. */
 export function settleApproval(id: string, decision: ApprovalDecision): boolean {
-  const entry = pending.get(id);
+  const entry = gate().pending.get(id);
   if (!entry) return false;
 
   clearTimeout(entry.timer);
-  pending.delete(id);
+  gate().pending.delete(id);
   entry.resolve(decision);
   return true;
 }
@@ -106,10 +116,10 @@ export function settleApproval(id: string, decision: ApprovalDecision): boolean 
  * reason — finished, aborted, disconnected — ends it too.
  */
 export function denyAll(): void {
-  writeGrant = false;
-  for (const id of [...pending.keys()]) settleApproval(id, "deny");
+  gate().writeGrant = false;
+  for (const id of [...gate().pending.keys()]) settleApproval(id, "deny");
 }
 
 export function pendingCount(): number {
-  return pending.size;
+  return gate().pending.size;
 }

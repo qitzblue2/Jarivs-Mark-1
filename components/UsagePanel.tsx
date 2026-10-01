@@ -12,6 +12,7 @@ interface DayUsage {
   tokensSent: number;
   lastAt: number;
   lastError?: string;
+  lastOk?: boolean;
 }
 
 interface Usage {
@@ -143,7 +144,7 @@ export default function UsagePanel({ open, onClose }: Props) {
                         <td className="py-2 pl-3 text-ink-dim">
                           {cooling ? (
                             <span className="text-warn">Rate-limited — skipped for {minutes(cooling)}</span>
-                          ) : u.lastError && u.failed > 0 ? (
+                          ) : u.lastOk === false && u.lastError ? (
                             <span className="line-clamp-2 text-danger" title={u.lastError}>{u.lastError}</span>
                           ) : (
                             <span className="text-arc">Ready</span>

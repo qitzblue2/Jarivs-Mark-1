@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Check, FileText, ShieldAlert, Terminal, X } from "lucide-react";
+import { Check, FileCode2, FileText, ShieldAlert, Terminal, X } from "lucide-react";
+import DiffView, { looksLikeDiff } from "./DiffView";
 
 export interface PendingApproval {
   id: string;
@@ -25,7 +26,10 @@ interface Props {
  */
 export default function ApprovalCard({ approval, onSettled }: Props) {
   const [busy, setBusy] = useState<"approve" | "deny" | null>(null);
-  const [expanded, setExpanded] = useState(approval.kind === "command");
+  // A change to JARVIS' own code is shown open: the diff is the decision.
+  const isDiff = looksLikeDiff(approval.detail);
+  const selfEdit = approval.summary.includes("JARVIS' code");
+  const [expanded, setExpanded] = useState(approval.kind === "command" || isDiff || selfEdit);
 
   async function settle(decision: "approve" | "deny", scope: "once" | "run" = "once") {
     setBusy(decision);
@@ -49,7 +53,11 @@ export default function ApprovalCard({ approval, onSettled }: Props) {
       <div className="flex items-center gap-2 border-b border-warn/20 px-3 py-2">
         <ShieldAlert size={14} className="shrink-0 text-warn" />
         <span className="text-[12.5px] font-medium text-warn">
-          {isCommand ? "JARVIS wants to run a command" : "JARVIS wants to write a file"}
+          {isCommand
+            ? "JARVIS wants to run a command"
+            : selfEdit
+              ? "JARVIS wants to change its own code — in the sandbox"
+              : "JARVIS wants to write a file"}
         </span>
       </div>
 
@@ -57,6 +65,8 @@ export default function ApprovalCard({ approval, onSettled }: Props) {
         <div className="flex items-start gap-2">
           {isCommand ? (
             <Terminal size={13} className="mt-0.5 shrink-0 text-ink-faint" />
+          ) : selfEdit ? (
+            <FileCode2 size={13} className="mt-0.5 shrink-0 text-ink-faint" />
           ) : (
             <FileText size={13} className="mt-0.5 shrink-0 text-ink-faint" />
           )}
@@ -71,9 +81,15 @@ export default function ApprovalCard({ approval, onSettled }: Props) {
               onClick={() => setExpanded((v) => !v)}
               className="mt-2 text-[11px] text-ink-faint transition hover:text-ink"
             >
-              {expanded ? "Hide" : isCommand ? "Show why" : "Show the file content"}
+              {expanded ? "Hide" : isCommand ? "Show why" : isDiff ? "Show the change" : "Show the file content"}
             </button>
-            {expanded && (
+            {expanded && isDiff && (
+              <DiffView
+                diff={approval.detail!.slice(0, 20000)}
+                className="mt-1.5 max-h-72 rounded border border-line-soft bg-base py-1"
+              />
+            )}
+            {expanded && !isDiff && (
               <pre className="mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded border border-line-soft bg-base p-2 font-mono text-[11px] leading-relaxed text-ink-dim">
                 {approval.detail.slice(0, 8000)}
                 {approval.detail.length > 8000 && "\n…[truncated for display]"}

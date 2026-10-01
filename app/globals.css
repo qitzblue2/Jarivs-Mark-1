@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Never look for class names in build output. The real project's .gitignore
+   already keeps .next out, but Tailwind doesn't read the .gitignore of the
+   sandbox copy (lib/sandbox), whose build cache is binary — scanned as text
+   it produced a "class" that broke this stylesheet. */
+@source not "../.next";
+
 @theme {
   /* Deep, low-glare workspace palette. */
   --color-base: #0a0d13;

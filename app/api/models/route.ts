@@ -17,6 +17,7 @@ import { cooldownRemaining, stats as quotaStats } from "@/lib/providers/quota";
 import { storageDriver } from "@/lib/storage";
 import { computerAccessEnabled } from "@/lib/tools/fs/workspace";
 import { authConfigured, openNetwork, requiresAuth } from "@/lib/auth/session";
+import { isSandbox, sandboxPort, selfEditEnabled } from "@/lib/sandbox/paths";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -135,6 +136,10 @@ export async function GET(req: NextRequest) {
         // combination worth shouting about.
         exposedWithComputerAccess: !local && computerAccessEnabled(),
       },
+      // Whether JARVIS may edit its own code, and whether this server *is*
+      // the sandbox copy — the UI says so loudly, so nobody tests in the
+      // real one thinking it's the copy, or the other way round.
+      selfEdit: { enabled: selfEditEnabled(), isSandbox: isSandbox(), port: sandboxPort() },
     },
     { headers: { "Cache-Control": "no-store" } },
   );

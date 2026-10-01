@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ShieldAlert } from "lucide-react";
+import { FlaskConical, ShieldAlert } from "lucide-react";
 import Sidebar from "./Sidebar";
 import ChatPane from "./ChatPane";
 import CodeCanvas from "./CodeCanvas";
@@ -9,6 +9,7 @@ import SettingsDialog, { DEFAULT_SETTINGS, type Settings } from "./SettingsDialo
 import VoiceMode from "./VoiceMode";
 import Gallery from "./Gallery";
 import UsagePanel from "./UsagePanel";
+import SandboxPanel from "./SandboxPanel";
 import type { PendingApproval } from "./ApprovalCard";
 import { kokoroEngine } from "@/lib/voice/tts";
 import type { ProviderState } from "./ModelPicker";
@@ -57,6 +58,8 @@ export default function Workspace() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
+  const [sandboxOpen, setSandboxOpen] = useState(false);
+  const [selfEdit, setSelfEdit] = useState<{ enabled: boolean; isSandbox: boolean; port: number } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [pushToTalk, setPushToTalk] = useState(false);
@@ -117,6 +120,7 @@ export default function Workspace() {
       setProviders(list);
       setStorage(data.storage ?? "fs");
       setSecurity(data.security ?? null);
+      setSelfEdit(data.selfEdit ?? null);
 
       // Restore the last selection when it's still valid, else pick the first
       // usable provider with a model. "Usable" rather than "has a key": a
@@ -627,6 +631,18 @@ export default function Workspace() {
 
   return (
     <div className="flex h-dvh w-full flex-col overflow-hidden">
+      {selfEdit?.isSandbox && (
+        <div
+          className="flex items-center gap-2 border-b border-warn/40 bg-warn/15 px-3 py-1.5 text-[11.5px] text-warn"
+          data-sandbox-banner
+        >
+          <FlaskConical size={13} className="shrink-0" />
+          <span className="min-w-0 flex-1">
+            <strong>Sandbox</strong> — a test copy of JARVIS. Changes here don&apos;t touch the real one, and its
+            chats are its own.
+          </span>
+        </div>
+      )}
       {security?.exposedWithComputerAccess && (
         <div className="flex items-center gap-2 border-b border-danger/40 bg-danger/15 px-3 py-1.5 text-[11.5px] text-danger">
           <ShieldAlert size={13} className="shrink-0" />
@@ -651,6 +667,7 @@ export default function Workspace() {
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenGallery={() => setGalleryOpen(true)}
           onOpenUsage={() => setUsageOpen(true)}
+          onOpenSandbox={selfEdit?.enabled ? () => setSandboxOpen(true) : undefined}
           storageDriver={storage}
         />
       </div>
@@ -679,6 +696,14 @@ export default function Workspace() {
                 setSidebarOpen(false);
                 setUsageOpen(true);
               }}
+              onOpenSandbox={
+                selfEdit?.enabled
+                  ? () => {
+                      setSidebarOpen(false);
+                      setSandboxOpen(true);
+                    }
+                  : undefined
+              }
               storageDriver={storage}
             />
           </div>
@@ -771,6 +796,8 @@ export default function Workspace() {
       </div>
 
       <UsagePanel open={usageOpen} onClose={() => setUsageOpen(false)} />
+
+      <SandboxPanel open={sandboxOpen} onClose={() => setSandboxOpen(false)} />
 
       <Gallery
         open={galleryOpen}

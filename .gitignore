@@ -40,6 +40,9 @@ public/models/kokoro/
 # JARVIS scratch space for the filesystem tools.
 workspace/
 
+# The sandbox copy JARVIS edits its own code in — rebuilt from the source.
+/.sandbox*/
+
 # Silero VAD assets, fetched by scripts/setup-voice.mjs.
 public/vad/
 

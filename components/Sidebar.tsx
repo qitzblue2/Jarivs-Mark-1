@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, Gauge, ImageIcon, MessageSquare, Pin, PinOff, Plus, Search, Settings, Trash2, X } from "lucide-react";
+import { Check, FlaskConical, Gauge, ImageIcon, MessageSquare, Pin, PinOff, Plus, Search, Settings, Trash2, X } from "lucide-react";
 import type { ChatMeta } from "@/lib/types";
 import type { ChatHit } from "@/lib/chat-search";
 
@@ -16,6 +16,8 @@ interface Props {
   onOpenSettings: () => void;
   onOpenGallery: () => void;
   onOpenUsage: () => void;
+  /** Present only when JARVIS may edit its own code. */
+  onOpenSandbox?: () => void;
   storageDriver: string;
 }
 
@@ -39,6 +41,7 @@ export default function Sidebar({
   onOpenSettings,
   onOpenGallery,
   onOpenUsage,
+  onOpenSandbox,
   storageDriver,
 }: Props) {
   const [query, setQuery] = useState("");
@@ -99,27 +102,39 @@ export default function Sidebar({
           <div className="truncate text-sm font-semibold tracking-wide">JARVIS</div>
           <div className="text-[10px] uppercase tracking-widest text-ink-faint">Mark 6</div>
         </div>
-        <button
-          onClick={onOpenUsage}
-          className="rounded-md p-1.5 text-ink-faint transition hover:bg-raised hover:text-ink"
-          title="Usage"
-        >
-          <Gauge size={16} />
-        </button>
-        <button
-          onClick={onOpenGallery}
-          className="rounded-md p-1.5 text-ink-faint transition hover:bg-raised hover:text-ink"
-          title="Pictures"
-        >
-          <ImageIcon size={16} />
-        </button>
-        <button
-          onClick={onOpenSettings}
-          className="rounded-md p-1.5 text-ink-faint transition hover:bg-raised hover:text-ink"
-          title="Settings"
-        >
-          <Settings size={16} />
-        </button>
+        {/* Grouped without gaps so four buttons leave room for the name. */}
+        <div className="flex shrink-0 items-center">
+          {onOpenSandbox && (
+            <button
+              onClick={onOpenSandbox}
+              className="rounded-md p-1.5 text-ink-faint transition hover:bg-raised hover:text-arc"
+              title="Sandbox — JARVIS' code, and a copy to test it in"
+            >
+              <FlaskConical size={16} />
+            </button>
+          )}
+          <button
+            onClick={onOpenUsage}
+            className="rounded-md p-1.5 text-ink-faint transition hover:bg-raised hover:text-ink"
+            title="Usage"
+          >
+            <Gauge size={16} />
+          </button>
+          <button
+            onClick={onOpenGallery}
+            className="rounded-md p-1.5 text-ink-faint transition hover:bg-raised hover:text-ink"
+            title="Pictures"
+          >
+            <ImageIcon size={16} />
+          </button>
+          <button
+            onClick={onOpenSettings}
+            className="rounded-md p-1.5 text-ink-faint transition hover:bg-raised hover:text-ink"
+            title="Settings"
+          >
+            <Settings size={16} />
+          </button>
+        </div>
       </div>
 
       <div className="px-3 pb-2">

@@ -35,7 +35,7 @@ import { attachmentsToText, lighten, formatSize, MAX_IMAGES } from "../lib/attac
 import { supportsVision } from "../lib/providers/registry";
 import { textOf } from "../lib/tokens";
 import type { Attachment } from "../lib/types";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { imageIdFrom, listImages, pruneImages, readImage, sniffMime } from "../lib/images/store";
@@ -44,6 +44,13 @@ import { getStore } from "../lib/storage";
 import { flushUsage, recordRequest, resetUsage, usageHistory, utcDay } from "../lib/providers/usage";
 import { crc32, zipStream } from "../lib/backup/zip";
 import { backupEntries } from "../lib/backup";
+import { isEditable, isSourcePath, resolveSource } from "../lib/sandbox/paths";
+import { diffLines, unifiedDiff } from "../lib/sandbox/diff";
+import {
+  listChanges, listPromotions, promote, readManifest, resetSandbox, revertSandboxFile, undoPromotion, writeSandboxFile,
+} from "../lib/sandbox/sync";
+import { sandboxEnv } from "../lib/sandbox/server";
+import { settleApproval } from "../lib/tools/fs/approval";
 import type { Chat } from "../lib/types";
 
 let pass = 0;
@@ -1223,6 +1230,9 @@ console.log("\n--- counting what was spent ---");
   eq("a rate limit isn't reported as an error", groq.lastError, undefined);
   eq("a failure is", today.providers.cerebras.failed, 2);
   eq("with what went wrong last", today.providers.cerebras.lastError, "ECONNREFUSED");
+  eq("and whether the latest request failed", today.providers.cerebras.lastOk, false);
+  recordRequest("cerebras", 100, 200);
+  eq("which an answer since clears, error kept for the record", [(await usageHistory())[0].providers.cerebras.lastOk, (await usageHistory())[0].providers.cerebras.lastError], [true, "ECONNREFUSED"]);
 
   await flushUsage();
   const saved = JSON.parse(readFileSync(process.env.JARVIS_USAGE_FILE, "utf8"));
@@ -1280,6 +1290,210 @@ console.log("\n--- backing everything up ---");
 
   delete process.env.JARVIS_DATA_DIR;
   rmSync(dir, { recursive: true, force: true });
+}
+
+console.log("\n--- JARVIS editing its own code, in a sandbox ---");
+{
+  // Which paths are JARVIS' source, and which an edit may touch.
+  eq("a component is source", isSourcePath("components/ChatPane.tsx"), true);
+  eq("so is a route", isEditable("app/api/chat/route.ts"), true);
+  eq("and a top-level config", isEditable("next.config.ts"), true);
+  eq("secrets never are", isSourcePath(".env.local"), false);
+  eq("the example env file is", isEditable(".env.example"), true);
+  eq("nor your data", isSourcePath("data/chats/a.json"), false);
+  eq("nor installed packages", isSourcePath("lib/node_modules/x.js"), false);
+  eq("nor the downloaded voice models", isSourcePath("public/models/kokoro/x.onnx"), false);
+  eq("package.json is copied but can't be edited", [isSourcePath("package.json"), isEditable("package.json")], [true, false]);
+  eq("traversal is not source", isSourcePath("lib/../../etc/passwd"), false);
+
+  const root = mkdtempSync(join(tmpdir(), "jarvis-self-"));
+  const live = join(root, "live");
+  const box = join(root, "box");
+  const put = (base: string, rel: string, text: string) => {
+    mkdirSync(join(base, ...rel.split("/").slice(0, -1)), { recursive: true });
+    writeFileSync(join(base, ...rel.split("/")), text);
+  };
+  put(live, "components/Hello.tsx", "export const hello = 1;\n");
+  put(live, "lib/util.ts", "export const a = 1;\nexport const b = 2;\n");
+  put(live, "README.md", "# JARVIS\n");
+  put(live, "package.json", "{}\n");
+  put(live, ".env.local", "GROQ_API_KEY=secret\n");
+  put(live, "data/chats/c.json", "{}");
+  put(live, "test/.mock.log", "noise");
+  mkdirSync(join(live, "public", "models"), { recursive: true });
+  writeFileSync(join(live, "public", "models", "big.onnx"), "weights");
+  process.env.JARVIS_LIVE_ROOT = live;
+  process.env.JARVIS_SANDBOX_DIR = box;
+  // These tests play the real JARVIS, even when the checks run them inside
+  // the sandbox copy (which is marked as such, and has self-editing off).
+  const wasSandbox = process.env.JARVIS_IS_SANDBOX;
+  delete process.env.JARVIS_IS_SANDBOX;
+
+  try {
+    await resetSandbox();
+    eq("the sandbox is a copy of the source", readdirSync(join(box, "components")), ["Hello.tsx"]);
+    eq("without your secrets", existsSync(join(box, ".env.local")), false);
+    eq("or your data", existsSync(join(box, "data")), false);
+    eq("or stray logs", existsSync(join(box, "test", ".mock.log")), false);
+    eq("the voice models are linked, not copied", lstatSync(join(box, "public", "models")).isSymbolicLink(), true);
+    eq("git's own files are never source", isSourcePath(".git/config") || isSourcePath(".gitignore"), false);
+    // A sandbox folder set by mistake to somewhere with your files in it.
+    const elsewhere = join(root, "home");
+    put(elsewhere, "precious.txt", "keep me");
+    process.env.JARVIS_SANDBOX_DIR = elsewhere;
+    let refusedWipe = "";
+    try { await resetSandbox(); } catch (e) { refusedWipe = (e as Error).message; }
+    eq("a folder that isn't a sandbox is never cleared", [/won't be cleared/.test(refusedWipe), existsSync(join(elsewhere, "precious.txt"))], [true, true]);
+    process.env.JARVIS_SANDBOX_DIR = box;
+    eq(
+      "the stylesheet never scans build output (the sandbox's cache broke it)",
+      readFileSync(new URL("../app/globals.css", import.meta.url), "utf8").includes('@source not "../.next"'),
+      true,
+    );
+    eq("and every copied file is recorded", Object.keys((await readManifest())!.base).sort(), [
+      "README.md", "components/Hello.tsx", "lib/util.ts", "package.json",
+    ]);
+
+    let threw = "";
+    try { await resolveSource("../live/.env.local", box, { editable: true }); } catch (e) { threw = (e as Error).message; }
+    eq("an edit can't climb out", /outside/.test(threw), true);
+    threw = "";
+    try { await resolveSource("public/models/evil.ts", box, { editable: true }); } catch (e) { threw = (e as Error).message; }
+    eq("or follow the model link out of the sandbox", threw !== "", true);
+    threw = "";
+    try { await writeSandboxFile("package.json", "{\"dependencies\":{}}"); } catch (e) { threw = (e as Error).message; }
+    eq("dependencies can't be changed from here", /npm install/.test(threw), true);
+
+    await writeSandboxFile("lib/util.ts", "export const a = 1;\nexport const b = 3;\n");
+    await writeSandboxFile("lib/new.ts", "export const c = 3;\n");
+    rmSync(join(box, "README.md"));
+    eq("edits stay in the sandbox", readFileSync(join(live, "lib", "util.ts"), "utf8").includes("b = 2"), true);
+    eq("and are listed as changes, alphabetically", (await listChanges()).map((c) => `${c.status} ${c.path}`), [
+      "added lib/new.ts", "modified lib/util.ts", "deleted README.md",
+    ]);
+
+    // Someone changes the real file meanwhile: applying would clobber it.
+    put(live, "lib/util.ts", "export const a = 9;\nexport const b = 2;\n");
+    eq("a file changed in JARVIS since is flagged", (await listChanges()).find((c) => c.path === "lib/util.ts")?.conflict, true);
+    threw = "";
+    try { await promote(); } catch (e) { threw = (e as Error).message; }
+    eq("and applying refuses rather than overwrite it", /changed since the sandbox was made/.test(threw), true);
+    eq("writing nothing at all", existsSync(join(live, "lib", "new.ts")), false);
+
+    await revertSandboxFile("lib/util.ts");
+    eq("reverting takes JARVIS' current copy", readFileSync(join(box, "lib", "util.ts"), "utf8").includes("a = 9"), true);
+    await writeSandboxFile("lib/util.ts", "export const a = 9;\nexport const b = 3;\n");
+
+    const applied = await promote();
+    eq("applying writes the changes into JARVIS", readFileSync(join(live, "lib", "util.ts"), "utf8"), "export const a = 9;\nexport const b = 3;\n");
+    eq("adds new files", existsSync(join(live, "lib", "new.ts")), true);
+    eq("removes deleted ones", existsSync(join(live, "README.md")), false);
+    eq("and the sandbox then matches", (await listChanges()).length, 0);
+    eq("it's recorded", (await listPromotions()).map((p) => p.id), [applied.id]);
+    const saved = readdirSync(join(live, "data", "self-edit", applied.id, "before", "lib"));
+    eq("with the old code kept where no compiler mistakes it for source", saved, ["util.ts.orig"]);
+
+    await undoPromotion(applied.id);
+    eq("undo puts the old code back", readFileSync(join(live, "lib", "util.ts"), "utf8").includes("b = 2"), true);
+    eq("removes what was added", existsSync(join(live, "lib", "new.ts")), false);
+    eq("restores what was deleted", readFileSync(join(live, "README.md"), "utf8"), "# JARVIS\n");
+    eq("and the sandbox shows them as unapplied again", (await listChanges()).length, 3);
+    threw = "";
+    try { await undoPromotion(applied.id); } catch (e) { threw = (e as Error).message; }
+    eq("an undo can't run twice", /already undone/.test(threw), true);
+
+    const again = await promote();
+    put(live, "lib/util.ts", "hand edited after\n");
+    threw = "";
+    try { await undoPromotion(again.id); } catch (e) { threw = (e as Error).message; }
+    eq("undo won't discard an edit made after applying", /changed again/.test(threw), true);
+
+    // The sandbox server gets its own settings, never the real JARVIS' ones.
+    process.env.JARVIS_DEVICE_MODE = "1";
+    process.env.JARVIS_ALLOW_SELF_EDIT = "1";
+    const env = sandboxEnv();
+    eq("it is marked as the sandbox", env.JARVIS_IS_SANDBOX, "1");
+    eq("can't start a sandbox of its own", env.JARVIS_ALLOW_SELF_EDIT, undefined);
+    eq("and leaves the microphone and display alone", env.JARVIS_DEVICE_MODE, undefined);
+    eq("and uses its own data", env.JARVIS_LIVE_ROOT, undefined);
+    delete process.env.JARVIS_DEVICE_MODE;
+
+    // The tools, end to end, against the same fake project.
+    eq("the self-edit tools exist only when switched on", allTools().some((t) => t.name === "code_edit"), true);
+    const selfEditTokens =
+      estimateTokens(JSON.stringify(allTools().map(toWireTool))) -
+      (() => {
+        delete process.env.JARVIS_ALLOW_SELF_EDIT;
+        const n = estimateTokens(JSON.stringify(allTools().map(toWireTool)));
+        process.env.JARVIS_ALLOW_SELF_EDIT = "1";
+        return n;
+      })();
+    console.log(`     self-editing adds ${selfEditTokens} tokens when switched on`);
+    eq("and cost little when they do", selfEditTokens > 0 && selfEditTokens <= 300, true);
+    process.env.JARVIS_IS_SANDBOX = "1";
+    eq("the sandbox copy itself never gets them", allTools().some((t) => t.name === "code_edit"), false);
+    delete process.env.JARVIS_IS_SANDBOX;
+
+    const approve = { onApprovalRequest: (r: { id: string }) => settleApproval(r.id, "approve") };
+    const deny = { onApprovalRequest: (r: { id: string }) => settleApproval(r.id, "deny") };
+    let card = "";
+    const watch = { onApprovalRequest: (r: { id: string; detail?: string }) => { card = r.detail ?? ""; settleApproval(r.id, "approve"); } };
+
+    const read = await runToolCall({ id: "c1", name: "code_read", arguments: '{"path":"components/Hello.tsx"}' }, {});
+    eq("JARVIS can read its own code, numbered", read.content.includes("1  export const hello = 1;"), true);
+    const overviewText = (await runToolCall({ id: "c2", name: "code_read", arguments: "{}" }, {})).content;
+    eq("and gets a map of it", overviewText.includes("components/") && overviewText.includes("lib/"), true);
+
+    const edited = await runToolCall(
+      { id: "c3", name: "code_edit", arguments: JSON.stringify({ path: "components/Hello.tsx", find: "hello = 1", replace: "hello = 2" }) },
+      watch,
+    );
+    eq("JARVIS can edit itself", edited.isError, false);
+    eq("the approval shows a diff", card.includes("-export const hello = 1;") && card.includes("+export const hello = 2;"), true);
+    eq("the edit is in the sandbox", readFileSync(join(box, "components", "Hello.tsx"), "utf8"), "export const hello = 2;\n");
+    eq("not in the running JARVIS", readFileSync(join(live, "components", "Hello.tsx"), "utf8"), "export const hello = 1;\n");
+
+    const refused = await runToolCall(
+      { id: "c4", name: "code_edit", arguments: JSON.stringify({ path: "components/Hello.tsx", find: "hello = 2", replace: "hello = 3" }) },
+      deny,
+    );
+    eq("a refused edit changes nothing", readFileSync(join(box, "components", "Hello.tsx"), "utf8").includes("hello = 2"), true);
+    eq("and JARVIS is told", /did not approve/.test(refused.content), true);
+
+    const ambiguous = await runToolCall(
+      { id: "c5", name: "code_edit", arguments: JSON.stringify({ path: "lib/util.ts", find: "export const", replace: "const" }) },
+      approve,
+    );
+    eq("an edit that could mean two places is refused", ambiguous.isError && /appears 2 times/.test(ambiguous.content), true);
+    const secret = await runToolCall(
+      { id: "c6", name: "code_edit", arguments: JSON.stringify({ path: ".env.local", content: "x" }) },
+      approve,
+    );
+    eq("secrets are off limits", secret.isError, true);
+    const created = await runToolCall(
+      { id: "c7", name: "code_edit", arguments: JSON.stringify({ path: "lib/tools/joke.ts", content: "export const joke = 'hi';\n" }) },
+      approve,
+    );
+    eq("it can add a whole new file", created.isError === false && existsSync(join(box, "lib", "tools", "joke.ts")), true);
+    eq("a long file comes back a page at a time", await (async () => {
+      put(box, "lib/long.ts", Array.from({ length: 900 }, (_, i) => `export const v${i} = ${i};`).join("\n"));
+      const page = (await runToolCall({ id: "c8", name: "code_read", arguments: '{"path":"lib/long.ts"}' }, {})).content;
+      return page.length < 6000 && /Continue with from=\d+/.test(page);
+    })(), true);
+    eq("an unknown tool path is explained", /No such file/.test((await runToolCall({ id: "c9", name: "code_read", arguments: '{"path":"lib/nope.ts"}' }, {})).content), true);
+
+    eq("a diff of identical text is empty", unifiedDiff("a\n", "a\n"), "");
+    eq("a diff rebuilds both sides", (() => {
+      const d = diffLines("a\nb\nc\n", "a\nc\nd\n");
+      return [d.filter((l) => l.op !== "+").map((l) => l.text), d.filter((l) => l.op !== "-").map((l) => l.text)];
+    })(), [["a", "b", "c"], ["a", "c", "d"]]);
+  } finally {
+    delete process.env.JARVIS_ALLOW_SELF_EDIT;
+    delete process.env.JARVIS_LIVE_ROOT;
+    delete process.env.JARVIS_SANDBOX_DIR;
+    if (wasSandbox !== undefined) process.env.JARVIS_IS_SANDBOX = wasSandbox;
+    rmSync(root, { recursive: true, force: true });
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -23,6 +23,12 @@ export interface DayUsage {
   tokensSent: number;
   lastAt: number;
   lastError?: string;
+  /**
+   * How the most recent request ended. The page's "now" column reads this,
+   * not lastError: an error at nine o'clock says nothing about a provider
+   * that has answered fifty times since.
+   */
+  lastOk?: boolean;
 }
 
 export interface UsageFile {
@@ -82,6 +88,7 @@ async function readFile(): Promise<void> {
                 tokensSent: counts.tokensSent + mine.tokensSent,
                 lastAt: Math.max(counts.lastAt, mine.lastAt),
                 lastError: mine.lastError ?? counts.lastError,
+                lastOk: mine.lastAt >= counts.lastAt ? mine.lastOk : counts.lastOk,
               }
             : counts;
         }
@@ -141,12 +148,12 @@ export function recordRequest(
   counts.requests++;
   counts.tokensSent += Math.max(0, Math.round(tokens));
   counts.lastAt = Date.now();
+  const ok = typeof outcome === "number" && outcome < 400;
   if (outcome === 429) counts.rateLimited++;
-  else if (typeof outcome === "number" && outcome < 400) counts.ok++;
+  else if (ok) counts.ok++;
   else counts.failed++;
-  if (error && outcome !== 429 && !(typeof outcome === "number" && outcome < 400)) {
-    counts.lastError = error.slice(0, 200);
-  }
+  counts.lastOk = ok;
+  if (error && outcome !== 429 && !ok) counts.lastError = error.slice(0, 200);
 
   scheduleSave();
 }

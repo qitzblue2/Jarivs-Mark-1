@@ -14,6 +14,8 @@ can now use tools mid-answer instead of only talking.
 - **Voice.** Say "Hey JARVIS" and talk to it. Wake word runs on your machine.
 - **Proactive.** Reminders, briefings and watchers it speaks aloud unasked.
 - **Pictures.** With a NanoGPT key it draws, and edits pictures you attach.
+- **Edits its own code** (opt-in) — in an always-running sandbox copy, applied
+  to the real thing only when you say so, with undo.
 - **Yours.** Chats are plain JSON files on your disk. Nothing to sign into.
 
 ---
@@ -231,6 +233,7 @@ Shipped so far:
 | `calculate` | Arithmetic, via a real parser |
 | `get_time` | The current date, which a model cannot know on its own |
 | `generate_image` | Draws a picture, or edits one — only offered with a NanoGPT key |
+| `code_read` / `code_edit` / `code_check` | Its own source, in the sandbox — only with `JARVIS_ALLOW_SELF_EDIT=1` |
 | `remember` / `recall` / `forget` | Durable memory across conversations; `recall` also searches past chats |
 | `list_files` / `read_file` / `write_file` | Files in the workspace — writes need your approval |
 | `run_command` | Shell commands in the workspace — needs your approval |
@@ -581,6 +584,48 @@ controls.
 Reads are unattended. A handful of catastrophic commands (`rm -rf /`, `mkfs`,
 fork bombs) are refused outright even with approval.
 
+### Letting JARVIS edit its own code
+
+```bash
+JARVIS_ALLOW_SELF_EDIT=1   # in .env.local, then restart
+```
+
+JARVIS can then read and change its own source: any page, component, tool,
+provider, the voice pipeline, anything in `app/`, `components/`, `lib/`,
+`test/`, `scripts/` or `public/`. Ask it — "add a tool that tells jokes",
+"make the sidebar wider" — and it uses `code_read`, `code_edit` and
+`code_check`. You can do the same by hand from the **Sandbox** button (the
+flask) in the sidebar: every file, an editor, and `+ New` for new files.
+
+**Every change lands in the sandbox first, never in the JARVIS you're using.**
+
+- **The sandbox is a second JARVIS, always running** — a copy of the source in
+  `.sandbox/app`, served by `next dev` on port 3100. It starts with JARVIS,
+  is restarted by itself if it ever stops, and reloads a change within a
+  second or two of it being saved. **Open sandbox** in the panel opens it; a
+  yellow banner marks it, and its chats, memory and schedule are its own.
+  It uses the same installed packages, so nothing is installed twice.
+- **JARVIS asks before each edit**, showing the change as a diff. A change
+  lands only in the sandbox.
+- **Apply** copies the sandbox's changes into JARVIS — after running the type
+  checker and the unit tests on the copy. If they fail it stops; you can
+  apply anyway once you've seen why. JARVIS' current version of every file is
+  saved first, and **Undo** puts it back.
+- A file you changed in JARVIS since the sandbox was made (a `git pull`, say)
+  is flagged, and Apply refuses rather than overwrite it. **Revert** that file
+  in the sandbox, or **reset** the sandbox to a fresh copy.
+- `package.json` can't be edited here — a dependency change needs `npm
+  install`, which is yours to run. Nor can `.env` files, `data/` or
+  `node_modules/`.
+
+After Apply, `npm run dev` picks the change up immediately. A production
+server (`npm start`) needs `npm run build && npm start` to load it — the panel
+says which.
+
+> The sandbox protects JARVIS from broken code, not your machine from bad
+> code: it's a process on this computer, holding your API keys. That's why
+> self-editing is opt-in and every model edit needs your approval.
+
 ## 10. Reaching it from your phone
 
 `npm run dev` listens on **localhost only**. That is deliberate, and it is the
@@ -662,6 +707,7 @@ lib/
   auth/             password session, signed cookie
   memory/           durable facts, relevance scoring, prompt injection
   tools/fs/         workspace containment, approval gate, file and shell tools
+  sandbox/          self-editing: the sandbox copy, its server, checks, apply/undo
   voice/            wake word (local ONNX), speech to text, speech out
   providers/        registry + one OpenAI-compatible adapter for all of them
   tools/            tool definitions, registry and runner
@@ -684,6 +730,7 @@ GROQ_API_KEY=test JARVIS_GROQ_BASE_URL=http://localhost:8899/v1 npm run dev
 npm run test:e2e    # drives a real browser against the mock
 npm run test:voice  # voice mode, with a WAV standing in for a microphone
 npm run test:chats  # search, pinning and export
+npm run test:sandbox  # self-editing: start with JARVIS_ALLOW_SELF_EDIT=1, see the file
 
 # Pictures, against a production build (next dev would hide the bug it guards):
 npm run build
