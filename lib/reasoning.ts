@@ -25,11 +25,22 @@ export interface Split {
   thinking: boolean;
 }
 
+/**
+ * A tool call written out as text instead of made.
+ *
+ * Qwen's native format is `<tool_call><function=name>…</function></tool_call>`.
+ * When a model wants a tool on a round where none are offered — out of steps,
+ * or a provider that dropped the tools — it sometimes writes the call into its
+ * reply. Nothing runs, and the markup means nothing to a reader, so it goes;
+ * an unfinished one (still streaming) goes too.
+ */
+const LEAKED_CALL = /<tool_call>[\s\S]*?(?:<\/tool_call>|$)|<function=[\w.-]+>[\s\S]*?(?:<\/function>|$)/gi;
+
 export function splitReasoning(text: string): Split {
   const parts: string[] = [];
 
   // Completed blocks first, wherever they appear.
-  let answer = text.replace(CLOSED, (_match, _tag, inner: string) => {
+  let answer = text.replace(LEAKED_CALL, "").replace(CLOSED, (_match, _tag, inner: string) => {
     parts.push(inner.trim());
     return "";
   });

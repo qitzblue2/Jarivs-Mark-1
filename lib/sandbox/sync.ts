@@ -179,7 +179,9 @@ export async function resetSandbox(): Promise<Manifest> {
     try {
       await fs.access(from);
       await fs.mkdir(path.dirname(to), { recursive: true });
-      await fs.symlink(from, to, "dir");
+      // A junction on Windows: a plain directory symlink there needs admin
+      // rights or Developer Mode, and failed silently without them.
+      await fs.symlink(from, to, process.platform === "win32" ? "junction" : "dir");
     } catch {
       /* not downloaded on this install */
     }

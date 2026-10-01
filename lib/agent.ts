@@ -85,6 +85,19 @@ export async function* runAgentTurn(
     // Withhold tools on the final round so the model has to conclude.
     const offerTools = toolsEnabled && round < maxRounds;
 
+    // And say so. Without the note a model mid-task carries on as if it still
+    // had tools, and writes its next call out as text — raw <tool_call> markup
+    // in the reply, and nothing run.
+    if (toolsEnabled && round === maxRounds && round > 1) {
+      messages.push({
+        role: "system",
+        content:
+          "You have used all your tool steps for this turn. Don't call any more tools. Answer now with " +
+          "what you found, and say plainly what is left to do — the user can continue, or press " +
+          '"Work on this" for a longer run.',
+      });
+    }
+
     let upstream: ReadableStream<Uint8Array>;
     try {
       upstream = await streamChat(providerId, key, {

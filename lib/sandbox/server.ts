@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, promises as fs, readFileSync } from "node:fs";
 import { connect } from "node:net";
 import path from "node:path";
@@ -89,6 +89,23 @@ export function sandboxEnv(): Record<string, string | undefined> {
   return env;
 }
 
+/**
+ * Stop the sandbox server and everything it started.
+ *
+ * `next dev` runs workers of its own, so stopping only the top process
+ * leaves them holding the port. Elsewhere the server gets its own process
+ * group and the whole group is signalled; Windows has no groups, so
+ * taskkill /T takes the tree instead (and /F, since a console program there
+ * often ignores a polite request).
+ */
+function killTree(pid: number, force = false): void {
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+    return;
+  }
+  process.kill(-pid, force ? "SIGKILL" : "SIGTERM");
+}
+
 function nextBin(): string {
   return path.join(liveRoot(), "node_modules", "next", "dist", "bin", "next");
 }
@@ -114,7 +131,7 @@ async function stopOrphan(): Promise<void> {
   try {
     const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8");
     if (!cmdline.includes("next") || !cmdline.includes(String(sandboxPort()))) return;
-    process.kill(-pid, "SIGTERM");
+    killTree(pid);
     log(`Stopped a sandbox server left over from before (pid ${pid}).`);
   } catch {
     /* gone already, or not Linux — nothing to do */
@@ -140,8 +157,10 @@ function launch(): void {
     cwd: sandboxRoot(),
     env: sandboxEnv() as NodeJS.ProcessEnv,
     stdio: ["ignore", "pipe", "pipe"],
-    // Its own process group, so stopping it stops the workers next dev spawns too.
-    detached: true,
+    // Its own process group, so stopping it stops the workers next dev spawns
+    // too. Not on Windows, where detaching opens a console window of its own.
+    detached: process.platform !== "win32",
+    windowsHide: true,
   });
   s.child = child;
   if (child.pid) void fs.writeFile(pidFile(), String(child.pid)).catch(() => {});
@@ -195,7 +214,7 @@ export async function startSandboxServer(): Promise<void> {
       const child = supervisor().child;
       if (child?.pid) {
         try {
-          process.kill(-child.pid, "SIGTERM");
+          killTree(child.pid);
         } catch {
           /* already gone */
         }
@@ -224,7 +243,7 @@ export async function stopSandboxServer(): Promise<void> {
   await new Promise<void>((resolve) => {
     const kill = setTimeout(() => {
       try {
-        process.kill(-child.pid!, "SIGKILL");
+        killTree(child.pid!, true);
       } catch {
         /* gone */
       }
@@ -234,7 +253,7 @@ export async function stopSandboxServer(): Promise<void> {
       resolve();
     });
     try {
-      process.kill(-child.pid!, "SIGTERM");
+      killTree(child.pid!);
     } catch {
       clearTimeout(kill);
       resolve();

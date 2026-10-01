@@ -26,6 +26,7 @@ import { DEFAULT_PERSONA } from "../lib/persona";
 import { isNoise } from "../lib/voice/phrases";
 import { forSpeech } from "../lib/voice/tts/types";
 import { splitReasoning } from "../lib/reasoning";
+import { environmentNote } from "../lib/environment";
 import { SentenceSplitter, splitSentences } from "../lib/voice/tts/sentences";
 import { Speaker } from "../lib/voice/tts/speaker";
 import { encodeWav, durationOf } from "../lib/voice/wav";
@@ -780,6 +781,12 @@ console.log("\n--- a thinking model's reasoning ---");
   eq("and all of the reasoning kept", many.reasoning, "one\n\ntwo");
 
   // A model that mentions the word must not trip the parser.
+  eq(
+    "a tool call written out as text is not shown",
+    splitReasoning("I see the issue.\n\n<tool_call> <function=run_command> <parameter=command> dir /b </parameter> </function> </tool_call>").answer,
+    "I see the issue.",
+  );
+  eq("nor one still streaming", splitReasoning("Done. <tool_call> <function=list_fi").answer, "Done.");
   eq("prose about thinking is left alone", splitReasoning("I think so.").answer, "I think so.");
 }
 
@@ -1417,6 +1424,22 @@ console.log("\n--- JARVIS editing its own code, in a sandbox ---");
     eq("and leaves the microphone and display alone", env.JARVIS_DEVICE_MODE, undefined);
     eq("and uses its own data", env.JARVIS_LIVE_ROOT, undefined);
     delete process.env.JARVIS_DEVICE_MODE;
+
+    // What the model is told about where it runs.
+    process.env.JARVIS_ALLOW_SELF_EDIT = "0";
+    delete process.env.JARVIS_ALLOW_COMPUTER;
+    eq("with no tools on, the model is told nothing extra", environmentNote(), "");
+    process.env.JARVIS_ALLOW_SELF_EDIT = "1";
+    const selfNote = environmentNote();
+    eq("with self-editing, it's pointed at the code tools", selfNote.includes("code_read"), true);
+    eq("and told .env files are off limits", selfNote.includes(".env"), true);
+    process.env.JARVIS_ALLOW_COMPUTER = "1";
+    process.env.JARVIS_WORKSPACE = join(box, "..");
+    const pointedAtSandbox = environmentNote();
+    eq("a workspace set to the sandbox folder is called out", pointedAtSandbox.includes("set to your sandbox"), true);
+    eq("and the shell is named for this OS", /cmd\.exe|uses sh/.test(pointedAtSandbox), true);
+    delete process.env.JARVIS_ALLOW_COMPUTER;
+    delete process.env.JARVIS_WORKSPACE;
 
     // The tools, end to end, against the same fake project.
     eq("the self-edit tools exist only when switched on", allTools().some((t) => t.name === "code_edit"), true);
