@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, AudioLines, Code2, FileDown, GitBranch, Info, Menu, Mic, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import Message from "./Message";
 import ContextMeter from "./ContextMeter";
+import Welcome, { type QuickActionId } from "./Welcome";
+import type { ChatMeta } from "@/lib/types";
 import type { ContextInfo } from "@/lib/context-meter";
 import Composer from "./Composer";
 import ApprovalCard, { type PendingApproval } from "./ApprovalCard";
@@ -55,6 +57,10 @@ interface Props {
   context: ContextInfo | null;
   favorites: string[];
   onToggleFavorite: (provider: string, model: string) => void;
+  /** For the welcome screen: where you left off, and the quick actions. */
+  recent: ChatMeta[];
+  onOpenChat: (id: string) => void;
+  onQuickAction: (id: QuickActionId) => void;
 }
 
 const STARTERS = [
@@ -71,7 +77,7 @@ export default function ChatPane(props: Props) {
     onModelChange, onOpenSettings, onToggleSidebar, onToggleCanvas, canvasOpen,
     artifactCount, notice, onDismissNotice, onStartVoice,
     attachments, onAttach, onRemoveAttachment, onAttachError,
-    approvals, onApprovalSettled, context, favorites, onToggleFavorite,
+    approvals, onApprovalSettled, context, favorites, onToggleFavorite, recent, onOpenChat, onQuickAction,
   } = props;
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -214,7 +220,7 @@ export default function ChatPane(props: Props) {
       >
         {messages.length === 0 ? (
           <div className="flex h-full items-center justify-center p-6">
-            <div className="w-full max-w-md text-center">
+            <div className="w-full max-w-xl text-center">
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-arc-dim/10 ring-1 ring-arc-dim/25">
                 <Sparkles size={20} className="text-arc" />
               </div>
@@ -226,17 +232,13 @@ export default function ChatPane(props: Props) {
               </p>
 
               {anyKey ? (
-                <div className="grid gap-1.5 text-left">
-                  {STARTERS.map((starter) => (
-                    <button
-                      key={starter}
-                      onClick={() => onInputChange(starter)}
-                      className="rounded-lg border border-line bg-panel px-3 py-2 text-[12.5px] text-ink-dim transition hover:border-arc-dim/40 hover:text-ink"
-                    >
-                      {starter}
-                    </button>
-                  ))}
-                </div>
+                <Welcome
+                  starters={STARTERS}
+                  onPick={onInputChange}
+                  recent={recent}
+                  onOpenChat={onOpenChat}
+                  onAction={onQuickAction}
+                />
               ) : (
                 <button
                   onClick={onOpenSettings}

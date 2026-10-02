@@ -8,6 +8,7 @@ import {
   listChanges,
   listPromotions,
   promote,
+  promotionDiff,
   resetSandbox,
   revertSandboxFile,
   undoPromotion,
@@ -25,10 +26,19 @@ function reloadNote(): string {
     : "JARVIS is running a production build, so restart it to load this: npm run build && npm start.";
 }
 
-/** GET /api/sandbox — is it up, what's changed, what's been applied. */
-export async function GET() {
+/**
+ * GET /api/sandbox — is it up, what's changed, what's been applied.
+ * With ?promotion=<id>, exactly what that one apply changed.
+ */
+export async function GET(req: NextRequest) {
   if (isSandbox()) return Response.json({ enabled: false, isSandbox: true });
   if (!selfEditEnabled()) return disabled();
+
+  const wanted = new URL(req.url).searchParams.get("promotion");
+  if (wanted) {
+    const detail = await promotionDiff(wanted);
+    return detail ? Response.json(detail) : Response.json({ error: "No such change." }, { status: 404 });
+  }
 
   // Started at boot, but a JARVIS running without instrumentation (or one
   // whose sandbox was stopped by a failed reset) is put right here.

@@ -24,6 +24,8 @@ export type AuditKind =
   | "sandbox.undo"
   | "sandbox.reset"
   | "backup.download"
+  | "backup.auto"
+  | "backup.auto.download"
   | "backup.restore"
   | "chat.trash"
   | "chat.restore";

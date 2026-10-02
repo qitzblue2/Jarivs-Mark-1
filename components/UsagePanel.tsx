@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Gauge, RefreshCw, X } from "lucide-react";
+import { Download, Gauge, RefreshCw, X } from "lucide-react";
+import ChatStatsView from "./ChatStatsView";
 import { useEscape } from "@/lib/hooks/use-escape";
 import { useDialogFocus } from "@/lib/hooks/use-dialog-focus";
 
@@ -45,6 +46,8 @@ const AUDIT_LABEL: Record<string, string> = {
   "sandbox.reset": "Reset the sandbox",
   "backup.download": "Downloaded a backup",
   "backup.restore": "Restored a backup",
+  "backup.auto": "Made a daily backup",
+  "backup.auto.download": "Downloaded a daily backup",
   "chat.trash": "Moved a chat to trash",
   "chat.restore": "Restored a chat",
 };
@@ -73,6 +76,7 @@ export default function UsagePanel({ open, onClose }: Props) {
   const [usage, setUsage] = useState<Usage | null>(null);
   const [activity, setActivity] = useState<AuditEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<"providers" | "chats">("providers");
 
   const refresh = useCallback(async () => {
     try {
@@ -128,6 +132,17 @@ export default function UsagePanel({ open, onClose }: Props) {
             <span className="text-[11px] font-normal text-ink-faint">today, UTC — when free tiers reset</span>
           </h2>
           <div className="flex items-center gap-1">
+            {tab === "providers" && (
+              <a
+                href="/api/usage?format=csv"
+                download
+                data-usage-csv
+                className="flex items-center gap-1 rounded-md px-1.5 py-1.5 text-[11px] text-ink-faint hover:bg-raised hover:text-ink"
+                title="Download the daily tally as a spreadsheet"
+              >
+                <Download size={13} aria-hidden /> CSV
+              </a>
+            )}
             <button onClick={() => void refresh()} className="rounded-md p-1.5 text-ink-faint hover:bg-raised hover:text-ink" title="Refresh">
               <RefreshCw size={14} />
             </button>
@@ -137,7 +152,50 @@ export default function UsagePanel({ open, onClose }: Props) {
           </div>
         </div>
 
-        <div className="max-h-[70vh] overflow-y-auto p-4" tabIndex={0} role="region" aria-label="Usage details">
+        <div role="tablist" aria-label="What to show" className="flex gap-1 border-b border-line-soft px-4 pt-2">
+          {(
+            [
+              ["providers", "Providers"],
+              ["chats", "Your chats"],
+            ] as const
+          ).map(([id, name]) => (
+            <button
+              key={id}
+              role="tab"
+              id={`usage-tab-${id}`}
+              aria-selected={tab === id}
+              aria-controls={`usage-panel-${id}`}
+              tabIndex={tab === id ? 0 : -1}
+              data-usage-tab={id}
+              onClick={() => setTab(id)}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+                  e.preventDefault();
+                  const next = tab === "providers" ? "chats" : "providers";
+                  setTab(next);
+                  document.getElementById(`usage-tab-${next}`)?.focus();
+                }
+              }}
+              className={`-mb-px rounded-t-md border-b-2 px-3 py-1.5 text-[12px] transition ${
+                tab === id ? "border-arc-dim text-ink" : "border-transparent text-ink-dim hover:text-ink"
+              }`}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+
+        <div
+          className="max-h-[70vh] overflow-y-auto p-4"
+          tabIndex={0}
+          role="tabpanel"
+          id={`usage-panel-${tab}`}
+          aria-labelledby={`usage-tab-${tab}`}
+        >
+          {tab === "chats" ? (
+            <ChatStatsView />
+          ) : (
+          <>
           {error && <p className="mb-3 text-[12px] text-warn">{error}</p>}
 
           {rows.length === 0 ? (
@@ -240,6 +298,8 @@ export default function UsagePanel({ open, onClose }: Props) {
             more if the key is used elsewhere. Tokens are estimated at four characters each. A
             rate-limited provider is skipped until its wait is over, and the next one answers instead.
           </p>
+          </>
+          )}
         </div>
       </div>
     </div>

@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Download, ImageIcon, Monitor, Pencil, Trash2, X } from "lucide-react";
+import { Check, Copy, Download, ImageIcon, Monitor, Pencil, Trash2, X } from "lucide-react";
+import { familyOf, lineageOf } from "@/lib/image-lineage";
 import Lightbox, { showOnDisplay } from "./Lightbox";
 import { useEscape } from "@/lib/hooks/use-escape";
 import { useDialogFocus } from "@/lib/hooks/use-dialog-focus";
@@ -32,6 +33,9 @@ export default function Gallery({ open, onClose, onEdit }: Props) {
   const [viewing, setViewing] = useState<Picture | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  /** Set to look at one picture's family — the original and everything edited from it. */
+  const [familyFor, setFamilyFor] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -55,9 +59,25 @@ export default function Gallery({ open, onClose, onEdit }: Props) {
 
   async function remove(id: string) {
     const res = await fetch(`/api/images/${id}`, { method: "DELETE" });
-    if (res.ok) setPictures((all) => all.filter((p) => p.id !== id));
-    else setNote("Couldn't delete that picture.");
+    if (res.ok) {
+      setPictures((all) => all.filter((p) => p.id !== id));
+      if (familyFor === id) setFamilyFor(null);
+    } else setNote("Couldn't delete that picture.");
   }
+
+  async function copyPrompt(picture: Picture) {
+    try {
+      await navigator.clipboard.writeText(picture.prompt);
+      setCopiedId(picture.id);
+      setTimeout(() => setCopiedId((id) => (id === picture.id ? null : id)), 1500);
+    } catch {
+      setNote("Couldn't copy — the browser blocked the clipboard.");
+    }
+  }
+
+  const focus = familyFor ? pictures.find((p) => p.id === familyFor) : undefined;
+  // In a family, oldest first: the original, then each edit in the order it was made.
+  const shown = focus ? familyOf(focus, pictures) : pictures;
 
   const dialogRef = useDialogFocus(open);
   if (!open) return null;
@@ -90,6 +110,17 @@ export default function Gallery({ open, onClose, onEdit }: Props) {
           <p className="border-b border-line-soft px-4 py-2 text-[12px] text-warn">{note}</p>
         )}
 
+        {focus && (
+          <div className="flex items-center justify-between gap-2 border-b border-line-soft px-4 py-2 text-[12px] text-ink-dim" data-family-banner>
+            <span>
+              {shown.length} {shown.length === 1 ? "picture" : "pictures"} from the same original, oldest first
+            </span>
+            <button onClick={() => setFamilyFor(null)} data-family-clear className="rounded border border-line px-2 py-0.5 text-[11px] text-ink-dim hover:text-ink">
+              Show all
+            </button>
+          </div>
+        )}
+
         <div className="max-h-[70vh] overflow-y-auto p-4" tabIndex={0} role="region" aria-label="Picture list">
           {pictures.length === 0 ? (
             <p className="py-10 text-center text-[13px] text-ink-faint">
@@ -99,8 +130,10 @@ export default function Gallery({ open, onClose, onEdit }: Props) {
             </p>
           ) : (
             <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-              {pictures.map((picture) => (
-                <li key={picture.id} className="group relative overflow-hidden rounded-lg border border-line bg-base">
+              {shown.map((picture) => {
+                const lineage = lineageOf(picture, pictures);
+                return (
+                <li key={picture.id} data-picture={picture.id} className="group relative overflow-hidden rounded-lg border border-line bg-base">
                   <button onClick={() => setViewing(picture)} className="block w-full" title={picture.prompt}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={picture.url} alt={picture.prompt} loading="lazy" className="aspect-square w-full object-cover" />
@@ -113,8 +146,34 @@ export default function Gallery({ open, onClose, onEdit }: Props) {
                     <p className="text-[10px] text-ink-faint">
                       {new Date(picture.createdAt).toLocaleString()} · {picture.model}
                     </p>
+                    {(picture.editedFrom || lineage.edits.length > 0) && (
+                      <p className="mt-0.5 flex flex-wrap items-center gap-x-1 text-[10.5px]" data-lineage>
+                        {picture.editedFrom &&
+                          (lineage.original ? (
+                            <button onClick={() => setFamilyFor(picture.id)} data-show-original className="inline-flex min-h-6 items-center rounded px-1 text-arc hover:underline">
+                              Edited from an earlier picture
+                            </button>
+                          ) : (
+                            <span className="text-ink-faint">Original deleted</span>
+                          ))}
+                        {lineage.edits.length > 0 && (
+                          <button onClick={() => setFamilyFor(picture.id)} data-show-edits className="inline-flex min-h-6 items-center rounded px-1 text-arc hover:underline">
+                            {lineage.edits.length} {lineage.edits.length === 1 ? "edit" : "edits"}
+                          </button>
+                        )}
+                      </p>
+                    )}
                   </div>
-                  <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-0 transition group-hover:opacity-100">
+                  <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+                    <button
+                      onClick={() => void copyPrompt(picture)}
+                      data-copy-prompt
+                      className="rounded bg-black/60 p-1.5 text-white hover:bg-black/80"
+                      title="Copy this picture's prompt"
+                      aria-label="Copy this picture's prompt"
+                    >
+                      {copiedId === picture.id ? <Check size={12} /> : <Copy size={12} />}
+                    </button>
                     {onEdit && (
                       <button
                         onClick={() => onEdit(picture.url)}
@@ -147,7 +206,8 @@ export default function Gallery({ open, onClose, onEdit }: Props) {
                     </button>
                   </div>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
         </div>

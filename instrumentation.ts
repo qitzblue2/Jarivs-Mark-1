@@ -13,6 +13,10 @@ export async function register(): Promise<void> {
   const { autoStart } = await import("./lib/voice/device/runtime");
   autoStart();
 
+  // A backup a day, kept seven days; JARVIS_AUTO_BACKUP=0 turns it off.
+  const { startAutoBackup } = await import("./lib/backup/auto");
+  startAutoBackup();
+
   // The sandbox copy comes up with JARVIS and is kept running, so there is
   // always somewhere to try a change before it reaches the real thing.
   const { selfEditEnabled } = await import("./lib/sandbox/paths");

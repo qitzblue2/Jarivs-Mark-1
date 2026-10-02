@@ -22,6 +22,7 @@ import {
 import type { ChatMeta } from "@/lib/types";
 import { parseQuery, passesFilters, type ChatHit } from "@/lib/chat-search";
 import { groupByDate } from "@/lib/chat-groups";
+import { relativeTime } from "@/lib/format";
 import { tagCounts } from "@/lib/chat-ops";
 import ChatMenu from "./ChatMenu";
 
@@ -51,15 +52,6 @@ interface Props {
   storageDriver: string;
   /** Something that lives on the list's right edge — the resize handle — kept inside the landmark. */
   edge?: React.ReactNode;
-}
-
-function relativeTime(ts: number): string {
-  const seconds = Math.floor((Date.now() - ts) / 1000);
-  if (seconds < 60) return "just now";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
-  return new Date(ts).toLocaleDateString();
 }
 
 export default function Sidebar({

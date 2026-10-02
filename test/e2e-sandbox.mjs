@@ -136,10 +136,23 @@ try {
   const tsc = spawnSync(process.execPath, ["node_modules/typescript/bin/tsc", "--noEmit"], { encoding: "utf8" });
   check("and JARVIS still type-checks afterwards", tsc.status === 0, (tsc.stdout || "").split("\n")[0]);
 
+  // What the apply changed, exactly: the old line against the new.
+  await panel.locator("[data-view-applied]").first().click();
+  const appliedDiff = panel.locator("[data-applied-file='components/ChatPane.tsx']");
+  await appliedDiff.waitFor({ timeout: 10000 });
+  const diffText = await appliedDiff.innerText();
+  check("an apply can show exactly what it changed", diffText.includes(MARK) && diffText.includes("+") && diffText.includes("-"), diffText.slice(0, 120));
+  check("as a diff against the old line", diffText.includes('JARVIS Mark 6</h2>') && diffText.includes("edited by itself</h2>"));
+  await panel.locator("[data-view-applied]").first().click();
+  check("and hides it again", (await panel.locator("[data-applied-diff]").count()) === 0);
+
   page.once("dialog", (d) => d.accept());
   await panel.locator("button", { hasText: "Undo" }).first().click();
   await panel.getByText(/^Undone\./).waitFor({ timeout: 20000 });
   check("and undo puts JARVIS back exactly", readFileSync(FILE, "utf8") === original);
+  await panel.locator("[data-view-applied]").first().click();
+  await panel.locator("[data-applied-file='components/ChatPane.tsx']").waitFor({ timeout: 10000 });
+  check("an undone apply can still be looked at", (await panel.locator("[data-applied-file='components/ChatPane.tsx']").innerText()).includes(MARK));
 
   // --- it works on a phone ---
   await page.setViewportSize({ width: 390, height: 844 });

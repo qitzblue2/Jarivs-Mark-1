@@ -70,6 +70,16 @@ import { MAX_FAVORITES, cleanFavorites, favoriteKey, isFavorite, parseFavorite, 
 import { IMAGE_TOKENS, contextCeiling, conversationTokens, formatTokens, measureContext } from "../lib/context-meter";
 import { getProvider } from "../lib/providers/registry";
 import { createHash } from "node:crypto";
+import { relativeTime } from "../lib/format";
+import { recentChats, timeGreeting } from "../lib/welcome";
+import { MAX_FIELD, TASK_TEMPLATES, buildFromTemplate } from "../lib/schedule/templates";
+import { createTask } from "../lib/schedule";
+import { familyOf, lineageOf } from "../lib/image-lineage";
+import { promotionDiff } from "../lib/sandbox/sync";
+import { usageFilename, usageToCsv } from "../lib/usage-csv";
+import { AUTO_NAME, autoName, backupsKept, listAutoBackups, runAutoBackup, startAutoBackup } from "../lib/backup/auto";
+import { backupDir, backupEntries } from "../lib/backup";
+import { MAX_DAYS, computeChatStats, dayKey } from "../lib/chat-stats";
 import { SentenceSplitter, splitSentences } from "../lib/voice/tts/sentences";
 import { Speaker } from "../lib/voice/tts/speaker";
 import { encodeWav, durationOf } from "../lib/voice/wav";
@@ -1453,6 +1463,25 @@ console.log("\n--- JARVIS editing its own code, in a sandbox ---");
     try { await undoPromotion(applied.id); } catch (e) { threw = (e as Error).message; }
     eq("an undo can't run twice", /already undone/.test(threw), true);
 
+    // What each apply changed, exactly — still there after the undo.
+    const shown = await promotionDiff(applied.id);
+    const byPath = Object.fromEntries((shown?.files ?? []).map((f) => [f.path, f]));
+    eq("a past apply lists every file it touched", Object.keys(byPath).sort(), ["README.md", "lib/new.ts", "lib/util.ts"]);
+    eq("a modified file shows the lines that changed", [byPath["lib/util.ts"].diff.includes("-export const b = 2;"), byPath["lib/util.ts"].diff.includes("+export const b = 3;")], [true, true]);
+    eq("an added file is all additions", [byPath["lib/new.ts"].diff.includes("+export const c = 3;"), byPath["lib/new.ts"].diff.includes("\n-")], [true, false]);
+    eq("a deleted file is all removals", [byPath["README.md"].diff.includes("-# JARVIS"), byPath["README.md"].diff.includes("\n+#")], [true, false]);
+    eq("the diff is for the file it names", byPath["lib/util.ts"].diff.startsWith("--- a/lib/util.ts\n+++ b/lib/util.ts"), true);
+    eq("it still shows after the undo, from the copies kept at apply time", (await promotionDiff(applied.id))?.files.find((f) => f.path === "lib/util.ts")?.diff.includes("+export const b = 3;"), true);
+    eq("an unknown change is null, not an error", [await promotionDiff("00000000-0000-0000-0000-000000000000"), await promotionDiff("../etc/passwd")], [null, null]);
+    // A change applied before the written copy was kept: from the live file while it is still what the apply left.
+    const oldStyle = await promote();
+    rmSync(join(live, "data", "self-edit", oldStyle.id, "after"), { recursive: true, force: true });
+    eq("an older change still shows, from the live file, while the live file is what it left", (await promotionDiff(oldStyle.id))?.files.some((f) => f.diff.includes("+export const b = 3;") || f.diff.includes("+export const c = 3;")), true);
+    put(live, "lib/util.ts", "changed again\n");
+    eq("and says so when it no longer is", (await promotionDiff(oldStyle.id))?.files.find((f) => f.path === "lib/util.ts")?.note?.includes("wasn't kept"), true);
+    put(live, "lib/util.ts", "export const a = 9;\nexport const b = 3;\n");
+    await undoPromotion(oldStyle.id);
+
     const again = await promote();
     put(live, "lib/util.ts", "hand edited after\n");
     threw = "";
@@ -2519,6 +2548,216 @@ console.log("\n--- the context meter ---");
   const over = measureContext({ ...base, messages: [msg("x".repeat(40_000))], limit: 7000 });
   eq("past the ceiling the oldest messages are being left out", [over.level, over.leftOut, over.ratio > 1], ["full", true, true]);
   eq("token counts read naturally", [formatTokens(850), formatTokens(2400), formatTokens(10_000), formatTokens(12_300), formatTokens(2000)], ["850", "2.4k", "10k", "12k", "2k"]);
+}
+
+console.log("\n--- the welcome screen ---");
+{
+  const at = (h: number) => new Date(2026, 9, 2, h, 30);
+  eq("a greeting for the hour", [4, 5, 11, 12, 17, 18, 21, 22, 23, 0].map((h) => timeGreeting(at(h))), ["Working late?", "Good morning", "Good morning", "Good afternoon", "Good afternoon", "Good evening", "Good evening", "Working late?", "Working late?", "Working late?"]);
+  const meta = (id: string, updatedAt: number, extra: object = {}) => ({ id, title: id, createdAt: 1, updatedAt, messageCount: 2, ...extra });
+  eq("recent chats: newest first", recentChats([meta("a", 10), meta("b", 30), meta("c", 20)]).map((c) => c.id), ["b", "c", "a"]);
+  eq("archived and empty ones are left out", recentChats([meta("a", 10, { archived: true }), meta("b", 20, { messageCount: 0 }), meta("c", 5)]).map((c) => c.id), ["c"]);
+  eq("four by default, or as many as asked", [recentChats(Array.from({ length: 9 }, (_, i) => meta(`c${i}`, i))).length, recentChats(Array.from({ length: 9 }, (_, i) => meta(`c${i}`, i)), 2).length], [4, 2]);
+  const now = 1_000_000_000_000;
+  eq("relative times", [0, 59_000, 120_000, 3 * 3600_000, 2 * 86_400_000].map((d) => relativeTime(now - d, now)), ["just now", "just now", "2m ago", "3h ago", "2d ago"]);
+  eq("past a week it is a date", relativeTime(now - 8 * 86_400_000, now), new Date(now - 8 * 86_400_000).toLocaleDateString());
+}
+
+console.log("\n--- scheduled-task templates ---");
+{
+  eq("there are several, with distinct ids", [TASK_TEMPLATES.length >= 5, new Set(TASK_TEMPLATES.map((t) => t.id)).size], [true, TASK_TEMPLATES.length]);
+  const filled = (t: (typeof TASK_TEMPLATES)[number]) => Object.fromEntries((t.fields ?? []).map((f) => [f.id, `a ${f.id} value`]));
+  let saved: ScheduledTask[] = [];
+  setScheduleStore({
+    async list() { return saved.map((t) => ({ ...t })); },
+    async save(task) { const i = saved.findIndex((x) => x.id === task.id); if (i === -1) saved.push(task); else saved[i] = task; },
+    async delete(id) { saved = saved.filter((t) => t.id !== id); },
+  });
+  for (const t of TASK_TEMPLATES) {
+    const built = buildFromTemplate(t, { fields: filled(t) });
+    ok(`${t.name}: builds with its defaults`, built.ok);
+    if (!built.ok) continue;
+    ok(`${t.name}: and the scheduler accepts it`, !(await createTask({ prompt: built.prompt, label: built.label, schedule: built.schedule })).error);
+    ok(`${t.name}: no placeholder is left in the prompt`, !/[{}]|undefined|null/.test(built.prompt) && !/[{}]|undefined|null/.test(built.label));
+    ok(`${t.name}: the prompt is short enough to be read aloud, and the label fits a row`, built.prompt.length < 400 && built.label.length <= 60);
+  }
+  const briefing = TASK_TEMPLATES.find((t) => t.id === "morning-briefing")!;
+  const plain = buildFromTemplate(briefing, {});
+  eq("a briefing with no topic is about the news in general", plain.ok && [plain.label, plain.schedule, /headlines \(search/.test(plain.prompt)], ["Morning briefing", { kind: "daily", hhmm: "08:00" }, true]);
+  const topical = buildFromTemplate(briefing, { time: "06:45", fields: { topic: "rust" } });
+  eq("and with one, about it, at the time asked", topical.ok && [topical.label, topical.schedule, topical.prompt.includes("headlines about rust")], ["Morning briefing — rust", { kind: "daily", hhmm: "06:45" }, true]);
+  eq("a bad time is refused with a message", buildFromTemplate(briefing, { time: "25:99" }), { ok: false, error: '"25:99" isn\'t a time of day. Use HH:MM, like 08:00.' });
+  const reminder = TASK_TEMPLATES.find((t) => t.id === "reminder")!;
+  eq("a required field can't be empty", buildFromTemplate(reminder, { fields: { what: "   " } }), { ok: false, error: "Remind me to: this can't be empty." });
+  const water = TASK_TEMPLATES.find((t) => t.id === "water")!;
+  eq("an interval is whole minutes, at least one", [water.when.kind, (buildFromTemplate(water, { minutes: 0 }) as { ok: false }).ok, (buildFromTemplate(water, { minutes: 1.5 }) as { ok: false }).ok, (buildFromTemplate(water, { minutes: 99999 }) as { ok: false }).ok], ["every", false, false, false]);
+  const w = buildFromTemplate(water, { minutes: "45" });
+  eq("a string of digits is fine", w.ok && w.schedule, { kind: "every", minutes: 45 });
+  const long = buildFromTemplate(reminder, { fields: { what: `take\n\n  my   pills ${"x".repeat(500)}` } });
+  eq("a field is one tidy line, cut to a sensible length", long.ok && [long.prompt.includes("\n\n"), long.prompt.includes("take my pills"), long.prompt.length < MAX_FIELD + 60], [false, true, true]);
+  eq("and a long one makes a label that fits", long.ok && long.label.length <= 60, true);
+  saved = [];
+}
+
+console.log("\n--- a picture's family ---");
+{
+  const pic = (id: string, createdAt: number, editedFrom?: string) => ({ id, createdAt, editedFrom });
+  const all = [pic("a", 1), pic("b", 2, "a"), pic("c", 3, "b"), pic("d", 4, "a"), pic("x", 5), pic("orphan", 6, "gone")];
+  eq("an original has its edits, oldest first", lineageOf(all[0], all).edits.map((p) => p.id), ["b", "d"]);
+  eq("an edit knows what it came from", lineageOf(all[1], all).original?.id, "a");
+  eq("and an edit of an edit, its own parent", lineageOf(all[2], all).original?.id, "b");
+  eq("a picture with no edits says so", [lineageOf(all[4], all).edits.length, lineageOf(all[4], all).original, lineageOf(all[4], all).originalGone], [0, null, false]);
+  eq("an edit of a deleted picture says the original is gone", [lineageOf(all[5], all).original, lineageOf(all[5], all).originalGone], [null, true]);
+  eq("the family is everything from the oldest ancestor down", familyOf(all[2], all).map((p) => p.id), ["a", "b", "c", "d"]);
+  eq("the same from any member", [familyOf(all[0], all).map((p) => p.id), familyOf(all[3], all).map((p) => p.id)], [["a", "b", "c", "d"], ["a", "b", "c", "d"]]);
+  eq("an unrelated picture is its own family", familyOf(all[4], all).map((p) => p.id), ["x"]);
+  eq("an orphaned edit is its own root", familyOf(all[5], all).map((p) => p.id), ["orphan"]);
+  const loop = [pic("p", 1, "q"), pic("q", 2, "p")];
+  eq("a corrupt loop can't hang it", familyOf(loop[0], loop).length, 2);
+}
+
+console.log("\n--- usage as a spreadsheet ---");
+{
+  const day = (requests: number, extra: object = {}) => ({ requests, ok: requests - 1, rateLimited: 1, failed: 0, tokensSent: requests * 100, lastAt: Date.UTC(2026, 9, 2, 12, 0, 0), ...extra });
+  const csv = usageToCsv([
+    { day: "2026-10-02", providers: { groq: day(10), cerebras: day(3, { lastError: "=HYPERLINK(\"http://evil.example\")" }) } },
+    { day: "2026-10-01", providers: { groq: day(4) } },
+  ], { groq: "Groq", cerebras: "Cerebras" });
+  const lines = csv.split(/\r?\n/);
+  eq("a header row", lines[0], "date_utc,provider,provider_name,requests,ok,rate_limited,failed,tokens_sent_estimated,last_request_utc,last_error");
+  eq("one row per provider per day, oldest day first", lines.slice(1).map((l) => l.split(",").slice(0, 3).join(",")), ["2026-10-01,groq,Groq", "2026-10-02,cerebras,Cerebras", "2026-10-02,groq,Groq"]);
+  eq("numbers stay numbers", lines[1].split(",").slice(3, 8), ["4", "3", "1", "0", "400"]);
+  eq("times are ISO", lines[1].split(",")[8], "2026-10-02T12:00:00.000Z");
+  eq("an error message that starts like a formula is neutralised", lines[2].includes("\"'=HYPERLINK(\"\"http://evil.example\"\")\"") || lines[2].includes("'=HYPERLINK"), true);
+  eq("an empty tally is just the header", usageToCsv([]).split(/\r?\n/).length, 1);
+  eq("it is named for the day", usageFilename(new Date("2026-10-02T12:00:00Z")), "jarvis-usage-2026-10-02.csv");
+}
+
+console.log("\n--- daily backups ---");
+{
+  const dir = mkdtempSync(join(tmpdir(), "jarvis-auto-"));
+  const keep = { dir: process.env.JARVIS_DATA_DIR, backup: process.env.JARVIS_BACKUP_DIR, auto: process.env.JARVIS_AUTO_BACKUP, images: process.env.JARVIS_AUTO_BACKUP_IMAGES, keepN: process.env.JARVIS_BACKUP_KEEP };
+  process.env.JARVIS_DATA_DIR = dir;
+  delete process.env.JARVIS_BACKUP_DIR;
+  delete process.env.JARVIS_AUTO_BACKUP;
+  delete process.env.JARVIS_AUTO_BACKUP_IMAGES;
+  delete process.env.JARVIS_BACKUP_KEEP;
+  const put = (rel: string, text: string) => {
+    mkdirSync(join(dir, ...rel.split("/").slice(0, -1)), { recursive: true });
+    writeFileSync(join(dir, ...rel.split("/")), text);
+  };
+  const namesIn = (bytes: Uint8Array) => readZipDirectory(bytes).map((e) => e.name).sort();
+  const names = async () => { const out: string[] = []; for await (const e of backupEntries()) out.push(e.name); return out.sort(); };
+  try {
+    put("chats/c1.json", "{\"id\":\"c1\"}");
+    put("memory.json", "[]");
+    put("images/p.png", "png");
+    put("trash/t.json", "{}");
+    const day = (n: number) => new Date(2026, 9, n, 10, 0, 0);
+
+    eq("backups are named for the day", [autoName(day(2)), AUTO_NAME.test(autoName(day(2)))], ["jarvis-auto-2026-10-02.zip", true]);
+    const first = await runAutoBackup(day(2));
+    eq("the first run makes today's", [first.created, first.skipped, first.error], ["jarvis-auto-2026-10-02.zip", undefined, undefined]);
+    const entries = namesIn(new Uint8Array(readFileSync(join(dir, "backups", "jarvis-auto-2026-10-02.zip"))));
+    eq("it holds chats, memory and the trash — and says how to restore", ["RESTORE.txt", "data/chats/c1.json", "data/memory.json", "data/trash/t.json"].every((n) => entries.includes(n)), true);
+    eq("but not pictures, unless asked", entries.includes("data/images/p.png"), false);
+    eq("and never the backups themselves", entries.some((n) => n.includes("backups")), false);
+    eq("it is a zip every entry of which reads back", readZipDirectory(new Uint8Array(readFileSync(join(dir, "backups", "jarvis-auto-2026-10-02.zip")))).every((e) => readZipEntry(new Uint8Array(readFileSync(join(dir, "backups", "jarvis-auto-2026-10-02.zip"))), e).length >= 0), true);
+    eq("the same day again does nothing", (await runAutoBackup(day(2))).skipped, "exists");
+    eq("a leftover half-written file is never left behind", readdirSync(join(dir, "backups")).filter((n) => n.endsWith(".partial")), []);
+
+    process.env.JARVIS_AUTO_BACKUP_IMAGES = "1";
+    const withPictures = await runAutoBackup(day(2), true);
+    eq("forcing replaces today's, and pictures come with it when asked", [withPictures.created, namesIn(new Uint8Array(readFileSync(join(dir, "backups", "jarvis-auto-2026-10-02.zip")))).includes("data/images/p.png")], ["jarvis-auto-2026-10-02.zip", true]);
+    delete process.env.JARVIS_AUTO_BACKUP_IMAGES;
+
+    writeFileSync(join(dir, "backups", "notes.txt"), "mine");
+    writeFileSync(join(dir, "backups", "jarvis-auto-2026-10-99.txt"), "not a backup");
+    for (let n = 3; n <= 12; n++) await runAutoBackup(day(n));
+    const kept = (await listAutoBackups()).map((b) => b.name);
+    eq("only the last seven are kept, newest first", kept, [12, 11, 10, 9, 8, 7, 6].map((n) => `jarvis-auto-2026-10-${String(n).padStart(2, "0")}.zip`));
+    eq("and nothing else in the folder is touched", [existsSync(join(dir, "backups", "notes.txt")), existsSync(join(dir, "backups", "jarvis-auto-2026-10-99.txt"))], [true, true]);
+    eq("the default is seven; it can be set", [backupsKept(), (process.env.JARVIS_BACKUP_KEEP = "3", backupsKept()), (process.env.JARVIS_BACKUP_KEEP = "0", backupsKept()), (process.env.JARVIS_BACKUP_KEEP = "500", backupsKept()), (delete process.env.JARVIS_BACKUP_KEEP, backupsKept())], [7, 3, 7, 60, 7]);
+    process.env.JARVIS_BACKUP_KEEP = "2";
+    const trimmed = await runAutoBackup(day(13));
+    eq("a lower limit trims at the next run", [trimmed.pruned.length, (await listAutoBackups()).length], [6, 2]);
+    delete process.env.JARVIS_BACKUP_KEEP;
+
+    eq("the manual backup never contains the backups either", (await names()).some((n) => n.includes("backups")), false);
+    // The folder moved inside data/ under another name: still left out.
+    process.env.JARVIS_BACKUP_DIR = join(dir, "safe-place");
+    await runAutoBackup(day(20));
+    eq("wherever it is, even inside data/", [existsSync(join(dir, "safe-place", "jarvis-auto-2026-10-20.zip")), (await names()).some((n) => n.includes("safe-place"))], [true, false]);
+    delete process.env.JARVIS_BACKUP_DIR;
+
+    process.env.JARVIS_AUTO_BACKUP = "0";
+    eq("switched off, it does nothing on its own", (await runAutoBackup(day(25))).skipped, "disabled");
+    eq("but 'back up now' still works", (await runAutoBackup(day(25), true)).created, "jarvis-auto-2026-10-25.zip");
+    delete process.env.JARVIS_AUTO_BACKUP;
+
+    // A destination that can't be written: reported, not thrown.
+    writeFileSync(join(dir, "afile"), "x");
+    process.env.JARVIS_BACKUP_DIR = join(dir, "afile", "inside");
+    const failed = await runAutoBackup(day(26));
+    eq("a backup that can't be written says so instead of throwing", [failed.created, typeof failed.error], [null, "string"]);
+    delete process.env.JARVIS_BACKUP_DIR;
+    eq("the folder is data/backups by default", backupDir(), join(dir, "backups"));
+
+    // The timer: one, never in the sandbox copy, never when switched off.
+    const timer = globalThis as { __jarvisAutoBackup?: NodeJS.Timeout };
+    const stop = () => { if (timer.__jarvisAutoBackup) clearTimeout(timer.__jarvisAutoBackup); delete timer.__jarvisAutoBackup; };
+    process.env.JARVIS_IS_SANDBOX = "1";
+    startAutoBackup();
+    eq("the sandbox copy never starts one", timer.__jarvisAutoBackup, undefined);
+    delete process.env.JARVIS_IS_SANDBOX;
+    process.env.JARVIS_AUTO_BACKUP = "0";
+    startAutoBackup();
+    eq("nor does a switched-off install", timer.__jarvisAutoBackup, undefined);
+    delete process.env.JARVIS_AUTO_BACKUP;
+    startAutoBackup();
+    const started = timer.__jarvisAutoBackup;
+    startAutoBackup();
+    eq("otherwise there is one, and starting twice doesn't make two", [started !== undefined, timer.__jarvisAutoBackup === started], [true, true]);
+    eq("and it doesn't keep the process alive", (started as unknown as { hasRef(): boolean }).hasRef(), false);
+    stop();
+  } finally {
+    for (const [k, v] of Object.entries({ JARVIS_DATA_DIR: keep.dir, JARVIS_BACKUP_DIR: keep.backup, JARVIS_AUTO_BACKUP: keep.auto, JARVIS_AUTO_BACKUP_IMAGES: keep.images, JARVIS_BACKUP_KEEP: keep.keepN })) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+console.log("\n--- chat statistics ---");
+{
+  const NOW = Date.UTC(2026, 9, 10, 12, 0, 0);
+  const DAY = 86_400_000;
+  const msg = (role: "user" | "assistant", content: string, at: number, extra: object = {}) => ({ id: `${role}-${at}-${content.length}`, role, content, createdAt: at, ...extra });
+  const chats = [
+    { id: "a", title: "A", createdAt: 1, updatedAt: 1, pinned: true, messages: [
+      msg("user", "hello there friend", NOW - 2 * DAY),
+      msg("assistant", "Hi! How can I help you today?", NOW - 2 * DAY + 1000, { model: "m1", toolRounds: [{ round: 1, calls: [{ id: "1", name: "calculate", arguments: "{}" }, { id: "2", name: "web_search", arguments: "{}" }], results: [{ toolCallId: "1", name: "calculate", content: "42", isError: false, ms: 1 }, { toolCallId: "2", name: "web_search", content: "oops", isError: true, ms: 1 }] }] }),
+      msg("user", "thanks", NOW),
+    ] },
+    { id: "b", title: "B", createdAt: 1, updatedAt: 1, archived: true, messages: [
+      msg("assistant", "<think>a long private deliberation that should not count</think>The answer is four.", NOW - 40 * DAY, { model: "m1" }),
+      msg("assistant", "again", NOW, { model: "m2", toolRounds: [{ round: 1, calls: [{ id: "3", name: "calculate", arguments: "{}" }], results: [] }] }),
+    ] },
+  ] as never[];
+  const stats = computeChatStats(chats, { now: NOW, days: 7 });
+  eq("chats are counted, with those archived and pinned", stats.chats, { total: 2, archived: 1, pinned: 1 });
+  eq("so are messages by who sent them", stats.messages, { total: 5, user: 2, assistant: 3 });
+  eq("words are what you read — a thinking model's hidden reasoning isn't", stats.words, { user: 4, assistant: 7 + 4 + 1 });
+  eq("the chart is the last seven days, oldest first, zeros included", [stats.perDay.length, stats.perDay[0].day, stats.perDay[6].day, stats.perDay.map((d) => d.messages)], [7, "2026-10-04", "2026-10-10", [0, 0, 0, 0, 2, 0, 2]]);
+  eq("messages older than the chart still count in the totals", stats.messages.total, 5);
+  eq("the busiest day", stats.busiest, { day: "2026-10-08", messages: 2 });
+  eq("tools are ranked by use, with their failures", stats.tools, [{ name: "calculate", calls: 2, errors: 0 }, { name: "web_search", calls: 1, errors: 1 }]);
+  eq("models by replies", stats.models, [{ model: "m1", replies: 2 }, { model: "m2", replies: 1 }]);
+  eq("the first message", stats.firstMessageAt, NOW - 40 * DAY);
+  eq("days follow the clock of whoever is looking", [dayKey(Date.UTC(2026, 9, 10, 23, 30), 0), dayKey(Date.UTC(2026, 9, 10, 23, 30), -120), dayKey(Date.UTC(2026, 9, 10, 1, 30), 300)], ["2026-10-10", "2026-10-11", "2026-10-09"]);
+  eq("the chart is capped", computeChatStats([], { now: NOW, days: 5000 }).perDay.length, MAX_DAYS);
+  eq("and has at least a day", computeChatStats([], { now: NOW, days: 0 }).perDay.length, 1);
+  eq("no chats is a quiet zero, not an error", computeChatStats([], { now: NOW }).busiest, null);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -26,6 +26,16 @@ export function formatTime(at: number, now = Date.now(), locale?: string): strin
   return `${day}, ${clock}`;
 }
 
+/** "just now", "5m ago", "3h ago", "2d ago", then the date. For a list row, not a log. */
+export function relativeTime(ts: number, now = Date.now()): string {
+  const seconds = Math.floor((now - ts) / 1000);
+  if (seconds < 60) return "just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
 function duration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;

@@ -271,6 +271,14 @@ editor; everything else gets syntax highlighting, copy and download.
 - **Listen.** Reads a reply aloud with the browser's own voice — the words, not
   the markdown or the code. Press again to stop.
 
+### The welcome screen
+
+An empty chat greets you for the hour (worked out in your browser, so it is your
+hour), offers the last few conversations to pick back up — newest first, never
+archived or empty ones — the four starter prompts, and quick actions for the
+things that are otherwise a button you have to know about: search, voice mode,
+pictures, saved messages and the shortcuts.
+
 ### Models, personas and the context meter
 
 - **Persona presets.** *Start from* in Settings → Persona (and in a chat's own
@@ -670,6 +678,14 @@ Anything genuinely cron-shaped is better as two tasks.
 pause or cancel. That panel always works, even when asking JARVIS to stop
 doesn't — which is exactly when you need it.
 
+**Start from a template** under the list: *Morning briefing* (the date, then the
+headlines — about a topic if you give one), *Evening review*, *Bedtime nudge*,
+*Daily reminder* (say what), *Drink water* and *Keep an eye on a topic*. Pick
+one, set the time or how often, fill in anything it asks, and it is scheduled —
+the same stored task you'd get by asking in words, written as an instruction to
+JARVIS and short enough to be read aloud. The ones that repeat say that each run
+spends one request.
+
 The schedule is a plain file at `data/schedule.json`, readable and
 hand-editable, like `data/memory.json`.
 
@@ -769,7 +785,11 @@ flask) in the sidebar: every file, an editor, and `+ New` for new files.
 - **Apply** copies the sandbox's changes into JARVIS — after running the type
   checker and the unit tests on the copy. If they fail it stops; you can
   apply anyway once you've seen why. JARVIS' current version of every file is
-  saved first, and **Undo** puts it back.
+  saved first, and **Undo** puts it back. **View the changes** under any past
+  apply shows exactly what it changed, file by file, as a diff — also after
+  it has been undone. (The written copy is kept from now on; an older apply is
+  shown from the live file while that is still what it left, and says so when
+  it isn't.)
 - A file you changed in JARVIS since the sandbox was made (a `git pull`, say)
   is flagged, and Apply refuses rather than overwrite it. **Revert** that file
   in the sandbox, or **reset** the sandbox to a fresh copy.
@@ -863,6 +883,25 @@ only files with the expected names and shapes are used (a zip containing
 an archive that would expand past 500MB, or any file past 50MB, is refused.
 You can also still unzip a backup by hand next to `package.json`.
 
+**Daily backups.** Once a day JARVIS writes the same zip itself, to
+`data/backups/jarvis-auto-YYYY-MM-DD.zip`, and keeps the last seven (the first
+check is a minute after the server starts, then hourly, so a machine that was off
+at the usual time makes today's the first hour it is up). **Settings → Backups**
+lists them with a download link and a **Back up now** button, and **Restore**
+takes any of them. Things worth knowing:
+
+- They leave out pictures by default — seven copies of a gallery is a lot of
+  disk, and chats and memory are the part you can't get back. `JARVIS_AUTO_BACKUP_IMAGES=1`
+  includes them.
+- A backup beside the data doesn't survive losing the disk.
+  `JARVIS_BACKUP_DIR=/mnt/other-drive/jarvis` keeps them somewhere else.
+- `JARVIS_BACKUP_KEEP=14` (1–60) keeps more; `JARVIS_AUTO_BACKUP=0` turns it off.
+- A backup never contains the backups folder (wherever it is), so it can't grow
+  with each run. Only files named exactly like ours are ever deleted when old
+  ones are trimmed, and only names of exactly that shape can be downloaded.
+- Each is written under a temporary name and renamed, so an interrupted one is
+  never mistaken for a good copy; a failure (a full disk) is reported, not a crash.
+
 ### What it has spent
 
 The gauge at the top of the sidebar opens **Usage**: for each provider today
@@ -874,6 +913,17 @@ NanoGPT's 100 a day is its own allowance. The last fourteen days are kept in
 
 These are JARVIS' own counts of what this server sent. A provider's dashboard
 can show more if the same key is used elsewhere.
+
+**CSV** in the Usage header downloads that tally as a spreadsheet — one row per
+provider per day (`date_utc, provider, requests, ok, rate_limited, failed,
+tokens_sent_estimated, last_request_utc, last_error`), the fourteen days kept.
+Cells that could be read as a formula are neutralised, as for table copies.
+
+The **Your chats** tab counts the conversations themselves: chats (pinned,
+archived), messages and words by who wrote them, a bar per day for the last
+thirty (on your clock, not the server's), the tools used with how many calls
+failed, and the models that answered. It is computed from the chats on request
+and stores nothing — a thinking model's hidden reasoning isn't counted as words.
 
 ### It remembers what was said, not only what was saved
 
@@ -962,6 +1012,7 @@ npm run test:organize  # tags, archive, branch, trash, restore-from-backup
 npm run test:composer  # timestamps, saved messages, folding, drafts, up arrow, slash commands
 npm run test:appearance  # theme, text size, shortcuts, resizing, focus, axe scan, print, manifest, offline
 npm run test:models  # persona presets, context meter, favourites, regenerate-with, memory search/export/import, units
+npm run test:extras  # templates, welcome screen, gallery families, usage CSV, daily backups, chat statistics
 npm run test:security  # login lockout, headers — needs its own server, see the file
 npm run test:sandbox  # self-editing: start with JARVIS_ALLOW_SELF_EDIT=1, see the file
 
@@ -1222,7 +1273,11 @@ size, you get a square one and are told why, rather than an error.
   model — never the image itself, which would be a megabyte of text.
 - Click one in the chat to enlarge it, or use its download button. The
   **Pictures** button at the top of the sidebar lists every one, to view,
-  download, send to the room display, or delete.
+  download, copy its prompt, send to the room display, or delete.
+- An edit remembers the picture it started from. In the gallery an edit says
+  *Edited from an earlier picture*, an original says *1 edit* (or *3 edits*),
+  and either opens the whole family — the original and everything made from it,
+  oldest first. If the original has since been deleted the edit says so.
 - The model is picked by the server, not the chat model: `JARVIS_IMAGE_MODEL`
   (default `hidream`), and `JARVIS_IMAGE_EDIT_MODEL` for edits. The oldest
   pictures are removed past `JARVIS_IMAGE_KEEP` (default 200; 0 keeps all).

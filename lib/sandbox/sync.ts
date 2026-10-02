@@ -14,6 +14,7 @@ import {
   SOURCE_FILES,
   toPosix,
 } from "./paths";
+import { unifiedDiff } from "./diff";
 
 /**
  * Keeping the sandbox copy and the running JARVIS apart, and moving changes
@@ -286,6 +287,14 @@ function backupPath(dir: string, rel: string): string {
   return `${path.join(dir, "before", ...rel.split("/"))}.orig`;
 }
 
+/**
+ * Where what was applied is kept, so the change can be shown exactly later. Same
+ * reason for the suffix as .orig above: it must not read as source.
+ */
+function afterPath(dir: string, rel: string): string {
+  return `${path.join(dir, "after", ...rel.split("/"))}.new`;
+}
+
 async function readPromotion(id: string): Promise<Promotion | null> {
   if (!/^[0-9a-f-]{36}$/.test(id)) return null;
   try {
@@ -304,6 +313,88 @@ export async function listPromotions(): Promise<Promotion[]> {
   }
   const all = (await Promise.all(ids.map(readPromotion))).filter((p): p is Promotion => p !== null);
   return all.sort((a, b) => b.at - a.at);
+}
+
+export interface PromotionFileDiff {
+  path: string;
+  status: ChangeStatus;
+  /** A unified diff; empty when there is none to show (see `note`). */
+  diff: string;
+  note?: string;
+}
+
+/** A file too big or too binary to be worth reading as lines. */
+const MAX_DIFF_BYTES = 400_000;
+
+async function readForDiff(file: string): Promise<{ text: string } | { skip: string } | null> {
+  let data: Buffer;
+  try {
+    data = await fs.readFile(file);
+  } catch {
+    return null;
+  }
+  if (data.length > MAX_DIFF_BYTES) return { skip: "too large to show as a diff" };
+  if (data.includes(0)) return { skip: "binary, so there is no diff to show" };
+  return { text: data.toString("utf8") };
+}
+
+/**
+ * Exactly what one apply changed: for each file, the old copy against what was
+ * written. Changes applied before the written copy was kept are shown from the
+ * live file when it is still what that apply left, and say so when it isn't.
+ */
+export async function promotionDiff(id: string): Promise<{ promotion: Promotion; files: PromotionFileDiff[] } | null> {
+  const promotion = await readPromotion(id);
+  if (!promotion) return null;
+  const dir = path.join(historyDir(), promotion.id);
+  const live = liveRoot();
+
+  const files: PromotionFileDiff[] = [];
+  for (const file of promotion.files) {
+    const rel = file.path.split("/");
+    const base = { path: file.path, status: file.status };
+
+    let before: string | null = "";
+    if (file.status !== "added") {
+      const saved =
+        (await readForDiff(backupPath(dir, file.path))) ?? (await readForDiff(path.join(dir, "before", ...rel)));
+      if (!saved) {
+        files.push({ ...base, diff: "", note: "The saved copy of the old file is gone." });
+        continue;
+      }
+      if ("skip" in saved) {
+        files.push({ ...base, diff: "", note: `The old file is ${saved.skip}.` });
+        continue;
+      }
+      before = saved.text;
+    }
+
+    let after: string | null = "";
+    if (file.status !== "deleted") {
+      let written = await readForDiff(afterPath(dir, file.path));
+      // From before the written copy was kept: the live file will do if it is still the one this apply left.
+      if (!written && (await hashFile(path.join(live, ...rel))) === file.afterHash) {
+        written = await readForDiff(path.join(live, ...rel));
+      }
+      if (!written) {
+        files.push({
+          ...base,
+          diff: "",
+          note: "The version that was applied wasn't kept for this older change, and the file has changed since.",
+        });
+        continue;
+      }
+      if ("skip" in written) {
+        files.push({ ...base, diff: "", note: `The new file is ${written.skip}.` });
+        continue;
+      }
+      after = written.text;
+    }
+
+    const diff = unifiedDiff(before ?? "", after ?? "", file.path);
+    files.push(diff ? { ...base, diff } : { ...base, diff: "", note: "No difference." });
+  }
+  return { promotion, files };
 }
 
 export class ConflictError extends Error {
@@ -365,6 +456,9 @@ export async function promote(only?: string[]): Promise<Promotion> {
     const data = await fs.readFile(path.join(box, ...change.path.split("/")));
     await fs.mkdir(path.dirname(target), { recursive: true });
     await fs.writeFile(target, data);
+    // Kept beside the old copy, so "what did that apply change?" has an exact answer.
+    await fs.mkdir(path.dirname(afterPath(dir, change.path)), { recursive: true });
+    await fs.writeFile(afterPath(dir, change.path), data);
     manifest.base[change.path] = sha(data);
     promotion.files.push({ path: change.path, status: change.status, afterHash: sha(data) });
   }

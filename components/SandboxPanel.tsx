@@ -49,6 +49,42 @@ interface Status {
   check: { ok: boolean; at: number; steps: CheckStep[]; current: boolean } | null;
 }
 
+interface PastDiff {
+  files: { path: string; status: string; diff: string; note?: string }[];
+}
+
+/** Exactly what one past apply changed, loaded when you ask. */
+function AppliedDiff({ id }: { id: string }) {
+  const [detail, setDetail] = useState<PastDiff | "loading" | string | null>("loading");
+
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/sandbox?promotion=${encodeURIComponent(id)}`)
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => live && setDetail(ok ? (body as PastDiff) : (body.error ?? "Couldn't load that.")))
+      .catch(() => live && setDetail("Couldn't load that."));
+    return () => {
+      live = false;
+    };
+  }, [id]);
+
+  if (detail === "loading") return <p className="mt-2 text-[11px] text-ink-faint">Loading…</p>;
+  if (typeof detail === "string" || detail === null) return <p className="mt-2 text-[11px] text-warn">{detail ?? "Couldn't load that."}</p>;
+  return (
+    <div className="mt-2 space-y-2" data-applied-diff>
+      {detail.files.map((file) => (
+        <div key={file.path} className="overflow-hidden rounded border border-line-soft" data-applied-file={file.path}>
+          <p className="flex items-center justify-between gap-2 border-b border-line-soft bg-base px-2 py-1 font-mono text-[11px] text-ink-dim">
+            <span className="truncate">{file.path}</span>
+            <span className="shrink-0 text-ink-faint">{file.status}</span>
+          </p>
+          {file.diff ? <DiffView diff={file.diff} className="max-h-64" /> : <p className="px-2 py-1.5 text-[11px] text-ink-faint">{file.note}</p>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 interface OpenFile {
   path: string;
   /** What's saved in the sandbox. */
@@ -77,6 +113,8 @@ const STATUS_TONE = { modified: "text-warn", added: "text-ok", deleted: "text-da
  */
 export default function SandboxPanel({ open, onClose }: Props) {
   const [status, setStatus] = useState<Status | null>(null);
+  /** The past applies whose changes are open. */
+  const [openApplied, setOpenApplied] = useState<Set<string>>(new Set());
   const [files, setFiles] = useState<{ path: string; editable: boolean }[]>([]);
   const [filter, setFilter] = useState("");
   const [file, setFile] = useState<OpenFile | null>(null);
@@ -558,6 +596,21 @@ export default function SandboxPanel({ open, onClose }: Props) {
                     <p className="mt-1 truncate font-mono text-[11px] text-ink-faint" title={h.files.map((f) => f.path).join(", ")}>
                       {h.files.map((f) => f.path).join(", ")}
                     </p>
+                    <button
+                      onClick={() =>
+                        setOpenApplied((open) => {
+                          const next = new Set(open);
+                          if (!next.delete(h.id)) next.add(h.id);
+                          return next;
+                        })
+                      }
+                      aria-expanded={openApplied.has(h.id)}
+                      data-view-applied={h.id}
+                      className="mt-1.5 text-[11px] text-arc hover:underline"
+                    >
+                      {openApplied.has(h.id) ? "Hide the changes" : "View the changes"}
+                    </button>
+                    {openApplied.has(h.id) && <AppliedDiff id={h.id} />}
                   </li>
                 ))}
               </ul>

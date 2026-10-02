@@ -60,10 +60,10 @@ opt-in, and every write and command still waits for approval.
 - [x] 43. Unit conversion in `calculate`, at no extra tool cost
 
 ## F. Everything else
-- [ ] 44. Scheduled-task templates (morning briefing and others)
-- [ ] 45. Welcome screen with recent chats and quick actions
-- [ ] 46. Gallery: copy a picture's prompt, see what it was edited from
-- [ ] 47. Sandbox: view exactly what each past apply changed
-- [ ] 48. Usage export as CSV
-- [ ] 49. Automatic daily backups, keeping the last seven
-- [ ] 50. Chat statistics — messages, words, tools used, per day
+- [x] 44. Scheduled-task templates (morning briefing and others)
+- [x] 45. Welcome screen with recent chats and quick actions
+- [x] 46. Gallery: copy a picture's prompt, see what it was edited from
+- [x] 47. Sandbox: view exactly what each past apply changed
+- [x] 48. Usage export as CSV
+- [x] 49. Automatic daily backups, keeping the last seven
+- [x] 50. Chat statistics — messages, words, tools used, per day

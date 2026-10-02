@@ -28,6 +28,8 @@ import { THEMES } from "@/lib/appearance";
 import { contextCeiling, measureContext } from "@/lib/context-meter";
 import { favoriteKey, toggleFavorite } from "@/lib/favorites";
 import { ModelsContext, type ModelsContextValue } from "./models-context";
+import type { QuickActionId } from "./Welcome";
+import { recentChats } from "@/lib/welcome";
 import { estimateReplyTokens } from "@/lib/format";
 import type { ProviderState } from "./ModelPicker";
 import { consumeJarvisStream } from "@/lib/stream";
@@ -936,24 +938,48 @@ export default function Workspace() {
 
   // --- Shortcuts -----------------------------------------------------------
 
+  /**
+   * Put the cursor in the chat search. On a narrow screen the list is a drawer,
+   * so open it first; the box exists once it has rendered.
+   */
+  const focusChatSearch = useCallback(() => {
+    const visible = () =>
+      [...document.querySelectorAll<HTMLInputElement>("[data-chat-search]")].find((el) => el.offsetParent);
+    const box = visible();
+    if (box) box.focus();
+    else {
+      setSidebarOpen(true);
+      setTimeout(() => visible()?.focus(), 0);
+    }
+  }, []);
+
+  /** The quick actions on the welcome screen — each is also reachable some other way. */
+  const quickAction = useCallback(
+    (id: QuickActionId) => {
+      if (id === "search") return focusChatSearch();
+      if (id === "voice") {
+        setPushToTalk(false);
+        return setVoiceOpen(true);
+      }
+      if (id === "pictures") return setGalleryOpen(true);
+      if (id === "saved") return setSavedOpen(true);
+      return setShortcutsOpen(true);
+    },
+    [focusChatSearch],
+  );
+
+  const recent = useMemo(() => recentChats(chats), [chats]);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         newChat();
       }
-      // Cmd/Ctrl+/ searches every chat. On a narrow screen the list is a
-      // drawer, so open it first; the box exists once it has rendered.
+      // Cmd/Ctrl+/ searches every chat.
       if ((e.metaKey || e.ctrlKey) && e.key === "/") {
         e.preventDefault();
-        const visible = () =>
-          [...document.querySelectorAll<HTMLInputElement>("[data-chat-search]")].find((el) => el.offsetParent);
-        const box = visible();
-        if (box) box.focus();
-        else {
-          setSidebarOpen(true);
-          setTimeout(() => visible()?.focus(), 0);
-        }
+        focusChatSearch();
       }
       // "?" lists the shortcuts — unless you are typing, where it is a question mark.
       if (isHelpKey(e) && !isTypingTarget(e.target as HTMLElement | null)) {
@@ -1134,6 +1160,9 @@ export default function Workspace() {
             context={contextInfo}
             favorites={settings.favorites ?? []}
             onToggleFavorite={toggleFavoriteModel}
+            recent={recent}
+            onOpenChat={selectChat}
+            onQuickAction={quickAction}
           />
           </ModelsContext.Provider>
         </div>

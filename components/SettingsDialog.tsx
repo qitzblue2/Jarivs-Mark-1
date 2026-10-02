@@ -9,6 +9,7 @@ import { cleanPrompts, type SavedPrompt } from "@/lib/prompts";
 import PromptsEditor from "./PromptsEditor";
 import AppearanceSettings from "./AppearanceSettings";
 import PersonaPicker from "./PersonaPicker";
+import AutoBackups from "./AutoBackups";
 import { DEFAULT_GREETING } from "@/lib/voice/session";
 import { ttsEngines, getTts, kokoroEngine, QUALITY_OPTIONS, type KokoroQuality } from "@/lib/voice/tts";
 import type { ProviderState } from "./ModelPicker";
@@ -316,6 +317,8 @@ export default function SettingsDialog({
           <PromptsEditor prompts={draft.prompts ?? []} onChange={(prompts) => setDraft((d) => ({ ...d, prompts }))} />
 
           <MemoryEditor open={open} />
+
+          <AutoBackups open={open} />
 
           <section className="space-y-2.5">
             <h3 className="text-[12px] font-semibold uppercase tracking-wide text-ink-dim">
