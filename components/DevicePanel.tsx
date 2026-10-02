@@ -170,6 +170,7 @@ export default function DevicePanel() {
         <label className="flex items-center gap-2 text-[11px] text-ink-dim">
           <Volume2 size={11} className="shrink-0 text-ink-faint" />
           <select
+            aria-label="Voice for on-device speech"
             value={voice}
             onChange={(e) => {
               setVoice(e.target.value);
@@ -207,7 +208,7 @@ export default function DevicePanel() {
             <Mic size={10} className="shrink-0 text-ink-faint" />
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-line">
               <div
-                className={`h-full rounded-full transition-all duration-100 ${level > 0.01 ? "bg-green-400" : "bg-ink-faint"}`}
+                className={`h-full rounded-full transition-all duration-100 ${level > 0.01 ? "bg-ok" : "bg-ink-faint"}`}
                 style={{ width: `${Math.min(100, level * 400)}%` }}
               />
             </div>
@@ -266,7 +267,7 @@ function Check({ ok, label }: { ok: boolean; label: string }) {
   return (
     <span
       className={`flex items-center gap-1 rounded-md border px-1.5 py-0.5 ${
-        ok ? "border-green-400/30 bg-green-400/5 text-green-400" : "border-line text-ink-faint"
+        ok ? "border-ok/30 bg-ok/5 text-ok" : "border-line text-ink-faint"
       }`}
     >
       {ok ? "●" : "○"} {label}

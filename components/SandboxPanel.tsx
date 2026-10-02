@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import DiffView from "./DiffView";
 import { useEscape } from "@/lib/hooks/use-escape";
+import { useDialogFocus } from "@/lib/hooks/use-dialog-focus";
 
 interface Change {
   path: string;
@@ -65,7 +66,7 @@ interface Props {
 }
 
 const STATUS_LETTER = { modified: "M", added: "A", deleted: "D" } as const;
-const STATUS_TONE = { modified: "text-warn", added: "text-emerald-300", deleted: "text-danger" } as const;
+const STATUS_TONE = { modified: "text-warn", added: "text-ok", deleted: "text-danger" } as const;
 
 /**
  * JARVIS' code, in a copy you can break.
@@ -210,6 +211,7 @@ export default function SandboxPanel({ open, onClose }: Props) {
     return q ? files.filter((f) => f.path.toLowerCase().includes(q)) : files;
   }, [files, filter]);
 
+  const dialogRef = useDialogFocus(open);
   if (!open) return null;
 
   const server = status?.server;
@@ -222,18 +224,18 @@ export default function SandboxPanel({ open, onClose }: Props) {
   const failedNow = check?.current && !check.ok;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-base" role="dialog" aria-label="Sandbox">
+    <div ref={dialogRef} className="fixed inset-0 z-50 flex flex-col bg-base" role="dialog" aria-modal="true" aria-label="Sandbox">
       {/* Header */}
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
         <FlaskConical size={16} className="text-arc" />
         <span className="text-sm font-semibold">Sandbox</span>
         <span
           className={`flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] ${
-            online ? "bg-emerald-500/10 text-emerald-300" : server?.state === "stopped" ? "bg-danger/10 text-danger" : "bg-warn/10 text-warn"
+            online ? "bg-ok/10 text-ok" : server?.state === "stopped" ? "bg-danger/10 text-danger" : "bg-warn/10 text-warn"
           }`}
           data-sandbox-state={server?.state ?? "unknown"}
         >
-          <span className={`h-1.5 w-1.5 rounded-full ${online ? "bg-emerald-400" : server?.state === "stopped" ? "bg-danger" : "animate-pulse bg-warn"}`} />
+          <span className={`h-1.5 w-1.5 rounded-full ${online ? "bg-ok" : server?.state === "stopped" ? "bg-danger" : "animate-pulse bg-warn"}`} />
           {!server ? "…" : online ? "Online" : server.state === "stopped" ? "Offline" : server.state === "starting" ? "Starting…" : "Restarting…"}
           {server && server.restarts > 0 && <span className="text-ink-faint">· restarted {server.restarts}×</span>}
         </span>
@@ -286,7 +288,7 @@ export default function SandboxPanel({ open, onClose }: Props) {
       {note && (
         <div
           className={`flex items-start gap-2 border-b border-line-soft px-3 py-1.5 text-[12px] ${
-            note.tone === "ok" ? "text-emerald-300" : note.tone === "warn" ? "text-warn" : "text-danger"
+            note.tone === "ok" ? "text-ok" : note.tone === "warn" ? "text-warn" : "text-danger"
           }`}
           role="status"
         >
@@ -366,7 +368,7 @@ export default function SandboxPanel({ open, onClose }: Props) {
             <>
               <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-3 py-1.5">
                 <code className="min-w-0 truncate text-[12px] text-ink" data-open-file={file.path}>{file.path}</code>
-                {file.live === null && <span className="rounded bg-emerald-500/10 px-1.5 text-[10px] text-emerald-300">new</span>}
+                {file.live === null && <span className="rounded bg-ok/10 px-1.5 text-[10px] text-ok">new</span>}
                 {file.live !== null && file.saved !== file.live && <span className="rounded bg-warn/10 px-1.5 text-[10px] text-warn">changed</span>}
                 {dirty && <span className="text-[10px] text-warn">● unsaved</span>}
                 {!file.editable && <span className="text-[10px] text-ink-faint">read-only</span>}
@@ -395,7 +397,7 @@ export default function SandboxPanel({ open, onClose }: Props) {
                     <button
                       onClick={() => void save()}
                       disabled={!dirty || busy !== null}
-                      className="flex items-center gap-1 rounded-md bg-arc-dim px-2.5 py-1 text-[12px] font-medium text-white hover:bg-arc disabled:opacity-40"
+                      className="flex items-center gap-1 rounded-md bg-arc-solid px-2.5 py-1 text-[12px] font-medium text-white hover:bg-arc-solid-hover disabled:opacity-40"
                       title="Save to the sandbox (Ctrl+S)"
                     >
                       <Save size={13} /> Save
@@ -486,7 +488,7 @@ export default function SandboxPanel({ open, onClose }: Props) {
                 {check.steps.map((step) => (
                   <li key={step.name}>
                     <details>
-                      <summary className={`cursor-pointer ${step.skipped ? "text-ink-faint" : step.ok ? "text-emerald-300" : "text-danger"}`}>
+                      <summary className={`cursor-pointer ${step.skipped ? "text-ink-faint" : step.ok ? "text-ok" : "text-danger"}`}>
                         {step.skipped ? "–" : step.ok ? "✓" : "✗"} {step.name}
                         <span className="text-ink-faint"> · {(step.ms / 1000).toFixed(1)}s</span>
                       </summary>
@@ -507,7 +509,7 @@ export default function SandboxPanel({ open, onClose }: Props) {
             <button
               onClick={() => void apply(false)}
               disabled={busy !== null || changes.length === 0 || conflicts > 0}
-              className="flex w-full items-center justify-center gap-1.5 rounded-md bg-arc-dim px-3 py-2 text-[12.5px] font-medium text-white hover:bg-arc disabled:opacity-40"
+              className="flex w-full items-center justify-center gap-1.5 rounded-md bg-arc-solid px-3 py-2 text-[12.5px] font-medium text-white hover:bg-arc-solid-hover disabled:opacity-40"
             >
               {busy === "apply" ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
               {busy === "apply" ? "Checking and applying…" : `Apply ${changes.length || ""} change${changes.length === 1 ? "" : "s"} to JARVIS`}

@@ -65,4 +65,35 @@ check("the lockout is recorded", kinds.includes("login.locked"));
 check("the good sign-in is recorded", kinds.includes("login.ok"));
 check("with the client but never the password", entries.some((e) => e.client === "203.0.113.50") && !JSON.stringify(entries).includes(PASSWORD) && !JSON.stringify(entries).includes("wrong-"));
 
+// --- the login gate, from a non-local hostname --------------------------------
+// Requests to localhost are never gated, so to see the gate work this asks as a
+// visitor from elsewhere would: with a Host header that isn't this machine.
+import http from "node:http";
+const asVisitor = (path) =>
+  new Promise((resolve, reject) => {
+    const url = new URL(BASE);
+    const req = http.request(
+      { host: url.hostname, port: url.port, path, headers: { host: "jarvis.example.test" } },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => resolve({ status: res.statusCode, type: res.headers["content-type"] ?? "", location: res.headers.location ?? "", body: Buffer.concat(chunks) }));
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+const gated = await asVisitor("/api/chats");
+check("a visitor without a session is refused the API", gated.status === 401, String(gated.status));
+const page = await asVisitor("/");
+check("and sent to the login page from the app", page.status >= 300 && page.status < 400 && page.location.includes("/login"), `${page.status} ${page.location}`);
+const manifest = await asVisitor("/manifest.webmanifest");
+check("but the manifest is served, so the app can be installed", manifest.status === 200 && /json/.test(manifest.type) && JSON.parse(manifest.body.toString()).name === "JARVIS Mark 6", `${manifest.status} ${manifest.type}`);
+for (const icon of ["/icons/icon-192.png", "/icons/icon-512.png", "/icons/maskable-512.png", "/icon.png", "/apple-icon.png"]) {
+  const res = await asVisitor(icon);
+  check(`${icon} is served to a visitor too`, res.status === 200 && res.type.startsWith("image/png") && res.body.subarray(1, 4).toString() === "PNG", `${res.status} ${res.type}`);
+}
+const near = await asVisitor("/icons-private");
+check("while a path that merely starts like one is still gated", near.status >= 300 && near.status < 400, String(near.status));
+
 process.exit(failed ? 1 : 0);

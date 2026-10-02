@@ -103,7 +103,7 @@ export default function ApprovalCard({ approval, onSettled }: Props) {
         <button
           onClick={() => void settle("approve")}
           disabled={busy !== null}
-          className="flex items-center gap-1.5 rounded-md bg-arc-dim px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-arc disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded-md bg-arc-solid px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-arc-solid-hover disabled:opacity-50"
         >
           <Check size={12} />
           {busy === "approve" ? "Running…" : "Approve"}

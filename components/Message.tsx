@@ -100,12 +100,12 @@ function MessageBody({
             }}
             autoFocus
             rows={Math.min(14, draft.split("\n").length + 1)}
-            className="w-full resize-y rounded-lg border border-arc-dim bg-raised p-3 text-[15px] text-ink outline-none"
+            className="w-full resize-y rounded-lg border border-arc-dim bg-raised p-3 chat-text text-ink outline-none"
           />
           <div className="mt-2 flex gap-2">
             <button
               onClick={saveEdit}
-              className="rounded-md bg-arc-dim px-3 py-1.5 text-sm font-medium text-white transition hover:bg-arc"
+              className="rounded-md bg-arc-solid px-3 py-1.5 text-sm font-medium text-white transition hover:bg-arc-solid-hover"
             >
               Save &amp; resend
             </button>
@@ -124,6 +124,7 @@ function MessageBody({
   return (
     <div
       id={`msg-${message.id}`}
+      data-msg
       className={`group px-4 py-5 sm:px-6 ${isUser ? "" : "border-y border-line-soft bg-panel/40"}`}
     >
       <div className="mx-auto flex max-w-3xl gap-3 sm:gap-4">
@@ -162,7 +163,7 @@ function MessageBody({
                 <Attachments attachments={message.attachments} />
               )}
               <div
-                className={`relative whitespace-pre-wrap break-words text-[15px] leading-relaxed ${
+                className={`relative whitespace-pre-wrap break-words chat-text leading-relaxed ${
                   long && !expanded ? "max-h-64 overflow-hidden" : ""
                 }`}
                 data-collapsed={long && !expanded ? "true" : undefined}
@@ -211,7 +212,7 @@ function MessageBody({
           )}
 
           {!isStreaming && (
-            <div className="mt-2 flex items-center gap-1 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
+            <div className="mt-2 flex items-center gap-1 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
               <button
                 onClick={copyAll}
                 className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-ink-faint transition hover:bg-raised hover:text-ink"

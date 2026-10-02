@@ -51,6 +51,14 @@ import { COMMAND_NAMES, matchSlash, parseSlash } from "../lib/slash";
 import { MAX_PROMPTS, cleanPrompts, normalizePromptName } from "../lib/prompts";
 import { listStarred } from "../lib/starred";
 import { codeFileName } from "../lib/codeblocks";
+import {
+  APPEARANCE_KEY, DEFAULT_APPEARANCE, INIT_SCRIPT, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, TEXT_SIZES, THEMES, DENSITIES,
+  applyAppearance, cleanAppearance, clampSidebar, loadAppearance, resolveTheme, saveAppearance,
+} from "../lib/appearance";
+import { SHORTCUT_GROUPS, isHelpKey, isMac, isTypingTarget, keyLabel } from "../lib/shortcuts";
+import { BANNER_TEXT, linkOf, nextCheckDelay, reachable, reduceConnection } from "../lib/connection";
+import type { ConnectionEvent, ConnectionState } from "../lib/connection";
+import { inflateSync } from "node:zlib";
 import { SentenceSplitter, splitSentences } from "../lib/voice/tts/sentences";
 import { Speaker } from "../lib/voice/tts/speaker";
 import { encodeWav, durationOf } from "../lib/voice/wav";
@@ -89,6 +97,7 @@ const eq = (name: string, got: unknown, want: unknown) => {
       (ok ? "" : `\n     got  ${JSON.stringify(got)}\n     want ${JSON.stringify(want)}`),
   );
 };
+const ok = (name: string, condition: unknown) => eq(name, Boolean(condition), true);
 const throws = (name: string, fn: () => unknown) => {
   try {
     fn();
@@ -2073,6 +2082,197 @@ console.log("\n--- saved messages ---");
   eq("a block saved as a file keeps the name in its comment", codeFileName("// server.js\nconsole.log(1)", "javascript"), "server.js");
   eq("otherwise it's named for its language", [codeFileName("print(1)", "python"), codeFileName("SELECT 1", "sql"), codeFileName("hello", "text")], ["snippet.py", "snippet.sql", "snippet.txt"]);
   eq("a language it doesn't know is plain text", codeFileName("x", "klingon"), "snippet.txt");
+}
+
+console.log("\n--- appearance ---");
+{
+  const mem = (initial?: string) => {
+    const data = new Map<string, string>(initial === undefined ? [] : [[APPEARANCE_KEY, initial]]);
+    return { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v) };
+  };
+  eq("nothing stored is the defaults", loadAppearance(mem()), DEFAULT_APPEARANCE);
+  eq("junk stored is the defaults", loadAppearance(mem("{not json")), DEFAULT_APPEARANCE);
+  eq("a stored array is the defaults", loadAppearance(mem("[1,2]")), DEFAULT_APPEARANCE);
+  eq(
+    "unknown values fall back one field at a time",
+    cleanAppearance({ theme: "neon", textSize: "large", density: 5, sidebarWidth: "wide" }),
+    { theme: "system", textSize: "large", density: "comfortable", sidebarWidth: SIDEBAR_DEFAULT },
+  );
+  eq("the sidebar is kept within its limits", [clampSidebar(10), clampSidebar(9999), clampSidebar(300.6), clampSidebar(NaN), clampSidebar(Infinity), clampSidebar(null)], [SIDEBAR_MIN, SIDEBAR_MAX, 301, SIDEBAR_DEFAULT, SIDEBAR_DEFAULT, SIDEBAR_DEFAULT]);
+  const store = mem();
+  saveAppearance(store, { theme: "light", textSize: "xlarge", density: "compact", sidebarWidth: 333 });
+  eq("what is saved comes back", loadAppearance(store), { theme: "light", textSize: "xlarge", density: "compact", sidebarWidth: 333 });
+  saveAppearance({ setItem() { throw new Error("quota"); } }, DEFAULT_APPEARANCE);
+  ok("a full or blocked store doesn't throw", true);
+  eq("system follows the OS", [resolveTheme("system", true), resolveTheme("system", false)], ["light", "dark"]);
+  eq("a chosen theme ignores the OS", [resolveTheme("dark", true), resolveTheme("light", false)], ["dark", "light"]);
+
+  // The inline script runs before any module can, so it is a second copy of
+  // the logic. Run it against the real functions for every combination.
+  const fakeRoot = () => {
+    const attrs: Record<string, string> = {};
+    const vars: Record<string, string> = {};
+    return { attrs, vars, setAttribute: (n: string, v: string) => void (attrs[n] = v), style: { setProperty: (n: string, v: string) => void (vars[n] = v) } };
+  };
+  let mismatches = 0;
+  let runs = 0;
+  const widths = [undefined, 100, 260, 481, "300", 333.4];
+  for (const theme of [...THEMES, "bogus"]) for (const textSize of [...TEXT_SIZES, "huge"]) for (const density of [...DENSITIES, "dense"]) for (const sidebarWidth of widths) for (const light of [true, false]) {
+    const raw = JSON.stringify({ theme, textSize, density, sidebarWidth });
+    const viaScript = fakeRoot();
+    new Function("document", "localStorage", "window", INIT_SCRIPT)(
+      { documentElement: viaScript },
+      { getItem: () => raw },
+      { matchMedia: () => ({ matches: light }) },
+    );
+    const viaCode = fakeRoot();
+    applyAppearance(viaCode, loadAppearance({ getItem: () => raw }), light);
+    runs++;
+    if (JSON.stringify([viaScript.attrs, viaScript.vars]) !== JSON.stringify([viaCode.attrs, viaCode.vars])) {
+      if (mismatches++ < 3) console.log("  mismatch for", raw, light, viaScript.attrs, viaCode.attrs, viaScript.vars, viaCode.vars);
+    }
+  }
+  eq(`the inline script agrees with the code for all ${runs} combinations`, mismatches, 0);
+  const broken = fakeRoot();
+  new Function("document", "localStorage", "window", INIT_SCRIPT)({ documentElement: broken }, { getItem: () => { throw new Error("blocked"); } }, { matchMedia: () => ({ matches: false }) });
+  eq("a blocked localStorage still gets the defaults", [broken.attrs["data-theme"], broken.attrs["data-text"], broken.vars["--sidebar-w"]], ["dark", "normal", `${SIDEBAR_DEFAULT}px`]);
+  const noMatchMedia = fakeRoot();
+  new Function("document", "localStorage", "window", INIT_SCRIPT)({ documentElement: noMatchMedia }, { getItem: () => null }, {});
+  eq("and so does a browser with no matchMedia", noMatchMedia.attrs["data-theme"], "dark");
+}
+
+console.log("\n--- the palette ---");
+{
+  const css = readFileSync("app/globals.css", "utf8");
+  const block = (start: RegExp) => {
+    const m = start.exec(css);
+    if (!m) throw new Error(`no block for ${start}`);
+    const open = css.indexOf("{", m.index);
+    return css.slice(open + 1, css.indexOf("}", open));
+  };
+  const tokens = (body: string) => Object.fromEntries([...body.matchAll(/--color-([a-z-]+):\s*(#[0-9a-fA-F]{6})/g)].map((m) => [m[1], m[2]]));
+  const dark = tokens(block(/@theme\s*\{/));
+  const light = { ...dark, ...tokens(block(/html\[data-theme="light"\]\s*\{/)) };
+
+  const lum = (hex: string) => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const ratio = (a: string, b: string) => {
+    const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+
+  const shared = ["arc-solid", "arc-solid-hover", "line-strong"];
+  const overridden = Object.keys(dark).filter((k) => !shared.includes(k) && (light as Record<string, string>)[k] === dark[k]);
+  eq("the light theme redefines every colour that isn't deliberately shared", overridden, []);
+
+  for (const [name, t] of [["dark", dark], ["light", light]] as const) {
+    let worst = 99;
+    let worstWhere = "";
+    for (const surface of ["base", "panel", "raised"]) for (const text of ["ink", "ink-dim", "ink-faint", "arc", "warn", "danger", "ok"]) {
+      const r = ratio(t[text], t[surface]);
+      if (r < worst) { worst = r; worstWhere = `${text} on ${surface}`; }
+    }
+    ok(`${name}: every text colour reads at 4.5:1 or better on every surface — worst ${worst.toFixed(2)} (${worstWhere})`, worst >= 4.5);
+    ok(`${name}: white on the solid accent fill is at least 4.5:1 — ${ratio("#ffffff", t["arc-solid"]).toFixed(2)}`, ratio("#ffffff", t["arc-solid"]) >= 4.5);
+    ok(`${name}: and on its hover state`, ratio("#ffffff", t["arc-solid-hover"]) >= 4.5);
+    ok(`${name}: the page and its panels are told apart`, ratio(t.base, t.panel) > 1.03 || ratio(t.panel, t.raised) > 1.03);
+  }
+  ok("the two themes really differ", lum(dark.base) < 0.05 && lum(light.base) > 0.8);
+}
+
+console.log("\n--- keyboard shortcuts ---");
+{
+  eq("Mod is Cmd on a Mac and Ctrl elsewhere", [keyLabel("Mod", true), keyLabel("Mod", false)], ["⌘", "Ctrl"]);
+  eq("other keys pass through", [keyLabel("K", true), keyLabel("↑", false), keyLabel("Esc", true)], ["K", "↑", "Esc"]);
+  eq("Mac detection", [isMac("MacIntel"), isMac("iPhone"), isMac("Win32"), isMac("Linux x86_64"), isMac(undefined)], [true, true, false, false, false]);
+  eq("typing targets", [isTypingTarget({ tagName: "TEXTAREA" }), isTypingTarget({ tagName: "input" }), isTypingTarget({ tagName: "SELECT" }), isTypingTarget({ tagName: "DIV", isContentEditable: true }), isTypingTarget({ tagName: "BUTTON" }), isTypingTarget(null)], [true, true, true, true, false, false]);
+  const key = (k: string, mods: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}) => ({ key: k, ctrlKey: false, metaKey: false, altKey: false, ...mods });
+  eq("? opens the list, alone", isHelpKey(key("?")), true);
+  eq("but not with Ctrl, Cmd or Alt, and not other keys", [isHelpKey(key("?", { ctrlKey: true })), isHelpKey(key("?", { metaKey: true })), isHelpKey(key("?", { altKey: true })), isHelpKey(key("/"))], [false, false, false, false]);
+  const all = SHORTCUT_GROUPS.flatMap((g) => g.items);
+  ok("every group has entries", SHORTCUT_GROUPS.every((g) => g.items.length > 0));
+  ok("every entry says what it does and which keys", all.every((i) => i.action.length > 3 && i.keys.length > 0 && i.keys.every((k) => k.length > 0)));
+  eq("no action is listed twice", new Set(all.map((i) => i.action)).size, all.length);
+  ok("the slash commands the list promises exist", COMMAND_NAMES.includes("help") && COMMAND_NAMES.includes("theme"));
+}
+
+console.log("\n--- the connection banner ---");
+{
+  const start: ConnectionState = { browserOnline: true, failures: 0 };
+  const run = (...events: ConnectionEvent[]) => events.reduce(reduceConnection, start);
+  eq("connected is ok", linkOf(start), "ok");
+  eq("one failed check isn't enough to alarm anyone", linkOf(run("check-failed")), "ok");
+  eq("two in a row is", linkOf(run("check-failed", "check-failed")), "server-unreachable");
+  eq("a success in between starts the count again", linkOf(run("check-failed", "check-ok", "check-failed")), "ok");
+  eq("recovering clears it", linkOf(run("check-failed", "check-failed", "check-ok")), "ok");
+  eq("the browser going offline is its own message", linkOf(run("offline")), "browser-offline");
+  eq("and takes priority over the server", linkOf(run("check-failed", "check-failed", "offline")), "browser-offline");
+  eq("coming back online leaves whatever the server check says", linkOf(run("offline", "online")), "ok");
+  eq("checks are lazy when all is well, quick when something looks wrong", [nextCheckDelay(start), nextCheckDelay(run("check-failed")), nextCheckDelay(run("offline"))], [20000, 2000, 5000]);
+  eq("any answer means the server is there; a gateway error does not", [reachable(200), reachable(401), reachable(404), reachable(500), reachable(502)], [true, true, true, false, false]);
+  ok("both messages exist and say what is wrong", BANNER_TEXT["browser-offline"].includes("offline") && BANNER_TEXT["server-unreachable"].includes("server"));
+}
+
+console.log("\n--- installable app ---");
+{
+  const { default: manifest } = await import("../app/manifest");
+  const m = manifest();
+  eq("it has a name and a short one", [m.name, m.short_name], ["JARVIS Mark 6", "JARVIS"]);
+  eq("it opens in its own window from the root", [m.display, m.start_url, m.scope], ["standalone", "/", "/"]);
+  ok("its colours are real colours", /^#[0-9a-f]{6}$/i.test(m.background_color ?? "") && /^#[0-9a-f]{6}$/i.test(m.theme_color ?? ""));
+  const icons = m.icons ?? [];
+  ok("there is a 192 and a 512 icon", icons.some((i) => i.sizes === "192x192") && icons.some((i) => i.sizes === "512x512"));
+  eq("one icon is maskable", icons.filter((i) => i.purpose === "maskable").length, 1);
+
+  const crcOk = (png: Buffer) => {
+    let at = 8;
+    while (at < png.length) {
+      const len = png.readUInt32BE(at);
+      const body = png.subarray(at + 4, at + 8 + len);
+      if (crc32(body) !== png.readUInt32BE(at + 8 + len)) return false;
+      at += 12 + len;
+    }
+    return true;
+  };
+  for (const icon of icons) {
+    const file = `public${icon.src}`;
+    const png = readFileSync(file);
+    const [w, h] = (icon.sizes ?? "").split("x").map(Number);
+    ok(`${icon.src} is a PNG`, png.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])));
+    eq(`${icon.src} is the size the manifest says`, [png.readUInt32BE(16), png.readUInt32BE(20)], [w, h]);
+    ok(`${icon.src} is intact (every chunk's checksum matches)`, crcOk(png));
+  }
+  for (const [file, size] of [["app/icon.png", 96], ["app/apple-icon.png", 180]] as const) {
+    const png = readFileSync(file);
+    eq(`${file} is ${size} square`, [png.readUInt32BE(16), png.readUInt32BE(20)], [size, size]);
+    ok(`${file} is intact`, crcOk(png));
+  }
+  // Decompresses to exactly rows × (pixels × 4 + a filter byte): nothing truncated.
+  const big = readFileSync("public/icons/icon-512.png");
+  let at = 8, idat: Buffer[] = [];
+  while (at < big.length) {
+    const len = big.readUInt32BE(at);
+    if (big.subarray(at + 4, at + 8).toString() === "IDAT") idat.push(big.subarray(at + 8, at + 8 + len));
+    at += 12 + len;
+  }
+  eq("the big icon holds every pixel", inflateSync(Buffer.concat(idat)).length, 512 * (512 * 4 + 1));
+
+  // The manifest is fetched without your session cookie, so behind the login
+  // it has to be reachable or "Install" quietly never appears.
+  const { config } = await import("../proxy");
+  const gate = new RegExp(`^${(config.matcher[0] as string).replace(/^\/\(/, "/(")}$`);
+  eq(
+    "the login gate lets the manifest and icons through",
+    ["/manifest.webmanifest", "/icons/icon-192.png", "/icons/maskable-512.png", "/icon.png", "/apple-icon.png"].map((p) => gate.test(p)),
+    [false, false, false, false, false],
+  );
+  eq(
+    "and still covers the app and the API",
+    ["/", "/api/chats", "/api/health", "/api/audit", "/icons-private", "/manifest.json"].map((p) => gate.test(p)),
+    [true, true, true, true, true, true],
+  );
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

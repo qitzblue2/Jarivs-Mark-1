@@ -19,6 +19,12 @@ import { forSpeech } from "@/lib/voice/tts/types";
 import { Speaker } from "@/lib/voice/tts/speaker";
 import { parseSlash, type SlashMatch } from "@/lib/slash";
 import { draftKey, loadDraft, saveDraft } from "@/lib/drafts";
+import SidebarResizer from "./SidebarResizer";
+import ShortcutsDialog from "./ShortcutsDialog";
+import ConnectionBanner from "./ConnectionBanner";
+import { isHelpKey, isTypingTarget } from "@/lib/shortcuts";
+import { getAppearance, setAppearance } from "@/lib/appearance-store";
+import { THEMES } from "@/lib/appearance";
 import { estimateReplyTokens } from "@/lib/format";
 import type { ProviderState } from "./ModelPicker";
 import { consumeJarvisStream } from "@/lib/stream";
@@ -67,6 +73,7 @@ export default function Workspace() {
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   /** The chat whose own instructions are being edited, loaded in full. */
@@ -601,6 +608,12 @@ export default function Workspace() {
       }
       case "instructions":
         return void editInstructions(chat!.id);
+      case "help":
+        return setShortcutsOpen(true);
+      case "theme": {
+        const { theme } = getAppearance();
+        return setAppearance({ theme: THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length] });
+      }
     }
   }
 
@@ -874,6 +887,11 @@ export default function Workspace() {
           setTimeout(() => visible()?.focus(), 0);
         }
       }
+      // "?" lists the shortcuts — unless you are typing, where it is a question mark.
+      if (isHelpKey(e) && !isTypingTarget(e.target as HTMLElement | null)) {
+        e.preventDefault();
+        setShortcutsOpen((open) => !open);
+      }
       if (e.key === "Escape" && canvasOpen) setCanvasOpen(false);
       // Cmd/Ctrl+J drops straight into voice mode.
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
@@ -889,7 +907,16 @@ export default function Workspace() {
   const showCanvas = canvasOpen;
 
   return (
-    <div className="flex h-dvh w-full flex-col overflow-hidden">
+    <div className="flex h-dvh w-full flex-col overflow-hidden" data-print-flow>
+      {/* First stop for Tab: past the chat list and the header, straight to typing. */}
+      <a
+        href="#message-input"
+        data-skip-link
+        className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[100] focus:rounded-md focus:bg-arc-solid focus:px-3 focus:py-2 focus:text-[13px] focus:font-medium focus:text-white"
+      >
+        Skip to the message box
+      </a>
+      <ConnectionBanner />
       {selfEdit?.isSandbox && (
         <div
           className="flex items-center gap-2 border-b border-warn/40 bg-warn/15 px-3 py-1.5 text-[11.5px] text-warn"
@@ -912,10 +939,11 @@ export default function Workspace() {
           </span>
         </div>
       )}
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden" data-print-flow>
       {/* Sidebar: fixed column on desktop, overlay drawer on small screens. */}
-      <div className="hidden w-[260px] shrink-0 lg:block">
+      <div className="hidden shrink-0 lg:block" style={{ width: "var(--sidebar-w, 260px)" }}>
         <Sidebar
+          edge={<SidebarResizer />}
           chats={chats}
           activeId={chat?.id ?? null}
           onSelect={selectChat}
@@ -989,9 +1017,10 @@ export default function Workspace() {
         </div>
       )}
 
-      <main className="flex min-w-0 flex-1">
+      <main className="flex min-w-0 flex-1" data-print-flow>
         <div
           className="min-w-0 flex-1"
+          data-print-flow
           style={showCanvas ? { width: `${100 - canvasWidth}%` } : undefined}
         >
           <ChatPane
@@ -1044,13 +1073,15 @@ export default function Workspace() {
                 document.body.style.cursor = "col-resize";
                 document.body.style.userSelect = "none";
               }}
-              className="hidden w-1 shrink-0 cursor-col-resize bg-line transition hover:bg-arc-dim md:block"
+              data-no-print
+              className="hidden w-1 shrink-0 cursor-col-resize bg-line transition hover:bg-arc-solid md:block"
               title="Drag to resize"
             />
             {/* One instance only — a second copy would run a second preview
                 iframe of the same code. Full-screen on phones, a sized panel
                 from md up. */}
             <div
+              data-no-print
               className="fixed inset-0 z-30 md:relative md:inset-auto md:z-auto md:shrink-0 md:[width:var(--canvas-w)]"
               style={{ "--canvas-w": `${canvasWidth}vw` } as React.CSSProperties}
             >
@@ -1092,6 +1123,7 @@ export default function Workspace() {
         }}
       />
 
+      <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <TrashPanel open={trashOpen} onClose={() => setTrashOpen(false)} onRestored={() => void refreshChats()} />
 
       <ChatInstructions

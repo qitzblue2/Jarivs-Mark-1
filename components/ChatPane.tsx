@@ -101,7 +101,7 @@ export default function ChatPane(props: Props) {
   const anyKey = providers.some((p) => p.ready && p.models.length > 0);
 
   return (
-    <div className="flex h-full min-w-0 flex-col bg-base">
+    <div className="flex h-full min-w-0 flex-col bg-base" data-print-flow>
       <header className="flex items-center gap-2 border-b border-line px-3 py-2">
         <button
           onClick={onToggleSidebar}
@@ -174,7 +174,7 @@ export default function ChatPane(props: Props) {
         >
           <Code2 size={16} />
           {artifactCount > 0 && !canvasOpen && (
-            <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-arc-dim px-1 text-[9px] font-bold text-white">
+            <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-arc-solid px-1 text-[9px] font-bold text-white">
               {artifactCount}
             </span>
           )}
@@ -191,7 +191,19 @@ export default function ChatPane(props: Props) {
         </div>
       )}
 
-      <div ref={scroller} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-y-auto">
+      <div
+        ref={scroller}
+        onScroll={onScroll}
+        id="conversation"
+        role="log"
+        aria-label="Conversation"
+        // Streamed text arrives a few characters at a time; reading each one out
+        // would be unusable. The status line below announces start and finish.
+        aria-live="off"
+        tabIndex={0}
+        data-print-flow
+        className="relative min-h-0 flex-1 overflow-y-auto"
+      >
         {messages.length === 0 ? (
           <div className="flex h-full items-center justify-center p-6">
             <div className="w-full max-w-md text-center">
@@ -220,7 +232,7 @@ export default function ChatPane(props: Props) {
               ) : (
                 <button
                   onClick={onOpenSettings}
-                  className="rounded-lg bg-arc-dim px-4 py-2 text-[13px] font-medium text-white transition hover:bg-arc"
+                  className="rounded-lg bg-arc-solid px-4 py-2 text-[13px] font-medium text-white transition hover:bg-arc-solid-hover"
                 >
                   Add an API key
                 </button>
@@ -275,7 +287,7 @@ export default function ChatPane(props: Props) {
               setPinned(true);
               scroller.current?.scrollTo({
                 top: scroller.current.scrollHeight,
-                behavior: "smooth",
+                behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
               });
             }}
             className="sticky bottom-4 left-1/2 z-10 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-line bg-raised text-ink-dim shadow-lg transition hover:text-ink"
@@ -285,6 +297,8 @@ export default function ChatPane(props: Props) {
           </button>
         )}
       </div>
+
+      <ReplyAnnouncer streaming={streaming} />
 
       <Composer
         value={input}
@@ -302,6 +316,25 @@ export default function ChatPane(props: Props) {
         disabled={!anyKey}
         placeholder={anyKey ? "Ask JARVIS anything…" : "Add an API key in Settings to start"}
       />
+    </div>
+  );
+}
+
+/**
+ * Tells a screen reader when a reply starts and finishes — and nothing in
+ * between. Hidden visually; present in the page.
+ */
+function ReplyAnnouncer({ streaming }: { streaming: boolean }) {
+  const [text, setText] = useState("");
+  const was = useRef(false);
+  useEffect(() => {
+    if (streaming && !was.current) setText("JARVIS is replying");
+    else if (!streaming && was.current) setText("JARVIS has finished replying");
+    was.current = streaming;
+  }, [streaming]);
+  return (
+    <div role="status" aria-live="polite" className="sr-only" data-reply-status>
+      {text}
     </div>
   );
 }

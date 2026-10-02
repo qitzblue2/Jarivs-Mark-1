@@ -24,6 +24,8 @@ export const COMMANDS: SlashCommand[] = [
   { name: "archive", summary: "Archive this chat", kind: "action" },
   { name: "export", summary: "Download this chat as Markdown", kind: "action" },
   { name: "instructions", summary: "Edit this chat's own instructions", kind: "action" },
+  { name: "theme", summary: "Switch between system, dark and light", kind: "action" },
+  { name: "help", summary: "Show keyboard shortcuts", kind: "action" },
   {
     name: "summarize",
     summary: "Ask for a summary of this chat",

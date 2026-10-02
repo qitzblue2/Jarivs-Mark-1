@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Star, X } from "lucide-react";
 import { formatTime } from "@/lib/format";
 import { useEscape } from "@/lib/hooks/use-escape";
+import { useDialogFocus } from "@/lib/hooks/use-dialog-focus";
 import type { StarredItem } from "@/lib/starred";
 
 interface Props {
@@ -40,16 +41,19 @@ export default function SavedPanel({ open, onClose, onOpen }: Props) {
     };
   }, [open]);
 
+  const dialogRef = useDialogFocus(open);
   if (!open) return null;
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm sm:items-center"
       onClick={onClose}
     >
       <div
         className="w-full max-w-xl rounded-xl border border-line bg-panel shadow-2xl"
         role="dialog"
+        aria-modal="true"
         aria-label="Saved messages"
         onClick={(e) => e.stopPropagation()}
       >

@@ -73,7 +73,7 @@ export default function DisplayPanel() {
     <div className="space-y-2">
       <div className="flex items-center gap-2 text-[11.5px]">
         {live ? (
-          <Monitor size={12} className="shrink-0 text-green-400" />
+          <Monitor size={12} className="shrink-0 text-ok" />
         ) : (
           <MonitorOff size={12} className="shrink-0 text-ink-faint" />
         )}

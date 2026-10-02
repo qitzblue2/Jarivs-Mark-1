@@ -11,8 +11,13 @@ import { authConfigured, openNetwork, requiresAuth, SESSION_COOKIE, verifyToken 
  */
 export const config = {
   // Static assets and the login page itself stay reachable, or you could
-  // never log in and the ONNX models would 401.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|login|api/auth|models/|ort/|worklets/).*)"],
+  // never log in and the ONNX models would 401. The manifest and icons are
+  // here too: a browser fetches them without your session cookie, so behind
+  // the login they would redirect to an HTML page and "Install app" would
+  // quietly never appear. They hold nothing but a name and a picture.
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|icon.png|apple-icon.png|icons/|login|api/auth|models/|ort/|worklets/).*)",
+  ],
 };
 
 export async function proxy(req: NextRequest) {

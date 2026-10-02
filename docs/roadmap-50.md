@@ -41,14 +41,14 @@ opt-in, and every write and command still waits for approval.
 - [x] 28. Read a reply aloud, from any message
 
 ## D. Appearance and accessibility
-- [ ] 29. Light, dark or system theme
-- [ ] 30. Text size and density
-- [ ] 31. Keyboard shortcuts dialog (`?`)
-- [ ] 32. Resizable sidebar
-- [ ] 33. Accessibility pass — focus rings, skip link, reduced motion, landmarks
-- [ ] 34. Installable app — manifest and icons
-- [ ] 35. Print stylesheet for chats
-- [ ] 36. Offline banner
+- [x] 29. Light, dark or system theme
+- [x] 30. Text size and density
+- [x] 31. Keyboard shortcuts dialog (`?`)
+- [x] 32. Resizable sidebar
+- [x] 33. Accessibility pass — focus rings, skip link, reduced motion, landmarks
+- [x] 34. Installable app — manifest and icons
+- [x] 35. Print stylesheet for chats
+- [x] 36. Offline banner
 
 ## E. Models and memory
 - [ ] 37. Persona presets

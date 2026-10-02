@@ -210,6 +210,12 @@ on your own machine.
 | Commands | `/` in the box — `/new`, `/pin`, `/archive`, `/export`, `/instructions`, `/summarize` |
 | Your own shortcuts | Settings → **Saved prompts**, then `/name` |
 | Hear a reply | **Listen** under it |
+| Light, dark or system theme | Settings → **Appearance**, or `/theme` to cycle |
+| Bigger text, tighter spacing | Settings → **Appearance** |
+| Widen or narrow the chat list | Drag its right edge (double-click resets) |
+| See every shortcut | `?` (outside a text box), or `/help` |
+| Print a chat | `Ctrl/Cmd + P` — just the conversation |
+| Install it as an app | The install icon in Chrome's or Edge's address bar, or **Add to Home Screen** |
 | Voice mode | `Ctrl/Cmd + J` |
 | Open code in the canvas | Automatic, or the **Canvas** button on any code block |
 | Close the canvas | `Esc` |
@@ -260,6 +266,54 @@ editor; everything else gets syntax highlighting, copy and download.
   export/import.
 - **Listen.** Reads a reply aloud with the browser's own voice — the words, not
   the markdown or the code. Press again to stop.
+
+### Look, feel and accessibility
+
+- **Theme.** System (follows your OS and changes with it, live), Dark or Light.
+  It is applied by a tiny script before the page first paints, so a light theme
+  doesn't start with a dark flash while the app loads. Code blocks stay dark in
+  both themes.
+- **Text size and density.** Four text sizes for messages and the message box
+  (the sidebar and controls keep theirs — use your browser's zoom to enlarge
+  everything), and a compact density that tightens messages and the chat list.
+- **Remembered per device**, in the browser's localStorage, not in Settings: a
+  phone and a desk monitor want different answers. So these are not part of
+  Settings export/import.
+- **Resizable chat list.** Drag its edge between 220 and 480 px. It is a real
+  separator too: focus it and use the arrow keys (Shift for bigger steps),
+  `Home`/`End`, or `Enter` to reset.
+- **Keyboard.** `?` lists every shortcut (the list is generated from the same
+  data the tests press). The first `Tab` stop is a *Skip to the message box*
+  link. Every control shows a focus ring. Dialogs take focus when they open,
+  keep `Tab` inside them, and give focus back to what opened them when they
+  close.
+- **Screen readers.** The page has landmarks (the chat list, the main area, the
+  conversation as a labelled log). Streaming text is not read out character by
+  character; a polite status line announces when a reply starts and when it
+  finishes. Message actions that appear on hover are always shown on touch
+  screens.
+- **Colour.** Every text colour is at least 4.5:1 against the surfaces it sits
+  on, in both themes — a unit test reads the palette out of `globals.css` and
+  checks it. (The old dimmest grey measured 3.1–3.5:1; it was brightened. White
+  text on the accent fill is 5.9:1; the fill is now a deeper blue than the
+  bright accent used for outlines and text.)
+- **Reduced motion.** Respected, including the smooth scroll-to-latest.
+- **Printing.** `Ctrl/Cmd + P` prints only the conversation: no chat list,
+  message box, buttons or canvas; black on white whatever the theme; long
+  messages are unfolded; a message isn't split across pages when avoidable.
+- **Installable.** A web app manifest and icons make Chrome and Edge offer
+  *Install*, and phones *Add to Home Screen*; it then opens in its own window.
+  The manifest and icons are served without a login (a browser fetches them
+  without your session cookie). There is deliberately **no service worker**: an
+  installed copy that cached the app would keep running an old build after you
+  update the server, and the app is useless without the server anyway.
+  Installing needs `localhost` or HTTPS. `npm run icons` redraws the icons.
+- **Offline banner.** A strip across the top when your browser is offline, or
+  when the JARVIS server has stopped answering (it restarted, or you left its
+  network) — the second is the common case for something self-hosted, and the
+  browser's own online flag can't see it, so a small request to `/api/health`
+  every 20 seconds (and when you return to the tab) does. Two failures in a row
+  are needed before it shows.
 
 Model lists are fetched live from each provider, so a deprecated model never
 leaves you stuck (Groq retired its Llama 3.x IDs in June 2026 — a hardcoded
@@ -848,6 +902,7 @@ npm run test:chats  # search, pinning and export
 npm run test:settings  # settings export/import, activity list
 npm run test:organize  # tags, archive, branch, trash, restore-from-backup
 npm run test:composer  # timestamps, saved messages, folding, drafts, up arrow, slash commands
+npm run test:appearance  # theme, text size, shortcuts, resizing, focus, axe scan, print, manifest, offline
 npm run test:security  # login lockout, headers — needs its own server, see the file
 npm run test:sandbox  # self-editing: start with JARVIS_ALLOW_SELF_EDIT=1, see the file
 

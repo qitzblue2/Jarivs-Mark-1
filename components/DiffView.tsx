@@ -11,7 +11,7 @@ export default function DiffView({ diff, className = "" }: { diff: string; class
           : line.startsWith("@@")
             ? "text-arc"
             : line.startsWith("+")
-              ? "bg-emerald-500/10 text-emerald-300"
+              ? "bg-ok/10 text-ok"
               : line.startsWith("-")
                 ? "bg-danger/10 text-danger"
                 : "text-ink-dim";

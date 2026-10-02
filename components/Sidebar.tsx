@@ -49,6 +49,8 @@ interface Props {
   /** Present only when JARVIS may edit its own code. */
   onOpenSandbox?: () => void;
   storageDriver: string;
+  /** Something that lives on the list's right edge — the resize handle — kept inside the landmark. */
+  edge?: React.ReactNode;
 }
 
 function relativeTime(ts: number): string {
@@ -80,6 +82,7 @@ export default function Sidebar({
   onOpenUsage,
   onOpenSandbox,
   storageDriver,
+  edge,
 }: Props) {
   const [query, setQuery] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -243,7 +246,7 @@ export default function Sidebar({
   const menuChat = menu ? chats.find((c) => c.id === menu.id) : undefined;
 
   return (
-    <aside className="flex h-full w-full flex-col border-r border-line bg-panel" aria-label="Chats">
+    <aside className="relative flex h-full w-full flex-col border-r border-line bg-panel" aria-label="Chats">
       <div className="flex items-center gap-2 px-3 py-3">
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-arc-dim/15 text-[11px] font-bold text-arc ring-1 ring-arc-dim/30">
           J
@@ -325,7 +328,7 @@ export default function Sidebar({
                   title={on ? "Clear the filter" : `Show only chats tagged ${tag}`}
                   aria-pressed={on}
                   className={`rounded-full px-2 py-0.5 text-[10.5px] transition ${
-                    on ? "bg-arc-dim text-white" : "bg-raised text-ink-dim hover:text-arc"
+                    on ? "bg-arc-solid text-white" : "bg-raised text-ink-dim hover:text-arc"
                   }`}
                 >
                   #{tag} <span className="opacity-60">{count}</span>
@@ -438,6 +441,7 @@ export default function Sidebar({
           onInstructions={() => onEditInstructions(menuChat.id)}
         />
       )}
+      {edge}
     </aside>
   );
 }

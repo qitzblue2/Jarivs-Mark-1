@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { SlidersHorizontal, X } from "lucide-react";
 import { MAX_PERSONA } from "@/lib/chat-ops";
 import { useEscape } from "@/lib/hooks/use-escape";
+import { useDialogFocus } from "@/lib/hooks/use-dialog-focus";
 
 interface Props {
   open: boolean;
@@ -27,16 +28,19 @@ export default function ChatInstructions({ open, title, value, onSave, onClose }
     if (open) setDraft(value ?? "");
   }, [open, value]);
 
+  const dialogRef = useDialogFocus(open);
   if (!open) return null;
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm sm:items-center"
       onClick={onClose}
     >
       <div
         className="w-full max-w-lg rounded-xl border border-line bg-panel shadow-2xl"
         role="dialog"
+        aria-modal="true"
         aria-label="Chat instructions"
         onClick={(e) => e.stopPropagation()}
       >
@@ -84,7 +88,7 @@ export default function ChatInstructions({ open, title, value, onSave, onClose }
               onSave(draft.trim() || null);
               onClose();
             }}
-            className="rounded-md bg-arc-dim px-3 py-1.5 text-[13px] font-medium text-white hover:bg-arc"
+            className="rounded-md bg-arc-solid px-3 py-1.5 text-[13px] font-medium text-white hover:bg-arc-solid-hover"
           >
             Save
           </button>

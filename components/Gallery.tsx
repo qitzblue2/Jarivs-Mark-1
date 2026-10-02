@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Download, ImageIcon, Monitor, Pencil, Trash2, X } from "lucide-react";
 import Lightbox, { showOnDisplay } from "./Lightbox";
 import { useEscape } from "@/lib/hooks/use-escape";
+import { useDialogFocus } from "@/lib/hooks/use-dialog-focus";
 
 interface Picture {
   id: string;
@@ -58,15 +59,20 @@ export default function Gallery({ open, onClose, onEdit }: Props) {
     else setNote("Couldn't delete that picture.");
   }
 
+  const dialogRef = useDialogFocus(open);
   if (!open) return null;
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm sm:items-center"
       onClick={onClose}
     >
       <div
         className="w-full max-w-4xl rounded-xl border border-line bg-panel shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Pictures"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-line-soft px-4 py-3">
@@ -84,7 +90,7 @@ export default function Gallery({ open, onClose, onEdit }: Props) {
           <p className="border-b border-line-soft px-4 py-2 text-[12px] text-warn">{note}</p>
         )}
 
-        <div className="max-h-[70vh] overflow-y-auto p-4">
+        <div className="max-h-[70vh] overflow-y-auto p-4" tabIndex={0} role="region" aria-label="Picture list">
           {pictures.length === 0 ? (
             <p className="py-10 text-center text-[13px] text-ink-faint">
               {loading

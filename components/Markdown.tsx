@@ -15,6 +15,14 @@ interface Props {
   onOpenInCanvas?: (index: number) => void;
 }
 
+/**
+ * Code blocks are dark in both themes, so the bar above one is too: fixed
+ * colours (GitHub's dark palette, which the highlighter already uses), not the
+ * theme's. All of them read at 4.5:1 or better on #161b22.
+ */
+const toolButton =
+  "flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-[#9da7b3] transition hover:bg-[#30363d] hover:text-[#e6edf3]";
+
 function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -31,10 +39,10 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
   return (
     <button
       onClick={copy}
-      className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-ink-dim transition hover:bg-line hover:text-ink"
+      className={toolButton}
       title={label}
     >
-      {copied ? <Check size={12} className="text-arc" /> : <Copy size={12} />}
+      {copied ? <Check size={12} className="text-[#58a6ff]" /> : <Copy size={12} />}
       {copied ? "Copied" : label}
     </button>
   );
@@ -116,8 +124,6 @@ function saveAs(name: string, text: string, type = "text/plain") {
   URL.revokeObjectURL(url);
 }
 
-const toolButton =
-  "flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-ink-dim transition hover:bg-line hover:text-ink";
 
 /** A fenced code block: copy, download as a file, wrap long lines, open in the canvas. */
 function CodeBlock({
@@ -134,13 +140,13 @@ function CodeBlock({
   const lang = languageOf(children);
 
   return (
-    <div className="group my-3 overflow-hidden rounded-lg border border-line bg-[#0d1117]" data-code-block>
-      <div className="flex items-center justify-between border-b border-line-soft bg-panel px-2 py-1">
-        <span className="font-mono text-[11px] text-ink-faint">{lang === "text" ? "code" : lang}</span>
+    <div className="group my-3 overflow-hidden rounded-lg border border-[#30363d] bg-[#0d1117]" data-code-block>
+      <div className="flex items-center justify-between border-b border-[#30363d] bg-[#161b22] px-2 py-1">
+        <span className="font-mono text-[11px] text-[#9da7b3]">{lang === "text" ? "code" : lang}</span>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setWrap((w) => !w)}
-            className={`${toolButton} ${wrap ? "text-arc" : ""}`}
+            className={`${toolButton} ${wrap ? "!text-[#58a6ff]" : ""}`}
             title={wrap ? "Stop wrapping long lines" : "Wrap long lines"}
             aria-pressed={wrap}
           >
@@ -157,7 +163,7 @@ function CodeBlock({
             Download
           </button>
           {onOpenInCanvas && (
-            <button onClick={() => onOpenInCanvas(index)} className={`${toolButton} hover:text-arc`} title="Open in code canvas">
+            <button onClick={() => onOpenInCanvas(index)} className={toolButton} title="Open in code canvas">
               <PanelRightOpen size={12} />
               Canvas
             </button>
@@ -167,7 +173,8 @@ function CodeBlock({
       </div>
       {/* Must stay a real <pre>: swapping it for a div drops
           white-space: pre and collapses every newline. */}
-      <pre className={`m-0 p-3 ${wrap ? "whitespace-pre-wrap break-words" : "overflow-x-auto"}`}>{children}</pre>
+      {/* Focusable so the keyboard can scroll a long line; the arrow keys do. */}
+      <pre tabIndex={0} className={`m-0 p-3 ${wrap ? "whitespace-pre-wrap break-words" : "overflow-x-auto"}`}>{children}</pre>
     </div>
   );
 }
@@ -214,7 +221,7 @@ function MarkdownBody({ content, onOpenInCanvas }: Props) {
   let blockIndex = -1;
 
   return (
-    <div className="prose-jarvis text-[15px]">
+    <div className="prose-jarvis chat-text">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}

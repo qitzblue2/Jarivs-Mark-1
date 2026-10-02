@@ -243,7 +243,7 @@ export default function VoiceMode({
               <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-line">
                 <div
                   className={`h-full rounded-full transition-all duration-75 ${
-                    level > 0.01 ? "bg-green-400" : "bg-ink-faint"
+                    level > 0.01 ? "bg-ok" : "bg-ink-faint"
                   }`}
                   style={{ width: `${Math.min(100, level * 400)}%` }}
                 />

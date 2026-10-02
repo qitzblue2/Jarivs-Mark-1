@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { RotateCcw, Trash2, X } from "lucide-react";
 import { useEscape } from "@/lib/hooks/use-escape";
+import { useDialogFocus } from "@/lib/hooks/use-dialog-focus";
 
 interface Trashed {
   id: string;
@@ -47,6 +48,7 @@ export default function TrashPanel({ open, onClose, onRestored }: Props) {
     if (open) void load();
   }, [open, load]);
 
+  const dialogRef = useDialogFocus(open);
   if (!open) return null;
 
   async function restore(id: string) {
@@ -77,12 +79,14 @@ export default function TrashPanel({ open, onClose, onRestored }: Props) {
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm sm:items-center"
       onClick={onClose}
     >
       <div
         className="w-full max-w-lg rounded-xl border border-line bg-panel shadow-2xl"
         role="dialog"
+        aria-modal="true"
         aria-label="Trash"
         onClick={(e) => e.stopPropagation()}
       >

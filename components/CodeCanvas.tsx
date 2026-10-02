@@ -164,6 +164,7 @@ export default function CodeCanvas({ artifacts, activeId, onSelect, onClose }: P
                 >
                   <code
                     className="hljs bg-transparent p-0"
+                    style={{ overflow: "visible" }}
                     dangerouslySetInnerHTML={{ __html: `${highlighted}\n` }}
                   />
                 </pre>

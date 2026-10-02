@@ -1,11 +1,13 @@
 "use client";
 
+import { useDialogFocus } from "@/lib/hooks/use-dialog-focus";
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink, KeyRound, RotateCcw, X } from "lucide-react";
 import { DEFAULT_PERSONA } from "@/lib/persona";
 import { exportSettings, importSettings } from "@/lib/settings-io";
 import { cleanPrompts, type SavedPrompt } from "@/lib/prompts";
 import PromptsEditor from "./PromptsEditor";
+import AppearanceSettings from "./AppearanceSettings";
 import { DEFAULT_GREETING } from "@/lib/voice/session";
 import { ttsEngines, getTts, kokoroEngine, QUALITY_OPTIONS, type KokoroQuality } from "@/lib/voice/tts";
 import type { ProviderState } from "./ModelPicker";
@@ -119,6 +121,7 @@ export default function SettingsDialog({
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  const dialogRef = useDialogFocus(open);
   if (!open) return null;
 
   function save() {
@@ -156,16 +159,23 @@ export default function SettingsDialog({
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm sm:items-center"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-lg rounded-xl border border-line bg-panel shadow-2xl">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        className="w-full max-w-lg rounded-xl border border-line bg-panel shadow-2xl"
+      >
         <header className="flex items-center justify-between border-b border-line px-4 py-3">
-          <h2 className="text-sm font-semibold">Settings</h2>
+          <h2 id="settings-title" className="text-sm font-semibold">Settings</h2>
           <button
             onClick={onClose}
+            aria-label="Close"
             className="rounded p-1 text-ink-faint transition hover:bg-raised hover:text-ink"
           >
             <X size={16} />
@@ -269,6 +279,7 @@ export default function SettingsDialog({
               value={draft.persona}
               onChange={(e) => setDraft((d) => ({ ...d, persona: e.target.value }))}
               rows={8}
+              aria-label="Persona"
               className="w-full resize-y rounded-md border border-line bg-base px-2.5 py-2 font-mono text-[11.5px] leading-relaxed text-ink outline-none transition focus:border-arc-dim"
             />
           </section>
@@ -294,6 +305,8 @@ export default function SettingsDialog({
               </span>
             </label>
           </section>
+
+          <AppearanceSettings />
 
           <PromptsEditor prompts={draft.prompts ?? []} onChange={(prompts) => setDraft((d) => ({ ...d, prompts }))} />
 
@@ -484,6 +497,7 @@ export default function SettingsDialog({
             </div>
             <input
               type="range"
+              aria-label="Temperature"
               min={0}
               max={1.5}
               step={0.05}
@@ -555,7 +569,7 @@ export default function SettingsDialog({
           </button>
           <button
             onClick={save}
-            className="rounded-md bg-arc-dim px-3 py-1.5 text-[13px] font-medium text-white transition hover:bg-arc"
+            className="rounded-md bg-arc-solid px-3 py-1.5 text-[13px] font-medium text-white transition hover:bg-arc-solid-hover"
           >
             Save
           </button>

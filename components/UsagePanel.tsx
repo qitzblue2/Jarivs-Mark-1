@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Gauge, RefreshCw, X } from "lucide-react";
 import { useEscape } from "@/lib/hooks/use-escape";
+import { useDialogFocus } from "@/lib/hooks/use-dialog-focus";
 
 interface DayUsage {
   requests: number;
@@ -99,6 +100,7 @@ export default function UsagePanel({ open, onClose }: Props) {
 
   useEscape(open, onClose);
 
+  const dialogRef = useDialogFocus(open);
   if (!open) return null;
 
   const today = new Date().toISOString().slice(0, 10);
@@ -108,6 +110,7 @@ export default function UsagePanel({ open, onClose }: Props) {
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm sm:items-center"
       onClick={onClose}
     >
@@ -115,14 +118,15 @@ export default function UsagePanel({ open, onClose }: Props) {
         className="w-full max-w-2xl rounded-xl border border-line bg-panel shadow-2xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
+        aria-modal="true"
         aria-label="Usage"
       >
         <div className="flex items-center justify-between border-b border-line-soft px-4 py-3">
-          <div className="flex items-center gap-2 text-sm font-semibold">
+          <h2 className="flex items-center gap-2 text-sm font-semibold">
             <Gauge size={16} className="text-arc" />
             Usage
             <span className="text-[11px] font-normal text-ink-faint">today, UTC — when free tiers reset</span>
-          </div>
+          </h2>
           <div className="flex items-center gap-1">
             <button onClick={() => void refresh()} className="rounded-md p-1.5 text-ink-faint hover:bg-raised hover:text-ink" title="Refresh">
               <RefreshCw size={14} />
@@ -133,7 +137,7 @@ export default function UsagePanel({ open, onClose }: Props) {
           </div>
         </div>
 
-        <div className="max-h-[70vh] overflow-y-auto p-4">
+        <div className="max-h-[70vh] overflow-y-auto p-4" tabIndex={0} role="region" aria-label="Usage details">
           {error && <p className="mb-3 text-[12px] text-warn">{error}</p>}
 
           {rows.length === 0 ? (

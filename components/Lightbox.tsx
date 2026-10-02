@@ -3,6 +3,7 @@
 import { createPortal } from "react-dom";
 import { Download, Monitor, X } from "lucide-react";
 import { useEscape } from "@/lib/hooks/use-escape";
+import { useDialogFocus } from "@/lib/hooks/use-dialog-focus";
 
 interface Props {
   src: string;
@@ -34,14 +35,17 @@ export async function showOnDisplay(src: string, title?: string): Promise<string
  */
 export default function Lightbox({ src, alt, onClose }: Props) {
   useEscape(true, onClose);
+  const dialogRef = useDialogFocus(true);
 
   const own = isOwnImage(src);
 
   return createPortal(
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-[60] flex flex-col items-center justify-center bg-black/90 p-4"
       onClick={onClose}
       role="dialog"
+      aria-modal="true"
       aria-label={alt || "Picture"}
     >
       <div className="absolute right-3 top-3 flex gap-1" onClick={(e) => e.stopPropagation()}>

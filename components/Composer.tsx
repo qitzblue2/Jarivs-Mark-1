@@ -171,6 +171,7 @@ export default function Composer({
 
   return (
     <div
+      data-composer
       className="border-t border-line bg-base/95 px-3 py-3 backdrop-blur sm:px-6 sm:py-4"
       onDragOver={(e) => {
         e.preventDefault();
@@ -188,12 +189,14 @@ export default function Composer({
           <ul
             id="slash-menu"
             role="listbox"
+            aria-label="Commands"
             data-slash-menu
             className="absolute inset-x-0 bottom-full z-20 mb-2 max-h-60 overflow-y-auto rounded-lg border border-line bg-panel p-1 shadow-2xl"
           >
             {matches.map((m, i) => (
               <li
                 key={`${m.kind}-${m.name}`}
+                id={`slash-option-${i}`}
                 role="option"
                 aria-selected={i === highlight}
                 // mousedown, not click: click fires after the textarea has lost focus and the menu is gone.
@@ -241,6 +244,7 @@ export default function Composer({
           </button>
           <textarea
             ref={ref}
+            id="message-input"
             value={value}
             onChange={(e) => {
               // Typing ends any browsing: what's here is yours now.
@@ -248,16 +252,17 @@ export default function Composer({
               onChange(e.target.value);
             }}
             onKeyDown={onKeyDown}
-            role="combobox"
-            aria-expanded={menuOpen}
-            aria-controls="slash-menu"
-            aria-autocomplete="list"
+            // A plain textbox that points at the menu while it is open. A
+            // textarea may not take the combobox role, and a screen reader
+            // still hears the highlighted command through activedescendant.
+            aria-controls={menuOpen ? "slash-menu" : undefined}
+            aria-activedescendant={menuOpen ? `slash-option-${Math.min(highlight, matches.length - 1)}` : undefined}
             aria-label="Message"
             onPaste={onPaste}
             rows={1}
             disabled={disabled}
             placeholder={placeholder ?? "Ask JARVIS anything…"}
-            className="max-h-[220px] flex-1 resize-none bg-transparent px-2 py-1.5 text-[15px] text-ink outline-none placeholder:text-ink-faint disabled:opacity-50"
+            className="max-h-[220px] flex-1 resize-none bg-transparent px-2 py-1.5 chat-text text-ink outline-none placeholder:text-ink-faint disabled:opacity-50"
           />
           {/* Beside Send rather than hidden in Settings: it changes what the
               turn costs and what it may touch, so it should be a visible
@@ -285,7 +290,7 @@ export default function Composer({
             <button
               onClick={() => onSend(false)}
               disabled={disabled || !value.trim()}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-arc-dim text-white transition hover:bg-arc disabled:cursor-not-allowed disabled:bg-line disabled:text-ink-faint"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-arc-solid text-white transition hover:bg-arc-solid-hover disabled:cursor-not-allowed disabled:bg-line disabled:text-ink-faint"
               title="Send (Enter)"
             >
               <ArrowUp size={16} />
