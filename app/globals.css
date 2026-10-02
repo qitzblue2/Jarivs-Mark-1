@@ -1,0 +1,349 @@
+@import "tailwindcss";
+
+/* Never look for class names in build output. The real project's .gitignore
+   already keeps .next out, but Tailwind doesn't read the .gitignore of the
+   sandbox copy (lib/sandbox), whose build cache is binary — scanned as text
+   it produced a "class" that broke this stylesheet. */
+@source not "../.next";
+
+@theme {
+  /* Deep, low-glare workspace palette. The light theme below overrides these
+     same names, so nothing in a component has to know which theme is on. */
+  --color-base: #0a0d13;
+  --color-panel: #0f131c;
+  --color-raised: #151b27;
+  --color-line: #202839;
+  --color-line-soft: #19202e;
+  --color-line-strong: #2c3548;
+
+  --color-ink: #dbe3f0;
+  --color-ink-dim: #8e9bb3;
+  /* Captions and icons. Brightened from #5d6880, which measured 3.1–3.5:1 on
+     these surfaces — below the 4.5:1 that small text needs. */
+  --color-ink-faint: #7b87a0;
+
+  /* Arc-reactor cyan. */
+  --color-arc: #38bdf8;
+  --color-arc-dim: #0ea5e9;
+  /* A fill that white text can sit on (5.9:1). The bright accents above are for
+     text and outlines on dark surfaces; as a button fill they gave white text
+     only 2.8:1. */
+  --color-arc-solid: #0369a1;
+  --color-arc-solid-hover: #075985;
+  --color-warn: #fbbf24;
+  --color-danger: #f87171;
+  --color-ok: #6ee7b7;
+
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+/* --- Light theme ---------------------------------------------------------
+   Chosen in Settings → Appearance (or by the system); the choice lands on
+   <html data-theme>. Every text colour here is at least 4.5:1 on the surfaces
+   it is used on — checked by test/unit.test.mts, and by axe in the browser
+   suite. Code blocks stay dark in both themes. */
+html[data-theme="light"] {
+  color-scheme: light;
+  --color-base: #f6f8fb;
+  --color-panel: #ffffff;
+  --color-raised: #eaeff6;
+  --color-line: #d3dae6;
+  --color-line-soft: #e3e8f0;
+  --color-line-strong: #b9c4d6;
+
+  --color-ink: #111827;
+  --color-ink-dim: #414d63;
+  --color-ink-faint: #525d70;
+
+  --color-arc: #075985;
+  --color-arc-dim: #0369a1;
+  --color-warn: #92400e;
+  --color-danger: #b91c1c;
+  --color-ok: #047857;
+}
+html[data-theme="dark"],
+html:not([data-theme]) {
+  color-scheme: dark;
+}
+
+/* --- Text size and density -----------------------------------------------
+   Text size scales what you read and write — messages and the composer —
+   rather than the whole interface; the browser's own zoom does that. */
+html[data-text="small"] { --text-scale: 0.9; }
+html[data-text="large"] { --text-scale: 1.15; }
+html[data-text="xlarge"] { --text-scale: 1.3; }
+
+.chat-text {
+  font-size: calc(15px * var(--text-scale, 1));
+}
+
+html[data-density="compact"] [data-msg] {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+html[data-density="compact"] [data-chat-row] {
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+html[data-density="compact"] .prose-jarvis {
+  line-height: 1.5;
+}
+html[data-density="compact"] .prose-jarvis > * + * {
+  margin-top: 0.55em;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-base);
+  color: var(--color-ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbars that don't shout. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 99px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-line-strong);
+  background-clip: content-box;
+}
+
+/* --- Markdown ----------------------------------------------------------- */
+
+.prose-jarvis {
+  line-height: 1.7;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.prose-jarvis > * + * {
+  margin-top: 0.85em;
+}
+.prose-jarvis h1,
+.prose-jarvis h2,
+.prose-jarvis h3,
+.prose-jarvis h4 {
+  font-weight: 600;
+  line-height: 1.3;
+  margin-top: 1.4em;
+}
+.prose-jarvis h1 { font-size: 1.4rem; }
+.prose-jarvis h2 { font-size: 1.2rem; }
+.prose-jarvis h3 { font-size: 1.05rem; }
+.prose-jarvis a {
+  color: var(--color-arc);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prose-jarvis ul,
+.prose-jarvis ol {
+  padding-left: 1.4em;
+}
+.prose-jarvis ul { list-style: disc; }
+.prose-jarvis ol { list-style: decimal; }
+.prose-jarvis li + li { margin-top: 0.3em; }
+.prose-jarvis blockquote {
+  border-left: 3px solid var(--color-line);
+  padding-left: 0.9em;
+  color: var(--color-ink-dim);
+}
+.prose-jarvis :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--color-raised);
+  border: 1px solid var(--color-line-soft);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+.prose-jarvis hr {
+  border-color: var(--color-line);
+}
+.prose-jarvis table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+.prose-jarvis th,
+.prose-jarvis td {
+  border: 1px solid var(--color-line);
+  padding: 0.4em 0.7em;
+  text-align: left;
+}
+.prose-jarvis th {
+  background: var(--color-raised);
+  font-weight: 600;
+}
+
+/* highlight.js renders into pre > code; we own the frame around it. */
+.prose-jarvis pre {
+  margin: 0;
+}
+.prose-jarvis pre code.hljs {
+  background: transparent;
+  padding: 0;
+  /* highlight.js makes the <code> itself a scroll box; the <pre> around it is
+     the one that should scroll (and take keyboard focus). */
+  overflow: visible;
+  font-family: var(--font-mono);
+  font-size: calc(0.82rem * var(--text-scale, 1));
+  line-height: 1.6;
+}
+
+/* Blinking caret while a reply streams in. */
+.streaming-caret::after {
+  content: "";
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--color-arc);
+  animation: caret 1s steps(2) infinite;
+}
+@keyframes caret {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* A message arrived at from the Saved list: pulse it so the eye finds it. */
+@keyframes jarvis-flash {
+  0% { background-color: rgb(56 189 248 / 0.22); }
+  100% { background-color: transparent; }
+}
+.flash {
+  animation: jarvis-flash 1.8s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .flash {
+    animation: none;
+    background-color: rgb(56 189 248 / 0.12);
+  }
+}
+
+/* --- Keyboard focus --------------------------------------------------------
+   Every control shows where focus is — a component that wants something else
+   sets its own outline (and the browser suite fails if one has none). Fields
+   draw it inside their own box so it isn't clipped by a rounded container. */
+:focus-visible {
+  outline: 2px solid var(--color-arc);
+  outline-offset: 2px;
+}
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="log"]:focus-visible {
+  outline-offset: -2px;
+}
+
+/* --- Printing a chat -------------------------------------------------------
+   The app is a fixed-height shell with its own scrolling panes, which prints
+   as one clipped page. For print, everything is let out to its natural height
+   and only the conversation is kept: no sidebar, composer, buttons, banners or
+   canvas. Always dark-on-white, whatever the theme, and a message is not
+   split across pages when it can be helped. */
+@media print {
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #000 !important;
+    -webkit-print-color-adjust: economy;
+  }
+  /* Every layout box between <body> and the messages: unclip it. */
+  body *,
+  body *::before,
+  body *::after {
+    --color-base: #fff;
+    --color-panel: #fff;
+    --color-raised: #f3f4f6;
+    --color-line: #d1d5db;
+    --color-line-soft: #e5e7eb;
+    --color-ink: #000;
+    --color-ink-dim: #374151;
+    --color-ink-faint: #4b5563;
+    --color-arc: #0b4f75;
+    --color-arc-dim: #0b4f75;
+    animation: none !important;
+    transition: none !important;
+  }
+  .h-dvh,
+  .h-full,
+  .min-h-0,
+  .overflow-hidden,
+  .overflow-y-auto,
+  .overflow-auto {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  aside,
+  [data-composer],
+  [data-skip-link],
+  [data-sandbox-banner],
+  [data-connection-banner],
+  [data-sidebar-resizer],
+  [data-no-print],
+  header button,
+  button[title="Jump to latest"],
+  [role="dialog"] {
+    display: none !important;
+  }
+  [data-print-flow] {
+    display: block !important;
+    width: auto !important;
+  }
+  [data-msg] {
+    break-inside: avoid;
+    border-color: #d1d5db !important;
+    background: #fff !important;
+    padding-top: 0.6rem !important;
+    padding-bottom: 0.6rem !important;
+  }
+  /* Messages' own action rows (copy, save, branch…) are for the screen. */
+  [data-msg] button,
+  [data-code-block] button,
+  [data-code-block] [data-code-download] {
+    display: none !important;
+  }
+  [data-collapsed="true"] {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  [data-collapsed="true"] > span {
+    display: none !important;
+  }
+  pre {
+    white-space: pre-wrap !important;
+    break-inside: avoid;
+  }
+  a {
+    color: #0b4f75 !important;
+  }
+}
