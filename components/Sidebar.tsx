@@ -15,6 +15,7 @@ import {
   Plus,
   Search,
   Settings,
+  Star,
   Trash2,
   X,
 } from "lucide-react";
@@ -38,6 +39,8 @@ interface Props {
   onDuplicate: (id: string) => void;
   onEditInstructions: (id: string) => void;
   onOpenTrash: () => void;
+  /** Messages you've starred, across every chat. */
+  onOpenSaved: () => void;
   /** A backup zip chosen by the user, to be restored. */
   onRestoreFile: (file: File) => void;
   onOpenSettings: () => void;
@@ -70,6 +73,7 @@ export default function Sidebar({
   onDuplicate,
   onEditInstructions,
   onOpenTrash,
+  onOpenSaved,
   onRestoreFile,
   onOpenSettings,
   onOpenGallery,
@@ -389,6 +393,13 @@ export default function Sidebar({
                 title="Add what's missing from a backup zip. Nothing existing is overwritten."
               >
                 Restore
+              </button>
+              <button
+                onClick={onOpenSaved}
+                className="flex items-center gap-1 underline-offset-2 hover:text-arc hover:underline"
+                title="Messages you've saved, from every chat"
+              >
+                <Star size={10} /> Saved
               </button>
               <button
                 onClick={onOpenTrash}

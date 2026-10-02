@@ -43,6 +43,14 @@ import { FsMemoryStore } from "../lib/memory/fs-store";
 import { readZipDirectory, readZipEntry, ZipError } from "../lib/backup/unzip";
 import { describeRestore, restoreBackup } from "../lib/backup/restore";
 import { deflateRawSync } from "node:zlib";
+import { describeStats, estimateReplyTokens, formatTime, isLongMessage } from "../lib/format";
+import { toCsv } from "../lib/csv";
+import { PromptHistory } from "../lib/history";
+import { MAX_DRAFTS, clearDraft, draftKey, loadDraft, saveDraft } from "../lib/drafts";
+import { COMMAND_NAMES, matchSlash, parseSlash } from "../lib/slash";
+import { MAX_PROMPTS, cleanPrompts, normalizePromptName } from "../lib/prompts";
+import { listStarred } from "../lib/starred";
+import { codeFileName } from "../lib/codeblocks";
 import { SentenceSplitter, splitSentences } from "../lib/voice/tts/sentences";
 import { Speaker } from "../lib/voice/tts/speaker";
 import { encodeWav, durationOf } from "../lib/voice/wav";
@@ -1897,6 +1905,174 @@ console.log("\n--- restoring from a backup ---");
 
   delete process.env.JARVIS_DATA_DIR;
   rmSync(dir, { recursive: true, force: true });
+}
+
+console.log("\n--- times, speeds and long messages ---");
+{
+  const now = new Date(2026, 9, 2, 15, 30).getTime(); // Fri 2 Oct 2026, 15:30 local
+  const at = (y: number, m: number, d: number, h: number, min: number) => new Date(y, m, d, h, min).getTime();
+  eq("today is just the clock", formatTime(at(2026, 9, 2, 9, 5), now, "en-GB"), "09:05");
+  eq("yesterday says so", formatTime(at(2026, 9, 1, 23, 59), now, "en-GB"), "Yesterday 23:59");
+  eq("earlier this year gives the date", formatTime(at(2026, 8, 20, 8, 0), now, "en-US"), "Sep 20, 08:00 AM");
+  eq("another year gives the year too", formatTime(at(2025, 11, 31, 22, 15), now, "en-US"), "Dec 31, 2025, 10:15 PM");
+  eq("just after midnight is yesterday, not today", formatTime(at(2026, 9, 1, 0, 1), now, "en-GB"), "Yesterday 00:01");
+
+  eq("a quick reply is in milliseconds", describeStats({ totalMs: 850, firstTokenMs: 0, tokens: 3 }), "850ms");
+  eq("seconds get a decimal when short", describeStats({ totalMs: 1400, firstTokenMs: 300, tokens: 10 }), "1.4s · first word 300ms");
+  eq("and speed once there's enough to measure", describeStats({ totalMs: 5300, firstTokenMs: 300, tokens: 250 }), "5.3s · first word 300ms · ~50 tok/s");
+  eq("a three-word answer is not a million tokens a second", describeStats({ totalMs: 90, firstTokenMs: 40, tokens: 4 }).includes("tok/s"), false);
+  eq("a long wait reads as minutes", describeStats({ totalMs: 125_000, firstTokenMs: 0, tokens: 0 }), "2m 5s");
+  eq("tokens are the usual four characters", [estimateReplyTokens("abcd"), estimateReplyTokens("abcde"), estimateReplyTokens("")], [1, 2, 0]);
+
+  eq("a short message isn't folded", isLongMessage("hello\nthere"), false);
+  eq("a very long one is", isLongMessage("x".repeat(1501)), true);
+  eq("twenty lines are fine, twenty-one fold", [isLongMessage("l\n".repeat(19) + "l"), isLongMessage("l\n".repeat(20) + "l")], [false, true]);
+}
+
+console.log("\n--- tables as CSV ---");
+{
+  eq("plain cells", toCsv([["a", "b"], ["1", "2"]]), "a,b\r\n1,2");
+  eq("a comma or quote is quoted, quotes doubled", toCsv([["x, y", 'say "hi"']]), '"x, y","say ""hi"""');
+  eq("a newline stays inside its cell", toCsv([["line1\nline2"]]), '"line1\nline2"');
+  eq("a cell with edge spaces is quoted so they survive", toCsv([[" padded "]]), '" padded "');
+  eq("a formula is neutralised", toCsv([["=HYPERLINK(\"http://evil\",\"x\")", "=1+1"]]), `"'=HYPERLINK(""http://evil"",""x"")",'=1+1`);
+  eq("so is an @ function or a tab", toCsv([["@SUM(A1)", "\tcmd"]]), "'@SUM(A1),'\tcmd");
+  eq("a + or - that starts a formula is too", toCsv([["+cmd|' /C calc'!A0", "-2+3+cmd"]]), `'+cmd|' /C calc'!A0,'-2+3+cmd`);
+  eq("but real numbers stay numbers", toCsv([["-5", "+3.2%", "-1,250.50", "42"]]), '-5,+3.2%,"-1,250.50",42');
+  eq("an empty table is empty", toCsv([]), "");
+}
+
+console.log("\n--- the up arrow ---");
+{
+  const h = new PromptHistory(["first", "second", "third"]);
+  eq("starts not browsing", h.browsing, false);
+  eq("down does nothing before browsing", h.down(), null);
+  eq("up gives the newest", h.up("half typed"), "third");
+  eq("and is now browsing", h.browsing, true);
+  eq("up again goes older", [h.up("x"), h.up("x")], ["second", "first"]);
+  eq("the oldest is a wall", h.up("x"), null);
+  eq("down comes forward", [h.down(), h.down()], ["second", "third"]);
+  eq("past the newest it gives back what was half typed", [h.down(), h.browsing], ["half typed", false]);
+  eq("and down past that does nothing", h.down(), null);
+  const again = new PromptHistory(["a"]);
+  again.up("draft"); again.reset();
+  eq("typing resets it", [again.browsing, again.up("new")], [false, "a"]);
+  eq("an empty history has nothing to recall", new PromptHistory([]).up("x"), null);
+
+  // The chat is re-saved while you browse; a copy of the same list must not lose your place.
+  const kept = new PromptHistory(["a", "b", "c"]);
+  kept.up("typed");
+  kept.up("typed");
+  eq("an identical list is ignored", kept.sync(["a", "b", "c"]), false);
+  eq("so you are still where you were", [kept.browsing, kept.up("typed")], [true, "a"]);
+  eq("a list with something new replaces it", kept.sync(["a", "b", "c", "d"]), true);
+  eq("and starts from the newest again", [kept.browsing, kept.up("typed")], [false, "d"]);
+}
+
+console.log("\n--- drafts ---");
+{
+  const mem = () => {
+    const data = new Map<string, string>();
+    return { data, getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v), removeItem: (k: string) => void data.delete(k) };
+  };
+  const store = mem();
+  saveDraft(store, "chat-a", "half a message");
+  saveDraft(store, "chat-b", "another");
+  eq("a draft comes back", [loadDraft(store, "chat-a"), loadDraft(store, "chat-b")], ["half a message", "another"]);
+  eq("one with no draft is empty", loadDraft(store, "chat-z"), "");
+  saveDraft(store, "chat-a", "   ");
+  eq("blanking it removes it", loadDraft(store, "chat-a"), "");
+  clearDraft(store, "chat-b");
+  eq("clearing leaves nothing behind", [...store.data.keys()].filter((k) => k.startsWith("jarvis.draft.")), []);
+  eq("the new-chat screen has its own key", [draftKey(null), draftKey(undefined), draftKey("abc")], ["new", "new", "abc"]);
+
+  saveDraft(store, "big", "x".repeat(50_000));
+  eq("a draft is cut at 20,000 characters", loadDraft(store, "big").length, 20_000);
+
+  const crowded = mem();
+  for (let i = 0; i < MAX_DRAFTS + 10; i++) saveDraft(crowded, `c${i}`, `draft ${i}`);
+  const kept = [...crowded.data.keys()].filter((k) => k.startsWith("jarvis.draft."));
+  eq("only the most recent drafts are kept", kept.length, MAX_DRAFTS);
+  eq("the oldest went", [loadDraft(crowded, "c0"), loadDraft(crowded, `c${MAX_DRAFTS + 9}`)], ["", `draft ${MAX_DRAFTS + 9}`]);
+  saveDraft(crowded, "c20", "edited again");
+  eq("editing one makes it recent again", loadDraft(crowded, "c20"), "edited again");
+
+  const broken = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("quota"); }, removeItem: () => { throw new Error("blocked"); } };
+  eq("storage that throws never breaks typing", [loadDraft(broken, "x"), (saveDraft(broken, "x", "hi"), clearDraft(broken, "x"), "no error")], ["", "no error"]);
+  const garbled = mem();
+  garbled.data.set("jarvis.drafts.index", "{not json");
+  saveDraft(garbled, "ok", "still works");
+  eq("a damaged index is recovered from", loadDraft(garbled, "ok"), "still works");
+}
+
+console.log("\n--- slash commands and saved prompts ---");
+{
+  const prompts = [{ name: "review", text: "Review this code for bugs." }, { name: "tldr", text: "Give me the short version." }];
+  eq("typing / lists everything, commands first", matchSlash("/", prompts).map((m) => m.name), [...COMMAND_NAMES, "review", "tldr"]);
+  eq("it narrows as you type", matchSlash("/ne", prompts).map((m) => m.name), ["new"]);
+  eq("saved prompts are offered too", matchSlash("/re", prompts).map((m) => `${m.kind}:${m.name}`), ["prompt:review"]);
+  eq("nothing matches nonsense", matchSlash("/zzz", prompts), []);
+  eq("once there's a space, the menu is done", matchSlash("/new now", prompts), []);
+  eq("a path isn't a command being typed", matchSlash("/usr/bin", prompts), []);
+  eq("plain text has no menu", matchSlash("hello", prompts), []);
+
+  eq("/new is the new-chat command", parseSlash("/new", prompts)?.kind, "action");
+  eq("with trailing words, they become args", parseSlash("/summarize focus on risks", prompts)?.args, "focus on risks");
+  eq("a saved prompt is found by name", [parseSlash("/review", prompts)?.kind, parseSlash("/review", prompts)?.text], ["prompt", "Review this code for bugs."]);
+  eq("args go with prompts too", parseSlash("/review the auth code", prompts)?.args, "the auth code");
+  eq("a file path is a message, not a command", parseSlash("/usr/bin/env is missing on this machine", prompts), null);
+  eq("so is an unknown word", parseSlash("/nonsense", prompts), null);
+  eq("so is text that merely mentions one", parseSlash("please run /new", prompts), null);
+  eq("and a lone slash", parseSlash("/", prompts), null);
+  eq("commands are lowercase only", parseSlash("/NEW", prompts), null);
+
+  eq("a name is made typeable", normalizePromptName("  /Code Review!  "), "code-review");
+  eq("a built-in command's name is refused", [normalizePromptName("new"), normalizePromptName("/summarize")], [null, null]);
+  eq("an empty name is nothing", normalizePromptName("***"), null);
+  eq("names are cut to 24", normalizePromptName("a".repeat(60))!.length, 24);
+  const cleaned = cleanPrompts([
+    { name: "Review", text: "ok" }, { name: "review", text: "duplicate name" }, { name: "new", text: "reserved" },
+    { name: "empty", text: "   " }, { name: "typed", text: 5 }, "junk", null, { name: "long", text: "x".repeat(20_000) },
+  ]);
+  eq("bad entries are dropped, not repaired", cleaned.map((p) => p.name), ["review", "long"]);
+  eq("the first of two with one name wins", cleaned[0].text, "ok");
+  eq("text is cut to 8,000", cleaned[1].text.length, 8000);
+  eq("there's a ceiling on how many", cleanPrompts(Array.from({ length: 80 }, (_, i) => ({ name: `p${i}`, text: "t" }))).length, MAX_PROMPTS);
+  eq("not a list is no prompts", cleanPrompts("x"), []);
+
+  // They travel with the settings file, and are validated on the way in.
+  const out = exportSettings({ ...DEFAULT_SETTINGS, prompts });
+  eq("an export carries them", (out.settings as { prompts?: unknown }).prompts, prompts);
+  const imported = importSettings(JSON.stringify({ format: FORMAT, version: 1, settings: { prompts: [{ name: "ok", text: "fine" }, { name: "new", text: "reserved" }] } }), DEFAULT_SETTINGS);
+  eq("an import keeps the good ones only", imported.ok && imported.settings.prompts, [{ name: "ok", text: "fine" }]);
+}
+
+console.log("\n--- saved messages ---");
+{
+  const chat = (id: string, title: string, msgs: Partial<Chat["messages"][number]>[]): Chat => ({
+    id, title, createdAt: 1, updatedAt: 1,
+    messages: msgs.map((m, i) => ({ id: `${id}-${i}`, role: "user", content: "x", createdAt: i, ...m })) as Chat["messages"],
+  });
+  const items = listStarred([
+    chat("a", "Alpha", [{ createdAt: 10, starred: true, content: "an old star" }, { createdAt: 20, content: "not starred" }]),
+    chat("b", "Beta", [{ createdAt: 30, role: "assistant", model: "m1", starred: true, content: "<think>hidden</think>The  visible\nanswer" }]),
+  ]);
+  eq("only starred messages, newest first", items.map((i) => i.messageId), ["b-0", "a-0"]);
+  eq("each knows its chat", items.map((i) => [i.chatId, i.chatTitle]), [["b", "Beta"], ["a", "Alpha"]]);
+  eq("the preview is what was seen, tidied", items[0].preview, "The visible answer");
+  eq("the model is kept for replies", [items[0].model, items[1].model], ["m1", undefined]);
+  eq("no stars, no list", listStarred([chat("c", "C", [{ content: "plain" }])]), []);
+  eq("a long message gets a short preview", listStarred([chat("d", "D", [{ starred: true, content: "w ".repeat(500) }])])[0].preview.length <= 280, true);
+  eq("the limit is honoured", listStarred([chat("e", "E", Array.from({ length: 10 }, () => ({ starred: true }))) ], 3).length, 3);
+
+  const base: Chat = { id: "q", title: "Q", createdAt: 1, updatedAt: 100, messages: [] };
+  const quiet = applyChatPatch(base, { messages: [], quiet: true }, 9999);
+  const loud = applyChatPatch(base, { messages: [] }, 9999);
+  eq("a quiet save leaves the chat where it was", [quiet.ok && quiet.chat.updatedAt, loud.ok && loud.chat.updatedAt], [100, 9999]);
+
+  eq("a block saved as a file keeps the name in its comment", codeFileName("// server.js\nconsole.log(1)", "javascript"), "server.js");
+  eq("otherwise it's named for its language", [codeFileName("print(1)", "python"), codeFileName("SELECT 1", "sql"), codeFileName("hello", "text")], ["snippet.py", "snippet.sql", "snippet.txt"]);
+  eq("a language it doesn't know is plain text", codeFileName("x", "klingon"), "snippet.txt");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

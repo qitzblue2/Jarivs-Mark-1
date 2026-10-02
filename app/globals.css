@@ -162,3 +162,18 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* A message arrived at from the Saved list: pulse it so the eye finds it. */
+@keyframes jarvis-flash {
+  0% { background-color: rgb(56 189 248 / 0.22); }
+  100% { background-color: transparent; }
+}
+.flash {
+  animation: jarvis-flash 1.8s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .flash {
+    animation: none;
+    background-color: rgb(56 189 248 / 0.12);
+  }
+}

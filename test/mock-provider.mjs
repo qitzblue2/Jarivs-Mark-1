@@ -271,6 +271,22 @@ const server = http.createServer((req, res) => {
         );
       }
 
+      // A table, including cells a hostile page could have planted: a comma, and a spreadsheet formula.
+      if (/show me a table/i.test(prompt) && !alreadyRanTool) {
+        return streamText(
+          res,
+          [
+            "Here you go.",
+            "",
+            "| Name | Score |",
+            "|---|---|",
+            "| Ada, Countess | 10 |",
+            '| =HYPERLINK("http://evil.example","click") | -5 |',
+          ].join("\n"),
+          finish,
+        );
+      }
+
       // Proves per-chat instructions reach the model: the system prompt is what
       // changes, so the reply is keyed off it.
       const personaMessage = messages.find((m) => m.role === "system");

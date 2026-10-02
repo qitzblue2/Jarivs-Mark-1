@@ -205,6 +205,11 @@ on your own machine.
 | See what's been spent | The gauge at the top of the sidebar |
 | Back up everything | **Back up** at the bottom of the sidebar — one zip |
 | Move your setup | Settings → **Export** / **Import** — a file without API keys |
+| Save a message | **Save** under it; **Saved** at the bottom of the sidebar lists every one |
+| Recall what you sent | `↑` in an empty box, `↓` to come back |
+| Commands | `/` in the box — `/new`, `/pin`, `/archive`, `/export`, `/instructions`, `/summarize` |
+| Your own shortcuts | Settings → **Saved prompts**, then `/name` |
+| Hear a reply | **Listen** under it |
 | Voice mode | `Ctrl/Cmd + J` |
 | Open code in the canvas | Automatic, or the **Canvas** button on any code block |
 | Close the canvas | `Esc` |
@@ -219,6 +224,42 @@ are looking for what you saw.
 The **code canvas** takes any code JARVIS writes, gives it a tab, and lets you
 edit it. HTML, CSS, JS and SVG run live in a sandboxed iframe next to the
 editor; everything else gets syntax highlighting, copy and download.
+
+### Messages and the composer
+
+- **Time and speed.** Every message carries its time (the full date on hover).
+  A reply also shows how long it took, how long before the first word, and a
+  speed in tokens per second. The speed is estimated from the length of the
+  reply, not counted by the provider — the `~` in front of it says so.
+- **Saved messages.** **Save** keeps a message for later; **Saved** in the
+  sidebar lists them across every chat, and opening one jumps to it and
+  flashes it. Saving doesn't count as activity, so the chat doesn't jump to the
+  top of the sidebar.
+- **Long messages fold.** Something you paste past 20 lines or 1,500
+  characters is folded to a preview with **Show all (N lines)**. Replies are
+  never folded.
+- **Tables and code.** A table has a **Copy CSV** button that copies it as a
+  spreadsheet would want it — values that start with `=`, `+`, `-` or `@` are
+  neutralised so a pasted formula can't run, while real numbers stay numbers.
+  Code blocks scroll by default, can **Wrap**, and **Download** under the name
+  in their first-line comment (`// bounce.html`) if they have one.
+- **Drafts.** Half-written text is kept per chat in your browser, so switching
+  chats to look something up — or reloading — doesn't lose it. The last 50
+  edited drafts are kept; nothing leaves the browser.
+- **Up arrow.** In an empty box, `↑` walks back through what you've sent in
+  this chat and `↓` comes forward again, ending at whatever you had half-typed.
+  It only acts on the first or last line, so it never steals the cursor from
+  text you're editing.
+- **Slash commands.** Type `/` for a menu. Commands run (`/new`, `/pin`,
+  `/archive`, `/export`, `/instructions`) or fill the box for you to read before
+  sending (`/summarize`). Anything else beginning with a slash — a file path —
+  is sent as an ordinary message.
+- **Saved prompts.** Settings → **Saved prompts** holds up to 50 named prompts.
+  `/name` puts one in the box, and anything you type after it is added. A name
+  that is already a built-in command is flagged. They travel with Settings
+  export/import.
+- **Listen.** Reads a reply aloud with the browser's own voice — the words, not
+  the markdown or the code. Press again to stop.
 
 Model lists are fetched live from each provider, so a deprecated model never
 leaves you stuck (Groq retired its Llama 3.x IDs in June 2026 — a hardcoded
@@ -806,6 +847,7 @@ npm run test:voice  # voice mode, with a WAV standing in for a microphone
 npm run test:chats  # search, pinning and export
 npm run test:settings  # settings export/import, activity list
 npm run test:organize  # tags, archive, branch, trash, restore-from-backup
+npm run test:composer  # timestamps, saved messages, folding, drafts, up arrow, slash commands
 npm run test:security  # login lockout, headers — needs its own server, see the file
 npm run test:sandbox  # self-editing: start with JARVIS_ALLOW_SELF_EDIT=1, see the file
 

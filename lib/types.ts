@@ -38,6 +38,22 @@ export interface Message {
   error?: string;
   /** Tool rounds this assistant turn ran, for the UI trace and for replay. */
   toolRounds?: ToolRound[];
+  /** How long the reply took, measured in the browser. Assistant messages only. */
+  stats?: ResponseStats;
+  /** Saved for later; listed under Saved across every chat. */
+  starred?: boolean;
+}
+
+/**
+ * Timings for one reply. `tokens` is an estimate from the reply's length (the
+ * providers don't report usage mid-stream), so anything derived from it is
+ * shown as approximate.
+ */
+export interface ResponseStats {
+  totalMs: number;
+  /** Until the first word arrived. */
+  firstTokenMs: number;
+  tokens: number;
 }
 
 /** One request/response cycle of tool use inside a single assistant turn. */

@@ -50,7 +50,8 @@ export type PatchResult =
 /**
  * Apply a PATCH body to a chat.
  *
- * Only `messages` counts as activity and moves the chat up the list. Pinning,
+ * Only saving `messages` counts as activity and moves the chat up the list
+ * (unless the save says `quiet: true`). Pinning,
  * tagging, archiving, renaming, changing the model or setting its instructions
  * are tidying: doing them shouldn't reshuffle what you were last working on.
  *
@@ -70,7 +71,9 @@ export function applyChatPatch(existing: Chat, body: unknown, now = Date.now()):
   if ("messages" in patch) {
     if (!Array.isArray(patch.messages)) return { ok: false, error: "messages must be a list." };
     next.messages = patch.messages as Message[];
-    next.updatedAt = now;
+    // `quiet` is for edits to the messages that aren't conversation — starring
+    // one — which shouldn't move an old chat to the top of the list.
+    if (patch.quiet !== true) next.updatedAt = now;
   }
   if ("provider" in patch && typeof patch.provider === "string") next.provider = patch.provider;
   if ("model" in patch && typeof patch.model === "string") next.model = patch.model;

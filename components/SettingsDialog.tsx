@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { ExternalLink, KeyRound, RotateCcw, X } from "lucide-react";
 import { DEFAULT_PERSONA } from "@/lib/persona";
 import { exportSettings, importSettings } from "@/lib/settings-io";
+import { cleanPrompts, type SavedPrompt } from "@/lib/prompts";
+import PromptsEditor from "./PromptsEditor";
 import { DEFAULT_GREETING } from "@/lib/voice/session";
 import { ttsEngines, getTts, kokoroEngine, QUALITY_OPTIONS, type KokoroQuality } from "@/lib/voice/tts";
 import type { ProviderState } from "./ModelPicker";
@@ -47,6 +49,8 @@ export interface Settings {
    * can be woken rather than simply being unavailable.
    */
   macs: Record<string, string>;
+  /** Text you reuse, called up from the composer with "/name". */
+  prompts: SavedPrompt[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -62,6 +66,7 @@ export const DEFAULT_SETTINGS: Settings = {
   endpoints: {},
   budgets: {},
   macs: {},
+  prompts: [],
 };
 
 interface Props {
@@ -117,7 +122,8 @@ export default function SettingsDialog({
   if (!open) return null;
 
   function save() {
-    onSave(draft);
+    // Half-filled prompts (no name, a taken name) are dropped, not saved broken.
+    onSave({ ...draft, prompts: cleanPrompts(draft.prompts) });
     onClose();
   }
 
@@ -288,6 +294,8 @@ export default function SettingsDialog({
               </span>
             </label>
           </section>
+
+          <PromptsEditor prompts={draft.prompts ?? []} onChange={(prompts) => setDraft((d) => ({ ...d, prompts }))} />
 
           <MemoryEditor open={open} />
 

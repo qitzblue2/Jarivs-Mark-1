@@ -1,9 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, ListChecks, Paperclip, Square } from "lucide-react";
 import Attachments from "./Attachments";
 import { fileToAttachment } from "@/lib/attach-client";
+import { PromptHistory } from "@/lib/history";
+import { matchSlash, type SlashMatch } from "@/lib/slash";
+import type { SavedPrompt } from "@/lib/prompts";
 import type { Attachment } from "@/lib/types";
 
 interface Props {
@@ -23,6 +26,12 @@ interface Props {
   onAttach: (attachments: Attachment[]) => void;
   onRemoveAttachment: (id: string) => void;
   onAttachError: (message: string) => void;
+  /** What you've sent in this chat, oldest first, for the up arrow. */
+  history: string[];
+  /** Saved prompts, offered alongside the built-in commands after a "/". */
+  prompts: SavedPrompt[];
+  /** A command or prompt was chosen from the slash menu. */
+  onSlash: (match: SlashMatch) => void;
 }
 
 export default function Composer({
@@ -37,11 +46,39 @@ export default function Composer({
   onAttach,
   onRemoveAttachment,
   onAttachError,
+  history,
+  prompts,
+  onSlash,
 }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [reading, setReading] = useState(false);
+
+  // --- the slash menu ---
+  const [highlight, setHighlight] = useState(0);
+  // Escape closes the menu for what is typed now; typing more reopens it.
+  const [dismissedFor, setDismissedFor] = useState<string | null>(null);
+  const matches = useMemo(() => matchSlash(value, prompts), [value, prompts]);
+  const menuOpen = matches.length > 0 && dismissedFor !== value;
+  useEffect(() => setHighlight(0), [value]);
+
+  // --- up-arrow history ---
+  const recall = useRef(new PromptHistory(history));
+  useEffect(() => {
+    recall.current.sync(history);
+  }, [history]);
+
+  const caretToEnd = () =>
+    requestAnimationFrame(() => {
+      const el = ref.current;
+      if (el) el.setSelectionRange(el.value.length, el.value.length);
+    });
+
+  function choose(match: SlashMatch) {
+    setDismissedFor(null);
+    onSlash({ ...match, args: "" });
+  }
 
   const ingest = useCallback(
     async (files: FileList | File[]) => {
@@ -71,7 +108,53 @@ export default function Composer({
   }, [value]);
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (e.nativeEvent.isComposing) return;
+
+    if (menuOpen) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const step = e.key === "ArrowDown" ? 1 : -1;
+        setHighlight((h) => (h + step + matches.length) % matches.length);
+        return;
+      }
+      if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+        e.preventDefault();
+        choose(matches[Math.min(highlight, matches.length - 1)]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setDismissedFor(value);
+        return;
+      }
+    }
+
+    // Up/Down walk back through what you've sent — but only from an empty box
+    // or one already showing a recalled message, and only from its first/last
+    // line, so the arrows never steal the cursor from text you're editing.
+    const el = e.currentTarget;
+    const onFirstLine = !value.slice(0, el.selectionStart).includes("\n");
+    const onLastLine = !value.slice(el.selectionEnd).includes("\n");
+    if (e.key === "ArrowUp" && onFirstLine && (value === "" || recall.current.browsing)) {
+      const older = recall.current.up(value);
+      if (older !== null) {
+        e.preventDefault();
+        onChange(older);
+        caretToEnd();
+      }
+      return;
+    }
+    if (e.key === "ArrowDown" && onLastLine && recall.current.browsing) {
+      const newer = recall.current.down();
+      if (newer !== null) {
+        e.preventDefault();
+        onChange(newer);
+        caretToEnd();
+      }
+      return;
+    }
+
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (!streaming) onSend(false);
     }
@@ -100,7 +183,36 @@ export default function Composer({
         void ingest(e.dataTransfer.files);
       }}
     >
-      <div className="mx-auto max-w-3xl">
+      <div className="relative mx-auto max-w-3xl">
+        {menuOpen && (
+          <ul
+            id="slash-menu"
+            role="listbox"
+            data-slash-menu
+            className="absolute inset-x-0 bottom-full z-20 mb-2 max-h-60 overflow-y-auto rounded-lg border border-line bg-panel p-1 shadow-2xl"
+          >
+            {matches.map((m, i) => (
+              <li
+                key={`${m.kind}-${m.name}`}
+                role="option"
+                aria-selected={i === highlight}
+                // mousedown, not click: click fires after the textarea has lost focus and the menu is gone.
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  choose(m);
+                }}
+                onMouseEnter={() => setHighlight(i)}
+                className={`flex cursor-pointer items-baseline gap-3 rounded-md px-3 py-1.5 text-[13px] ${
+                  i === highlight ? "bg-raised text-ink" : "text-ink-dim"
+                }`}
+              >
+                <span className="font-mono text-arc">/{m.name}</span>
+                <span className="min-w-0 flex-1 truncate text-[12px] text-ink-faint">{m.summary}</span>
+                {m.kind === "prompt" && <span className="text-[10px] uppercase tracking-wider text-ink-faint">prompt</span>}
+              </li>
+            ))}
+          </ul>
+        )}
         <Attachments attachments={attachments} onRemove={onRemoveAttachment} />
 
         <div
@@ -130,8 +242,17 @@ export default function Composer({
           <textarea
             ref={ref}
             value={value}
-            onChange={(e) => onChange(e.target.value)}
+            onChange={(e) => {
+              // Typing ends any browsing: what's here is yours now.
+              recall.current.reset();
+              onChange(e.target.value);
+            }}
             onKeyDown={onKeyDown}
+            role="combobox"
+            aria-expanded={menuOpen}
+            aria-controls="slash-menu"
+            aria-autocomplete="list"
+            aria-label="Message"
             onPaste={onPaste}
             rows={1}
             disabled={disabled}
@@ -174,7 +295,7 @@ export default function Composer({
         <div className="mt-1.5 px-1 text-[11px] text-ink-faint">
           {dragging
             ? "Drop to attach"
-            : "Enter to send · Shift+Enter for a new line · drag, paste or clip a file"}
+            : "Enter to send · Shift+Enter for a new line · / for commands · ↑ for your last message"}
         </div>
       </div>
     </div>

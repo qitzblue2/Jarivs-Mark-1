@@ -28,17 +28,17 @@ opt-in, and every write and command still waits for approval.
 - [x] 17. Search operators — `tag:`, `is:pinned`, `is:archived`
 
 ## C. Messages and composer
-- [ ] 18. Message timestamps
-- [ ] 19. Response stats — time taken and tokens per second
-- [ ] 20. Star messages, with a Saved view across chats
-- [ ] 21. Collapse long messages
-- [ ] 22. Copy a table as CSV
-- [ ] 23. Code blocks: download as a file, wrap toggle
-- [ ] 24. Draft text kept per chat
-- [ ] 25. Up-arrow recalls your previous message
-- [ ] 26. Slash commands — `/new`, `/pin`, `/export`, `/summarize` …
-- [ ] 27. Saved prompts library
-- [ ] 28. Read a reply aloud, from any message
+- [x] 18. Message timestamps
+- [x] 19. Response stats — time taken and tokens per second
+- [x] 20. Star messages, with a Saved view across chats
+- [x] 21. Collapse long messages
+- [x] 22. Copy a table as CSV
+- [x] 23. Code blocks: download as a file, wrap toggle
+- [x] 24. Draft text kept per chat
+- [x] 25. Up-arrow recalls your previous message
+- [x] 26. Slash commands — `/new`, `/pin`, `/export`, `/summarize` …
+- [x] 27. Saved prompts library
+- [x] 28. Read a reply aloud, from any message
 
 ## D. Appearance and accessibility
 - [ ] 29. Light, dark or system theme

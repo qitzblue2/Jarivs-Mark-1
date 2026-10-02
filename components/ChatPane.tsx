@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, AudioLines, Code2, FileDown, GitBranch, Info, Menu, Mic, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import Message from "./Message";
 import Composer from "./Composer";
 import ApprovalCard, { type PendingApproval } from "./ApprovalCard";
 import ModelPicker, { type ProviderState } from "./ModelPicker";
 import type { Attachment, Chat } from "@/lib/types";
+import type { SavedPrompt } from "@/lib/prompts";
+import type { SlashMatch } from "@/lib/slash";
 
 interface Props {
   chat: Chat | null;
@@ -20,6 +22,12 @@ interface Props {
   onEditMessage: (messageId: string, content: string) => void;
   onOpenInCanvas: (messageId: string, blockIndex: number) => void;
   onBranch: (messageId: string) => void;
+  onStar: (messageId: string) => void;
+  onSpeak: (messageId: string) => void;
+  /** The message being read aloud, if any. */
+  speakingId: string | null;
+  prompts: SavedPrompt[];
+  onSlash: (match: SlashMatch) => void;
   /** Open the dialog for this chat's own instructions. */
   onEditInstructions: () => void;
   providers: ProviderState[];
@@ -53,7 +61,7 @@ const STARTERS = [
 export default function ChatPane(props: Props) {
   const {
     chat, streaming, streamingMessageId, input, onInputChange, onSend, onStop,
-    onRegenerate, onEditMessage, onOpenInCanvas, onBranch, onEditInstructions, providers, provider, model,
+    onRegenerate, onEditMessage, onOpenInCanvas, onBranch, onStar, onSpeak, speakingId, prompts, onSlash, onEditInstructions, providers, provider, model,
     onModelChange, onOpenSettings, onToggleSidebar, onToggleCanvas, canvasOpen,
     artifactCount, notice, onDismissNotice, onStartVoice,
     attachments, onAttach, onRemoveAttachment, onAttachError,
@@ -64,6 +72,13 @@ export default function ChatPane(props: Props) {
   const [pinned, setPinned] = useState(true);
 
   const messages = chat?.messages ?? [];
+  // What you've sent here, for the composer's up arrow. Memoised on the list
+  // itself so the composer isn't handed a new array — and told to forget
+  // where it was in your history — on every keystroke.
+  const sent = useMemo(
+    () => (chat?.messages ?? []).filter((m) => m.role === "user" && m.content.trim()).map((m) => m.content),
+    [chat?.messages],
+  );
   const lastId = messages[messages.length - 1]?.id;
   const tail = messages[messages.length - 1]?.content.length ?? 0;
 
@@ -232,6 +247,9 @@ export default function ChatPane(props: Props) {
                 onEdit={onEditMessage}
                 onOpenInCanvas={onOpenInCanvas}
                 onBranch={streaming ? undefined : onBranch}
+                onStar={streaming ? undefined : onStar}
+                onSpeak={onSpeak}
+                speaking={speakingId === message.id}
               />
             ))}
             {approvals.length > 0 && (
@@ -278,6 +296,9 @@ export default function ChatPane(props: Props) {
         onAttach={onAttach}
         onRemoveAttachment={onRemoveAttachment}
         onAttachError={onAttachError}
+        history={sent}
+        prompts={prompts}
+        onSlash={onSlash}
         disabled={!anyKey}
         placeholder={anyKey ? "Ask JARVIS anything…" : "Add an API key in Settings to start"}
       />

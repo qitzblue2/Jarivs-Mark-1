@@ -1,5 +1,6 @@
 import type { Settings } from "@/components/SettingsDialog";
 import { QUALITY_OPTIONS } from "@/lib/voice/tts/kokoro";
+import { cleanPrompts } from "@/lib/prompts";
 
 /**
  * Moving your setup between browsers.
@@ -97,6 +98,8 @@ export function importSettings(raw: string, current: Settings): ImportResult {
   set("ttsVoice", str(incoming.ttsVoice, 80));
   const quality = QUALITY_OPTIONS.find((q) => q.id === incoming.ttsQuality);
   if (quality) set("ttsQuality", quality.id);
+  // Saved prompts are text you wrote, not a secret, so they travel with the file.
+  if (Array.isArray(incoming.prompts)) set("prompts", cleanPrompts(incoming.prompts));
   set("endpoints", cleanEndpoints(incoming.endpoints));
   set("budgets", cleanBudgets(incoming.budgets));
 

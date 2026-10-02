@@ -32,6 +32,15 @@ function detectFilename(code: string): string | null {
 }
 
 /**
+ * What to call a code block saved as a file: the name in its first-line
+ * comment if it has one, otherwise `snippet.<ext>` for its language. Used for
+ * the Download button, so a saved file lands with a sensible name and type.
+ */
+export function codeFileName(code: string, lang: string): string {
+  return detectFilename(code) ?? `snippet.${EXTENSIONS[lang.toLowerCase()] ?? "txt"}`;
+}
+
+/**
  * Pull fenced code blocks out of markdown.
  *
  * Tracks the exact fence length so a block containing a shorter fence (a

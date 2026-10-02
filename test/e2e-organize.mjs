@@ -40,10 +40,12 @@ const gamma = await seed(`Gamma ideas ${RUN}`, "ideas for gamma");
 
 // An old chat, written straight to disk: the API stamps "now" on anything it saves.
 const oldId = `old-${RUN}`;
-mkdirSync("data/chats", { recursive: true });
+// Where the server keeps its chats: the same JARVIS_DATA_DIR it was started with, if any.
+const CHATS = `${process.env.JARVIS_DATA_DIR ?? "data"}/chats`;
+mkdirSync(CHATS, { recursive: true });
 const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
 writeFileSync(
-  `data/chats/${oldId}.json`,
+  `${CHATS}/${oldId}.json`,
   JSON.stringify({
     id: oldId, title: `Old chat ${RUN}`, createdAt: threeDaysAgo, updatedAt: threeDaysAgo,
     messages: [{ id: "o1", role: "user", content: "from a few days ago", createdAt: threeDaysAgo }],

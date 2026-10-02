@@ -2,7 +2,8 @@
 
 import { memo, useCallback, useState } from "react";
 import { splitReasoning } from "@/lib/reasoning";
-import { AlertTriangle, Check, ChevronRight, Copy, GitBranch, Pencil, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, Copy, GitBranch, Pencil, RefreshCw, Square, Star, Volume2, X } from "lucide-react";
+import { describeStats, formatTime, isLongMessage } from "@/lib/format";
 import Markdown from "./Markdown";
 import ToolTrace from "./ToolTrace";
 import Attachments from "./Attachments";
@@ -26,6 +27,12 @@ interface Props {
   onOpenInCanvas?: (messageId: string, blockIndex: number) => void;
   /** Start a new chat from this message, leaving this one as it is. */
   onBranch?: (messageId: string) => void;
+  /** Save or unsave this message; saved ones are listed under Saved. */
+  onStar?: (messageId: string) => void;
+  /** Read this message aloud, or stop if it already is. */
+  onSpeak?: (messageId: string) => void;
+  /** Whether this message is being read aloud right now. */
+  speaking?: boolean;
 }
 
 function MessageBody({
@@ -37,8 +44,12 @@ function MessageBody({
   onEdit,
   onOpenInCanvas,
   onBranch,
+  onStar,
+  onSpeak,
+  speaking,
 }: Props) {
   const [editing, setEditing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState(message.content);
   const [copied, setCopied] = useState(false);
 
@@ -57,6 +68,8 @@ function MessageBody({
   // as if it were the reply, and `forSpeech` drops it for the same reason.
   const { reasoning, answer, thinking } = splitReasoning(message.content);
   const isUser = message.role === "user";
+  // Pasted logs and files are folded; replies are meant to be read in full.
+  const long = isUser && isLongMessage(message.content);
 
   async function copyAll() {
     try {
@@ -110,6 +123,7 @@ function MessageBody({
 
   return (
     <div
+      id={`msg-${message.id}`}
       className={`group px-4 py-5 sm:px-6 ${isUser ? "" : "border-y border-line-soft bg-panel/40"}`}
     >
       <div className="mx-auto flex max-w-3xl gap-3 sm:gap-4">
@@ -124,9 +138,15 @@ function MessageBody({
         </div>
 
         <div className="min-w-0 flex-1">
-          {!isUser && (message.model || message.fellBackFrom) && (
+          {!isUser && (message.model || message.fellBackFrom || message.stats) && (
             <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[11px] text-ink-faint">
               {message.model && <span className="font-mono">{message.model}</span>}
+              {message.stats && (
+                <span data-stats title="Measured in your browser. Speed is estimated from the length of the reply.">
+                  {describeStats(message.stats)}
+                </span>
+              )}
+              {message.starred && <Star size={11} className="fill-warn text-warn" aria-label="Saved" />}
               {message.fellBackFrom && (
                 <span className="flex items-center gap-1 rounded bg-warn/10 px-1.5 py-0.5 text-warn">
                   <AlertTriangle size={10} />
@@ -141,9 +161,26 @@ function MessageBody({
               {message.attachments && message.attachments.length > 0 && (
                 <Attachments attachments={message.attachments} />
               )}
-              <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed">
+              <div
+                className={`relative whitespace-pre-wrap break-words text-[15px] leading-relaxed ${
+                  long && !expanded ? "max-h-64 overflow-hidden" : ""
+                }`}
+                data-collapsed={long && !expanded ? "true" : undefined}
+              >
                 {message.content}
+                {long && !expanded && (
+                  <span className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-base to-transparent" />
+                )}
               </div>
+              {long && (
+                <button
+                  onClick={() => setExpanded((v) => !v)}
+                  className="mt-1 text-[12px] text-arc transition hover:underline"
+                  aria-expanded={expanded}
+                >
+                  {expanded ? "Show less" : `Show all (${message.content.split("\n").length} lines)`}
+                </button>
+              )}
             </div>
           ) : (
             <>
@@ -194,6 +231,28 @@ function MessageBody({
                   Edit
                 </button>
               )}
+              {onStar && (
+                <button
+                  onClick={() => onStar(message.id)}
+                  className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-ink-faint transition hover:bg-raised hover:text-ink"
+                  title={message.starred ? "Remove from Saved" : "Save this message"}
+                  aria-pressed={Boolean(message.starred)}
+                >
+                  <Star size={12} className={message.starred ? "fill-warn text-warn" : ""} />
+                  {message.starred ? "Saved" : "Save"}
+                </button>
+              )}
+              {!isUser && onSpeak && (
+                <button
+                  onClick={() => onSpeak(message.id)}
+                  className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-ink-faint transition hover:bg-raised hover:text-ink"
+                  title={speaking ? "Stop reading" : "Read this reply aloud"}
+                  aria-pressed={Boolean(speaking)}
+                >
+                  {speaking ? <Square size={11} className="fill-arc text-arc" /> : <Volume2 size={12} />}
+                  {speaking ? "Stop" : "Listen"}
+                </button>
+              )}
               {onBranch && (
                 <button
                   onClick={() => onBranch(message.id)}
@@ -213,6 +272,14 @@ function MessageBody({
                   Regenerate
                 </button>
               )}
+              <time
+                dateTime={new Date(message.createdAt).toISOString()}
+                title={new Date(message.createdAt).toLocaleString()}
+                className="ml-auto pl-2 text-[11px] text-ink-faint"
+                data-message-time
+              >
+                {formatTime(message.createdAt)}
+              </time>
             </div>
           )}
         </div>

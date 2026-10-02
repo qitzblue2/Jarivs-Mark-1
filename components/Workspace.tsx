@@ -11,9 +11,15 @@ import Gallery from "./Gallery";
 import UsagePanel from "./UsagePanel";
 import SandboxPanel from "./SandboxPanel";
 import TrashPanel from "./TrashPanel";
+import SavedPanel from "./SavedPanel";
 import ChatInstructions from "./ChatInstructions";
 import type { PendingApproval } from "./ApprovalCard";
-import { kokoroEngine } from "@/lib/voice/tts";
+import { kokoroEngine, getTts } from "@/lib/voice/tts";
+import { forSpeech } from "@/lib/voice/tts/types";
+import { Speaker } from "@/lib/voice/tts/speaker";
+import { parseSlash, type SlashMatch } from "@/lib/slash";
+import { draftKey, loadDraft, saveDraft } from "@/lib/drafts";
+import { estimateReplyTokens } from "@/lib/format";
 import type { ProviderState } from "./ModelPicker";
 import { consumeJarvisStream } from "@/lib/stream";
 import { artifactsFromMessage, artifactsFromMessages } from "@/lib/codeblocks";
@@ -61,6 +67,8 @@ export default function Workspace() {
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [savedOpen, setSavedOpen] = useState(false);
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
   /** The chat whose own instructions are being edited, loaded in full. */
   const [instructionsFor, setInstructionsFor] = useState<{ id: string; title: string; persona?: string } | null>(null);
   const [sandboxOpen, setSandboxOpen] = useState(false);
@@ -246,7 +254,6 @@ export default function Workspace() {
 
   function newChat() {
     setChat(null);
-    setInput("");
     setActiveArtifactId(null);
     setSidebarOpen(false);
   }
@@ -287,7 +294,7 @@ export default function Workspace() {
   }
 
   /** A whole-chat copy (no messageId) or a branch from one message. */
-  async function copyChat(id: string, messageId?: string) {
+  const copyChat = useCallback(async (id: string, messageId?: string) => {
     try {
       const res = await fetch(`/api/chats/${id}/branch`, {
         method: "POST",
@@ -301,7 +308,7 @@ export default function Workspace() {
     } catch {
       setNotice("Couldn't reach the server.");
     }
-  }
+  }, [refreshChats, selectChat]);
 
   async function editInstructions(id: string) {
     try {
@@ -393,6 +400,10 @@ export default function Workspace() {
       let fellBackFrom: string | undefined;
       let errorMessage: string | undefined;
       let toolRounds: ToolRound[] = [];
+      // Measured here, in the browser, so it includes the network — which is
+      // what you actually wait for.
+      const startedAt = Date.now();
+      let firstTokenAt = 0;
 
       // Groq streams fast enough that a setState per token is wasted work.
       let lastPaint = 0;
@@ -454,6 +465,7 @@ export default function Workspace() {
             fellBackFrom = event.fellBackFrom;
             paint(true);
           } else if (event.type === "token") {
+            if (!firstTokenAt) firstTokenAt = Date.now();
             acc += event.value;
             onProgress?.(acc);
             paint();
@@ -500,6 +512,10 @@ export default function Workspace() {
         fellBackFrom,
         error: errorMessage,
         toolRounds: toolRounds.length ? toolRounds : undefined,
+        // Nothing to report for a reply that never produced a word.
+        stats: firstTokenAt
+          ? { totalMs: Date.now() - startedAt, firstTokenMs: firstTokenAt - startedAt, tokens: estimateReplyTokens(acc) }
+          : undefined,
       };
 
       const settled: Chat = {
@@ -531,14 +547,87 @@ export default function Workspace() {
     [provider, model, settings, persist],
   );
 
+  // --- drafts: unsent text, kept per chat ---------------------------------
+  const draftKeyNow = draftKey(chat?.id);
+  const draftKeyRef = useRef(draftKeyNow);
+  draftKeyRef.current = draftKeyNow;
+
+  /** localStorage can be absent or throw (private windows); drafts are a convenience, never a dependency. */
+  const draftStore = () => {
+    try {
+      return window.localStorage;
+    } catch {
+      return null;
+    }
+  };
+
+  /** Every change to the composer text goes through here, so it is saved as it is typed. */
+  const updateInput = useCallback((value: string) => {
+    setInput(value);
+    const store = draftStore();
+    if (store) saveDraft(store, draftKeyRef.current, value);
+  }, []);
+
+  // Coming to a chat, its draft comes back.
+  useEffect(() => {
+    const store = draftStore();
+    setInput(store ? loadDraft(store, draftKeyNow) : "");
+  }, [draftKeyNow]);
+
+  // --- slash commands ------------------------------------------------------
+  function runSlash(match: SlashMatch) {
+    // Text commands and saved prompts fill the box; you read it, then send it.
+    if (match.kind !== "action") {
+      const text = match.text ?? "";
+      updateInput(match.args ? `${text}\n\n${match.args}` : text);
+      return;
+    }
+    updateInput("");
+    const needsChat = ["pin", "archive", "export", "instructions"];
+    if (needsChat.includes(match.name) && !chat) return setNotice("Open a chat first.");
+
+    switch (match.name) {
+      case "new":
+        return newChat();
+      case "pin":
+        return void togglePin(chat!.id, !chats.find((c) => c.id === chat!.id)?.pinned);
+      case "archive":
+        return void archiveChat(chat!.id, true);
+      case "export": {
+        const a = document.createElement("a");
+        a.href = `/api/chats/${chat!.id}/export`;
+        a.click();
+        return;
+      }
+      case "instructions":
+        return void editInstructions(chat!.id);
+    }
+  }
+
   async function send(task = false) {
     const text = input.trim();
     if ((!text && pending.length === 0) || streaming) return;
 
+    // "/new", "/summarize", "/review": a command, not a message. Anything else
+    // that starts with a slash — a file path, say — is sent as written.
+    const slash = pending.length === 0 ? parseSlash(text, settings.prompts ?? []) : null;
+    if (slash) return runSlash(slash);
+
+    // Cleared before anything is awaited: a new chat takes a moment to create,
+    // and whatever is typed in that moment is the next message, not this one.
+    const attachments = pending;
+    updateInput("");
+    setPending([]);
+
     let target = chat;
     if (!target) {
       target = await createChat();
-      if (!target) return;
+      if (!target) {
+        // Nothing was sent, so nothing should be lost.
+        updateInput(text);
+        setPending(attachments);
+        return;
+      }
     }
 
     const userMessage: Message = {
@@ -546,17 +635,15 @@ export default function Workspace() {
       role: "user",
       content: text,
       createdAt: Date.now(),
-      attachments: pending.length > 0 ? pending : undefined,
+      attachments: attachments.length > 0 ? attachments : undefined,
     };
 
     const history = [...target.messages, userMessage];
     const titled: Chat =
       target.title === "New chat" || target.messages.length === 0
-        ? { ...target, title: deriveTitle(text || pending[0]?.name || "Attachment") }
+        ? { ...target, title: deriveTitle(text || attachments[0]?.name || "Attachment") }
         : target;
 
-    setInput("");
-    setPending([]);
     await runTurn(titled, history, undefined, task);
   }
 
@@ -629,6 +716,97 @@ export default function Workspace() {
     },
     [chat, streaming, runTurn],
   );
+
+  // Stable references, like the handlers above: each Message is memoised, and a
+  // handler that changed on every keystroke would re-render and re-highlight
+  // the whole conversation again.
+  const branchFrom = useCallback(
+    (messageId: string) => {
+      if (chat) void copyChat(chat.id, messageId);
+    },
+    [chat, copyChat],
+  );
+
+  /** Save or unsave a message. Quiet: a star isn't activity, so the chat keeps its place in the list. */
+  const toggleStar = useCallback(
+    async (messageId: string) => {
+      if (!chat || streaming) return;
+      const messages = chat.messages.map((m) =>
+        m.id === messageId ? { ...m, starred: m.starred ? undefined : true } : m,
+      );
+      setChat({ ...chat, messages });
+      await fetch(`/api/chats/${chat.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages, quiet: true }),
+      }).catch(() => setNotice("That didn't save."));
+    },
+    [chat, streaming],
+  );
+
+  /** A saved message to scroll to once its chat has loaded. */
+  const pendingScroll = useRef<string | null>(null);
+
+  const openSaved = useCallback(
+    async (chatId: string, messageId: string) => {
+      pendingScroll.current = messageId;
+      await selectChat(chatId);
+    },
+    [selectChat],
+  );
+
+  useEffect(() => {
+    const id = pendingScroll.current;
+    if (!id || !chat) return;
+    const el = document.getElementById(`msg-${id}`);
+    if (!el) return;
+    pendingScroll.current = null;
+    el.scrollIntoView({ block: "center" });
+    el.classList.add("flash");
+    setTimeout(() => el.classList.remove("flash"), 1800);
+  }, [chat]);
+
+  const speakerRef = useRef<Speaker | null>(null);
+  const speakingRef = useRef<string | null>(null);
+
+  const stopSpeaking = useCallback(() => {
+    speakerRef.current?.cancel();
+    speakerRef.current = null;
+    speakingRef.current = null;
+    setSpeakingId(null);
+  }, []);
+
+  /** Read a reply aloud with the voice from Settings; pressing it again stops. */
+  const speak = useCallback(
+    (messageId: string) => {
+      const wasSpeaking = speakingRef.current === messageId;
+      stopSpeaking();
+      if (wasSpeaking) return;
+
+      const message = chat?.messages.find((m) => m.id === messageId);
+      const text = message ? forSpeech(message.content) : "";
+      if (!text) return setNotice("There's nothing in that reply to read aloud.");
+
+      const speaker = new Speaker(
+        getTts(settings.ttsEngine),
+        { voice: settings.ttsVoice, rate: settings.ttsSpeed },
+        (reason) => setNotice(`Speech failed: ${reason}`),
+      );
+      speakerRef.current = speaker;
+      speakingRef.current = messageId;
+      setSpeakingId(messageId);
+      speaker.push(text);
+      speaker.end();
+      void speaker.wait().finally(() => {
+        // Only if this is still the current reading — not one that replaced it.
+        if (speakerRef.current === speaker) stopSpeaking();
+      });
+    },
+    [chat, settings.ttsEngine, settings.ttsVoice, settings.ttsSpeed, stopSpeaking],
+  );
+
+  // Reading a reply aloud belongs to the chat it came from.
+  useEffect(() => stopSpeaking, [chat?.id, stopSpeaking]);
 
   const openInCanvas = useCallback((messageId: string, blockIndex: number) => {
     setActiveArtifactId(`${messageId}-${blockIndex}`);
@@ -750,6 +928,7 @@ export default function Workspace() {
           onDuplicate={(id) => void copyChat(id)}
           onEditInstructions={editInstructions}
           onOpenTrash={() => setTrashOpen(true)}
+          onOpenSaved={() => setSavedOpen(true)}
           onRestoreFile={restoreBackupFile}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenGallery={() => setGalleryOpen(true)}
@@ -778,6 +957,10 @@ export default function Workspace() {
               onOpenTrash={() => {
                 setSidebarOpen(false);
                 setTrashOpen(true);
+              }}
+              onOpenSaved={() => {
+                setSidebarOpen(false);
+                setSavedOpen(true);
               }}
               onRestoreFile={restoreBackupFile}
               onOpenSettings={() => {
@@ -816,13 +999,18 @@ export default function Workspace() {
             streaming={streaming}
             streamingMessageId={streamingId}
             input={input}
-            onInputChange={setInput}
+            onInputChange={updateInput}
+            onSlash={runSlash}
             onSend={send}
             onStop={stop}
             onRegenerate={regenerate}
             onEditMessage={editMessage}
             onOpenInCanvas={openInCanvas}
-            onBranch={(messageId) => chat && void copyChat(chat.id, messageId)}
+            onBranch={branchFrom}
+            onStar={toggleStar}
+            onSpeak={speak}
+            speakingId={speakingId}
+            prompts={settings.prompts ?? []}
             onEditInstructions={() => chat && void editInstructions(chat.id)}
             providers={providers}
             provider={provider}
@@ -895,6 +1083,15 @@ export default function Workspace() {
 
       <UsagePanel open={usageOpen} onClose={() => setUsageOpen(false)} />
 
+      <SavedPanel
+        open={savedOpen}
+        onClose={() => setSavedOpen(false)}
+        onOpen={(chatId, messageId) => {
+          setSavedOpen(false);
+          void openSaved(chatId, messageId);
+        }}
+      />
+
       <TrashPanel open={trashOpen} onClose={() => setTrashOpen(false)} onRestored={() => void refreshChats()} />
 
       <ChatInstructions
@@ -912,7 +1109,7 @@ export default function Workspace() {
         onClose={() => setGalleryOpen(false)}
         onEdit={(url) => {
           setGalleryOpen(false);
-          setInput(`Edit the picture ${url} — `);
+          updateInput(`Edit the picture ${url} — `);
           // After the dialog unmounts and the draft renders, so focus isn't
           // stolen back and the cursor lands after the text, not before it.
           setTimeout(() => {
