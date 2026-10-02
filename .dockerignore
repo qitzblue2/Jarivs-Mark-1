@@ -1,0 +1,14 @@
+node_modules
+.next
+.sandbox
+.git
+data
+workspace
+.env
+.env.*
+!.env.example
+test/.mock.*
+*.tsbuildinfo
+npm-debug.log*
+Dockerfile
+docker-compose.yml

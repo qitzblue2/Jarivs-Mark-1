@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ExternalLink, KeyRound, RotateCcw, X } from "lucide-react";
 import { DEFAULT_PERSONA } from "@/lib/persona";
+import { exportSettings, importSettings } from "@/lib/settings-io";
 import { DEFAULT_GREETING } from "@/lib/voice/session";
 import { ttsEngines, getTts, kokoroEngine, QUALITY_OPTIONS, type KokoroQuality } from "@/lib/voice/tts";
 import type { ProviderState } from "./ModelPicker";
@@ -82,6 +83,8 @@ export default function SettingsDialog({
 }: Props) {
   const [draft, setDraft] = useState<Settings>(settings);
   const [voices, setVoices] = useState<{ id: string; label: string }[]>([]);
+  const [fileNote, setFileNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) setDraft(settings);
@@ -116,6 +119,33 @@ export default function SettingsDialog({
   function save() {
     onSave(draft);
     onClose();
+  }
+
+  /** Download the settings, without keys, as a file. */
+  function exportFile() {
+    const blob = new Blob([JSON.stringify(exportSettings(draft), null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `jarvis-settings-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setFileNote({ ok: true, text: "Exported. API keys are never included." });
+  }
+
+  /** Read a settings file into the form; nothing is saved until you press Save. */
+  async function importFile(file: File | undefined) {
+    if (!file) return;
+    if (file.size > 500_000) return setFileNote({ ok: false, text: "That file is too large to be a settings file." });
+    const result = importSettings(await file.text(), draft);
+    if (!result.ok) return setFileNote({ ok: false, text: result.error });
+    setDraft(result.settings);
+    setFileNote({
+      ok: true,
+      text: result.changed.length
+        ? `Loaded ${result.changed.join(", ")}. Press Save to keep them; your keys were not touched.`
+        : "Nothing in that file differs from what you have.",
+    });
   }
 
   return (
@@ -474,7 +504,41 @@ export default function SettingsDialog({
           </section>
         </div>
 
-        <footer className="flex justify-end gap-2 border-t border-line px-4 py-3">
+        <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-line px-4 py-3">
+          <div className="mr-auto min-w-0">
+            <div className="flex gap-1.5">
+              <button
+                onClick={exportFile}
+                className="rounded-md border border-line px-2 py-1 text-[11px] text-ink-dim transition hover:text-arc"
+                title="Download these settings (without API keys) as a file"
+              >
+                Export
+              </button>
+              <button
+                onClick={() => fileInput.current?.click()}
+                className="rounded-md border border-line px-2 py-1 text-[11px] text-ink-dim transition hover:text-arc"
+                title="Load settings from a file exported earlier"
+              >
+                Import
+              </button>
+              <input
+                ref={fileInput}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                data-settings-file
+                onChange={(e) => {
+                  void importFile(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+            {fileNote && (
+              <p className={`mt-1 max-w-xs text-[10.5px] leading-snug ${fileNote.ok ? "text-arc" : "text-warn"}`} role="status">
+                {fileNote.text}
+              </p>
+            )}
+          </div>
           <button
             onClick={onClose}
             className="rounded-md border border-line px-3 py-1.5 text-[13px] text-ink-dim transition hover:text-ink"

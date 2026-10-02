@@ -5,6 +5,8 @@ import {
   createToken,
   passwordMatches,
 } from "@/lib/auth/session";
+import { clientKey, recordFailure, recordSuccess, retryAfterMs } from "@/lib/auth/limiter";
+import { audit } from "@/lib/audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,14 +25,33 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const client = clientKey(req.headers);
+
+  // Checked before the password is, so a locked-out client can't learn whether
+  // a guess was right by whether it got in.
+  const wait = retryAfterMs(client);
+  if (wait > 0) {
+    const minutes = Math.ceil(wait / 60_000);
+    audit("login.locked", "refused while locked out", client);
+    return Response.json(
+      { error: `Too many wrong passwords. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.` },
+      { status: 429, headers: { "Retry-After": String(Math.ceil(wait / 1000)) } },
+    );
+  }
+
   const body = await req.json().catch(() => ({}));
   const submitted = String(body?.password ?? "");
 
   if (!passwordMatches(submitted)) {
+    recordFailure(client);
+    audit("login.fail", undefined, client);
     // A uniform delay blunts trivial timing and rate probing.
     await new Promise((r) => setTimeout(r, 400));
     return Response.json({ error: "Wrong password." }, { status: 401 });
   }
+
+  recordSuccess(client);
+  audit("login.ok", undefined, client);
 
   const secure = req.nextUrl.protocol === "https:";
   const response = Response.json({ ok: true });

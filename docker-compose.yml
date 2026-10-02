@@ -1,0 +1,15 @@
+services:
+  jarvis:
+    build: .
+    # Host loopback only. To reach it from other devices, publish on a LAN
+    # address AND set JARVIS_PASSWORD (README, "Reaching it from your phone") —
+    # JARVIS refuses to serve a non-local request without one.
+    ports:
+      - "127.0.0.1:3000:3000"
+    env_file:
+      - path: .env.local
+        required: false
+    volumes:
+      - ./data:/app/data
+      - ./workspace:/app/workspace
+    restart: unless-stopped

@@ -199,6 +199,7 @@ on your own machine.
 | Export a chat | The download button in the header — a Markdown file |
 | See what's been spent | The gauge at the top of the sidebar |
 | Back up everything | **Back up** at the bottom of the sidebar — one zip |
+| Move your setup | Settings → **Export** / **Import** — a file without API keys |
 | Voice mode | `Ctrl/Cmd + J` |
 | Open code in the canvas | Automatic, or the **Canvas** button on any code block |
 | Close the canvas | `Esc` |
@@ -695,6 +696,36 @@ is a four-method interface and `fs-store.ts` is the reference implementation.
 
 Set your keys as environment variables in the host's dashboard, not in a file.
 
+### Docker
+
+```bash
+docker compose up --build
+```
+
+Runs JARVIS on `http://localhost:3000`, published on the host's loopback only.
+Chats, memory and pictures live in `./data` on the host, so rebuilding never
+touches them; API keys come from `.env.local`, never from the image. The
+container runs as a non-root user and reports its health at `/api/health`.
+
+> The Dockerfile has not been built by its author — the machine it was written
+> on had no Docker daemon — though the compose file is syntax-checked. If a step
+> fails, the error will say which; the file is short.
+>
+> Leave `JARVIS_ALLOW_SELF_EDIT` off in a container: what it applies would
+> vanish with the container.
+
+### Health check
+
+`GET /api/health` returns `{"ok":true,"uptimeSeconds":…}` and nothing else, for
+uptime monitors and container health checks.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs the type check, the unit and provider tests and
+a production build on every push and pull request. It skips the voice-model
+download and the browser suites, which need a real browser and the mock
+provider — run those by hand, as described under Testing.
+
 ## 13. Layout
 
 ```
@@ -730,6 +761,8 @@ GROQ_API_KEY=test JARVIS_GROQ_BASE_URL=http://localhost:8899/v1 npm run dev
 npm run test:e2e    # drives a real browser against the mock
 npm run test:voice  # voice mode, with a WAV standing in for a microphone
 npm run test:chats  # search, pinning and export
+npm run test:settings  # settings export/import, activity list
+npm run test:security  # login lockout, headers — needs its own server, see the file
 npm run test:sandbox  # self-editing: start with JARVIS_ALLOW_SELF_EDIT=1, see the file
 
 # Pictures, against a production build (next dev would hide the bug it guards):
@@ -1054,6 +1087,19 @@ reaches a shell, which is why it needs no approval gate.
   `allow-same-origin`, so model-written code gets an opaque origin and cannot
   touch this app's DOM, storage, or API routes. Don't add that flag.
 - Chat ids are validated against a strict pattern before touching the filesystem.
+- **Wrong passwords are throttled.** Five wrong guesses from one client lock it
+  out for 15 minutes — even the right password is refused meanwhile — and a
+  higher limit across all clients catches an attacker who rotates the
+  forwarding header. A determined attacker can therefore lock *you* out for a
+  window; that is the price of not letting them guess forever.
+- **Responses carry `nosniff`, frame protection, a same-origin referrer policy
+  and a permissions policy** (microphone for this site only). There is
+  deliberately no Content-Security-Policy: Next's inline scripts and the
+  voice runtime's WebAssembly mean one loose enough to work protects little.
+- **An audit log** (`data/audit.jsonl`, shown under Usage → Recent activity)
+  records sign-ins and failures, every approval or denial, each self-edit apply
+  and undo, and backup downloads. It holds what was decided, never file
+  contents, passwords or keys, and rotates at 2MB.
 
 ## License
 

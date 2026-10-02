@@ -7,13 +7,13 @@ Nothing here weakens a safety default: self-editing and computer access stay
 opt-in, and every write and command still waits for approval.
 
 ## A. Security and operations
-- [ ] 1. Login rate limiting — lock out after repeated wrong passwords
-- [ ] 2. Security headers — nosniff, frame protection, referrer and permissions policy
-- [ ] 3. Audit log — logins, approvals, self-edit apply/undo, backups, restores
-- [ ] 4. `/api/health` — for uptime monitors and container health checks
-- [ ] 5. CI workflow — type check, tests and build on every push and pull request
-- [ ] 6. Dockerfile and compose file — run JARVIS in a container
-- [ ] 7. Settings export and import — move your setup between browsers (keys excluded)
+- [x] 1. Login rate limiting — lock out after repeated wrong passwords
+- [x] 2. Security headers — nosniff, frame protection, referrer and permissions policy
+- [x] 3. Audit log — logins, approvals, self-edit apply/undo, backups, restores
+- [x] 4. `/api/health` — for uptime monitors and container health checks
+- [x] 5. CI workflow — type check, tests and build on every push and pull request
+- [x] 6. Dockerfile and compose file — run JARVIS in a container (compose syntax-checked; the image itself could not be built here, no Docker daemon)
+- [x] 7. Settings export and import — move your setup between browsers (keys excluded)
 
 ## B. Chats
 - [ ] 8. Sidebar grouped by date — Today, Yesterday, Previous 7 days, Older

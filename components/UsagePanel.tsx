@@ -21,10 +21,32 @@ interface Usage {
   cooling: Record<string, number>;
 }
 
+interface AuditEntry {
+  at: number;
+  kind: string;
+  detail?: string;
+  client?: string;
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
 }
+
+const AUDIT_LABEL: Record<string, string> = {
+  "login.ok": "Signed in",
+  "login.fail": "Wrong password",
+  "login.locked": "Sign-in refused (locked out)",
+  "approval.approve": "Approved",
+  "approval.deny": "Denied",
+  "sandbox.apply": "Applied to JARVIS",
+  "sandbox.undo": "Undid an apply",
+  "sandbox.reset": "Reset the sandbox",
+  "backup.download": "Downloaded a backup",
+  "backup.restore": "Restored a backup",
+  "chat.trash": "Moved a chat to trash",
+  "chat.restore": "Restored a chat",
+};
 
 function compact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -48,11 +70,14 @@ function minutes(ms: number): string {
  */
 export default function UsagePanel({ open, onClose }: Props) {
   const [usage, setUsage] = useState<Usage | null>(null);
+  const [activity, setActivity] = useState<AuditEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch("/api/usage");
+      const [res, auditRes] = await Promise.all([fetch("/api/usage"), fetch("/api/audit?limit=40")]);
+      const auditData = await auditRes.json().catch(() => ({}));
+      if (Array.isArray(auditData.entries)) setActivity(auditData.entries);
       const data = await res.json();
       if (data.error) setError(data.error);
       else {
@@ -181,6 +206,27 @@ export default function UsagePanel({ open, onClose }: Props) {
                       </li>
                     );
                   })}
+              </ul>
+            </>
+          )}
+
+          {activity.length > 0 && (
+            <>
+              <h3 className="mb-2 mt-6 text-[10px] uppercase tracking-widest text-ink-faint">Recent activity</h3>
+              <ul className="space-y-1 text-[12px]" data-activity>
+                {activity.map((a, i) => (
+                  <li key={`${a.at}-${i}`} className="flex gap-3 text-ink-dim">
+                    <span className="w-28 shrink-0 font-mono text-[11px] text-ink-faint">
+                      {new Date(a.at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate" title={a.detail}>
+                      <span className={a.kind.endsWith("fail") || a.kind.endsWith("locked") || a.kind.endsWith("deny") ? "text-warn" : "text-ink"}>
+                        {AUDIT_LABEL[a.kind] ?? a.kind}
+                      </span>
+                      {a.detail && <span className="text-ink-faint"> · {a.detail}</span>}
+                    </span>
+                  </li>
+                ))}
               </ul>
             </>
           )}

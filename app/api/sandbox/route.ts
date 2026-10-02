@@ -12,6 +12,7 @@ import {
   revertSandboxFile,
   undoPromotion,
 } from "@/lib/sandbox/sync";
+import { audit } from "@/lib/audit";
 import { disabled, lastCheck, rememberCheck } from "./state";
 
 export const runtime = "nodejs";
@@ -86,11 +87,13 @@ export async function POST(req: NextRequest) {
           }
         }
         const promotion = await promote(paths);
+        audit("sandbox.apply", promotion.files.map((f) => `${f.status[0]}:${f.path}`).join(", "));
         return Response.json({ promotion, note: reloadNote() });
       }
 
       case "undo": {
         const promotion = await undoPromotion(String(body.id ?? ""));
+        audit("sandbox.undo", promotion.files.map((f) => f.path).join(", "));
         return Response.json({ promotion, note: reloadNote() });
       }
 
@@ -102,6 +105,7 @@ export async function POST(req: NextRequest) {
       case "reset": {
         // Stopped first so it isn't compiling files while they are replaced.
         await stopSandboxServer();
+        audit("sandbox.reset");
         try {
           await resetSandbox();
         } finally {

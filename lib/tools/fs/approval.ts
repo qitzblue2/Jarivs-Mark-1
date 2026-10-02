@@ -97,6 +97,12 @@ export function requestApproval(
   });
 }
 
+/** What a pending approval is for — read before it is settled, for the audit log. */
+export function pendingSummary(id: string): { kind: ApprovalRequest["kind"]; summary: string } | null {
+  const entry = gate().pending.get(id);
+  return entry ? { kind: entry.request.kind, summary: entry.request.summary } : null;
+}
+
 /** Called by the API route. Returns false if the id is unknown or expired. */
 export function settleApproval(id: string, decision: ApprovalDecision): boolean {
   const entry = gate().pending.get(id);

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
-import { grantWritesForRun, settleApproval } from "@/lib/tools/fs/approval";
+import { grantWritesForRun, pendingSummary, settleApproval } from "@/lib/tools/fs/approval";
+import { audit } from "@/lib/audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,11 +20,19 @@ export async function POST(req: NextRequest) {
 
   if (!id) return Response.json({ error: "No approval id." }, { status: 400 });
 
+  const what = pendingSummary(id);
   const settled = settleApproval(id, decision);
   if (!settled) {
     return Response.json(
       { error: "That approval is no longer pending — it may have timed out." },
       { status: 409 },
+    );
+  }
+
+  if (what) {
+    audit(
+      decision === "approve" ? "approval.approve" : "approval.deny",
+      `${what.kind}: ${what.summary}${forRun ? " (and the rest of this run)" : ""}`,
     );
   }
 

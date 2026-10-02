@@ -27,6 +27,12 @@ import { isNoise } from "../lib/voice/phrases";
 import { forSpeech } from "../lib/voice/tts/types";
 import { splitReasoning } from "../lib/reasoning";
 import { environmentNote } from "../lib/environment";
+import { MAX_FAILURES, MAX_GLOBAL_FAILURES, WINDOW_MS, clientKey, recordFailure, recordSuccess, resetLimiter, retryAfterMs } from "../lib/auth/limiter";
+import { audit, auditFile, flushAudit, recentAudit } from "../lib/audit";
+import { FORMAT, exportSettings, importSettings } from "../lib/settings-io";
+import { DEFAULT_SETTINGS } from "../components/SettingsDialog";
+import nextConfig, { securityHeaders } from "../next.config";
+import { GET as healthGet } from "../app/api/health/route";
 import { SentenceSplitter, splitSentences } from "../lib/voice/tts/sentences";
 import { Speaker } from "../lib/voice/tts/speaker";
 import { encodeWav, durationOf } from "../lib/voice/wav";
@@ -1517,6 +1523,127 @@ console.log("\n--- JARVIS editing its own code, in a sandbox ---");
     if (wasSandbox !== undefined) process.env.JARVIS_IS_SANDBOX = wasSandbox;
     rmSync(root, { recursive: true, force: true });
   }
+}
+
+console.log("\n--- guessing the password ---");
+{
+  resetLimiter();
+  const t0 = 1_000_000;
+  eq("a fresh client may try", retryAfterMs("a", t0), 0);
+  for (let i = 0; i < MAX_FAILURES - 1; i++) recordFailure("a", t0 + i);
+  eq("up to the limit minus one, still may", retryAfterMs("a", t0 + 10), 0);
+  recordFailure("a", t0 + 4);
+  const wait = retryAfterMs("a", t0 + 5);
+  eq("at the limit, locked out", wait > 0, true);
+  eq("for roughly the rest of the window", Math.abs(wait - (WINDOW_MS - 5)) < 10, true);
+  eq("another client is unaffected", retryAfterMs("b", t0 + 5), 0);
+  eq("the window ends and the lock lifts", retryAfterMs("a", t0 + WINDOW_MS + 10), 0);
+  recordSuccess("a");
+  eq("a correct password clears that client", retryAfterMs("a", t0 + 5), 0);
+
+  // An attacker who rotates the forwarding header still meets the global limit.
+  resetLimiter();
+  for (let i = 0; i < MAX_GLOBAL_FAILURES; i++) recordFailure(`spoof-${i}`, t0 + i);
+  eq("many clients, each under its limit, hit the shared one", retryAfterMs("someone-new", t0 + 100) > 0, true);
+  eq("and a success from one doesn't lift it", (recordSuccess("spoof-1"), retryAfterMs("someone-new", t0 + 100) > 0), true);
+
+  eq("the client is the first forwarded address", clientKey(new Headers({ "x-forwarded-for": "203.0.113.9, 10.0.0.1" })), "203.0.113.9");
+  eq("Cloudflare's header wins", clientKey(new Headers({ "cf-connecting-ip": "198.51.100.2", "x-forwarded-for": "203.0.113.9" })), "198.51.100.2");
+  eq("with no header, a single shared bucket", clientKey(new Headers()), "direct");
+  eq("an absurdly long header is cut", clientKey(new Headers({ "x-forwarded-for": "x".repeat(500) })).length, 64);
+  resetLimiter();
+}
+
+console.log("\n--- the audit log ---");
+{
+  const dir = mkdtempSync(join(tmpdir(), "jarvis-audit-"));
+  process.env.JARVIS_AUDIT_FILE = join(dir, "audit.jsonl");
+  audit("login.ok", undefined, "1.2.3.4");
+  audit("approval.approve", "write: Create notes/hello.txt\nwith a newline");
+  audit("sandbox.apply", "x".repeat(1000));
+  await flushAudit();
+  const entries = await recentAudit(10);
+  eq("newest first", entries.map((e) => e.kind), ["sandbox.apply", "approval.approve", "login.ok"]);
+  eq("a long detail is cut short", entries[0].detail!.length, 200);
+  eq("a newline can't split an entry", entries[1].detail, "write: Create notes/hello.txt with a newline");
+  eq("the client is kept for logins", entries[2].client, "1.2.3.4");
+  eq("each entry is one line of JSON", readFileSync(auditFile(), "utf8").trim().split("\n").length, 3);
+
+  writeFileSync(auditFile(), readFileSync(auditFile(), "utf8") + '{"at": 1, "kind"\nnot json\n');
+  eq("a damaged line is skipped, not fatal", (await recentAudit(10)).length, 3);
+  eq("the limit is honoured", (await recentAudit(2)).length, 2);
+
+  writeFileSync(auditFile(), "x".repeat(2_100_000) + "\n");
+  audit("login.fail");
+  await flushAudit();
+  eq("a big log is rotated, not grown forever", existsSync(`${auditFile()}.1`), true);
+  eq("and the new entry still reads back first", (await recentAudit(1))[0].kind, "login.fail");
+  delete process.env.JARVIS_AUDIT_FILE;
+  rmSync(dir, { recursive: true, force: true });
+}
+
+console.log("\n--- moving settings between browsers ---");
+{
+  const mine = { ...DEFAULT_SETTINGS, keys: { groq: "gsk_SECRET" }, macs: { "self-hosted": "aa:bb:cc:dd:ee:ff" }, temperature: 0.3 };
+  const out = exportSettings(mine, new Date("2026-10-02T00:00:00Z"));
+  const text = JSON.stringify(out);
+  eq("an export is labelled", [out.format, out.version], [FORMAT, 1]);
+  eq("and never carries a key", text.includes("gsk_SECRET"), false);
+  eq("or a MAC address", text.includes("aa:bb:cc"), false);
+  eq("but does carry the ordinary settings", out.settings.temperature, 0.3);
+
+  const back = importSettings(text, { ...DEFAULT_SETTINGS, keys: { groq: "gsk_MINE" } });
+  eq("an export imports", back.ok, true);
+  if (back.ok) {
+    eq("changing what differs", back.changed, ["temperature"]);
+    eq("and leaving this browser's keys alone", back.settings.keys, { groq: "gsk_MINE" });
+  }
+
+  const hostile = JSON.stringify({
+    format: FORMAT, version: 1,
+    settings: {
+      keys: { groq: "stolen" }, macs: { x: "y" },
+      temperature: 99, ttsSpeed: -4, wakeThreshold: "high", useTools: "yes", ttsQuality: "huge",
+      persona: "p".repeat(50_000), isAdmin: true,
+      endpoints: { "self-hosted": "javascript:alert(1)", ok: "http://localhost:11434/v1", "bad id!": "http://x" },
+      budgets: { "self-hosted": { context: 1e12, maxOutput: "lots" } },
+    },
+  });
+  const cleaned = importSettings(hostile, DEFAULT_SETTINGS);
+  eq("a hostile file still imports", cleaned.ok, true);
+  if (cleaned.ok) {
+    const s = cleaned.settings as unknown as Record<string, unknown>;
+    eq("keys in a file are ignored", s.keys, {});
+    eq("so are MAC addresses", s.macs, {});
+    eq("numbers are clamped", [s.temperature, s.ttsSpeed], [2, 0.5]);
+    eq("wrongly-typed values are dropped", [s.wakeThreshold, s.useTools, s.ttsQuality], [DEFAULT_SETTINGS.wakeThreshold, true, DEFAULT_SETTINGS.ttsQuality]);
+    eq("a huge persona is cut", (s.persona as string).length, 20_000);
+    eq("unknown fields are dropped", "isAdmin" in s, false);
+    eq("only http(s) endpoints survive, with sane ids", s.endpoints, { ok: "http://localhost:11434/v1" });
+    eq("budgets are clamped and typed", s.budgets, { "self-hosted": { context: 2_000_000 } });
+  }
+  eq("not JSON is refused", importSettings("hello", DEFAULT_SETTINGS).ok, false);
+  eq("other JSON is refused", importSettings('{"format":"other"}', DEFAULT_SETTINGS).ok, false);
+  eq("a newer version is refused, by name", /version 2/.test((importSettings('{"format":"jarvis-settings","version":2,"settings":{}}', DEFAULT_SETTINGS) as { error: string }).error), true);
+}
+
+console.log("\n--- headers and health ---");
+{
+  const names = securityHeaders.map((h) => h.key);
+  eq("the headers are all set", names, ["X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Permissions-Policy"]);
+  // Loaded as CommonJS here, so the default export arrives wrapped; Next
+  // itself unwraps it, which the production build below proves.
+  const config = ((nextConfig as unknown as { default?: typeof nextConfig }).default ?? nextConfig) as typeof nextConfig;
+  const rules = await config.headers!();
+  eq("on every route", [rules.length, rules[0].source], [1, "/:path*"]);
+  const permissions = securityHeaders.find((h) => h.key === "Permissions-Policy")!.value;
+  eq("the microphone stays available to voice mode", permissions.includes("microphone=(self)"), true);
+  eq("and nothing that breaks the WASM voice runtime is set", names.some((n) => /Cross-Origin|Content-Security/.test(n)), false);
+
+  const res = await healthGet();
+  const body = await res.json();
+  eq("health says it is up", [res.status, body.ok], [200, true]);
+  eq("and nothing else about the install", Object.keys(body).sort(), ["ok", "uptimeSeconds"]);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
