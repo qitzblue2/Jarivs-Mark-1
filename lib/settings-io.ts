@@ -1,6 +1,7 @@
 import type { Settings } from "@/components/SettingsDialog";
 import { QUALITY_OPTIONS } from "@/lib/voice/tts/kokoro";
 import { cleanPrompts } from "@/lib/prompts";
+import { cleanFavorites } from "@/lib/favorites";
 
 /**
  * Moving your setup between browsers.
@@ -100,6 +101,8 @@ export function importSettings(raw: string, current: Settings): ImportResult {
   if (quality) set("ttsQuality", quality.id);
   // Saved prompts are text you wrote, not a secret, so they travel with the file.
   if (Array.isArray(incoming.prompts)) set("prompts", cleanPrompts(incoming.prompts));
+  // Starred models are a preference, not a secret.
+  if (Array.isArray(incoming.favorites)) set("favorites", cleanFavorites(incoming.favorites));
   set("endpoints", cleanEndpoints(incoming.endpoints));
   set("budgets", cleanBudgets(incoming.budgets));
 

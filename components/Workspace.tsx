@@ -25,6 +25,9 @@ import ConnectionBanner from "./ConnectionBanner";
 import { isHelpKey, isTypingTarget } from "@/lib/shortcuts";
 import { getAppearance, setAppearance } from "@/lib/appearance-store";
 import { THEMES } from "@/lib/appearance";
+import { contextCeiling, measureContext } from "@/lib/context-meter";
+import { favoriteKey, toggleFavorite } from "@/lib/favorites";
+import { ModelsContext, type ModelsContextValue } from "./models-context";
 import { estimateReplyTokens } from "@/lib/format";
 import type { ProviderState } from "./ModelPicker";
 import { consumeJarvisStream } from "@/lib/stream";
@@ -80,6 +83,8 @@ export default function Workspace() {
   const [instructionsFor, setInstructionsFor] = useState<{ id: string; title: string; persona?: string } | null>(null);
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [selfEdit, setSelfEdit] = useState<{ enabled: boolean; isSandbox: boolean; port: number } | null>(null);
+  /** What each request carries besides the conversation, for the context meter. */
+  const [overhead, setOverhead] = useState({ toolTokens: 0, noteTokens: 0 });
   const [notice, setNotice] = useState<string | null>(null);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [pushToTalk, setPushToTalk] = useState(false);
@@ -141,6 +146,7 @@ export default function Workspace() {
       setStorage(data.storage ?? "fs");
       setSecurity(data.security ?? null);
       setSelfEdit(data.selfEdit ?? null);
+      setOverhead({ toolTokens: data.overhead?.toolTokens ?? 0, noteTokens: data.overhead?.noteTokens ?? 0 });
 
       // Restore the last selection when it's still valid, else pick the first
       // usable provider with a model. "Usable" rather than "has a key": a
@@ -383,15 +389,19 @@ export default function Workspace() {
       onProgress?: (soFar: string) => void,
       /** Run as a task: more tool rounds, and the goal pinned against trims. */
       task = false,
+      /** Answer with this model instead of the selected one — "regenerate with…". */
+      via?: { provider: string; model: string },
     ): Promise<string> => {
+      const chosenProvider = via?.provider ?? provider;
+      const chosenModel = via?.model ?? model;
       const assistantId = newId();
       const assistant: Message = {
         id: assistantId,
         role: "assistant",
         content: "",
         createdAt: Date.now(),
-        provider,
-        model,
+        provider: chosenProvider,
+        model: chosenModel,
       };
 
       setChat({ ...target, messages: [...history, assistant] });
@@ -402,8 +412,8 @@ export default function Workspace() {
       abortRef.current = controller;
 
       let acc = "";
-      let usedProvider = provider;
-      let usedModel = model;
+      let usedProvider = chosenProvider;
+      let usedModel = chosenModel;
       let fellBackFrom: string | undefined;
       let errorMessage: string | undefined;
       let toolRounds: ToolRound[] = [];
@@ -449,8 +459,8 @@ export default function Workspace() {
               content: m.content,
               attachments: m.attachments,
             })),
-            provider,
-            model,
+            provider: chosenProvider,
+            model: chosenModel,
             temperature: settings.temperature,
             // A chat's own instructions replace the Settings ones for it alone.
             persona: target.persona?.trim() ? target.persona : settings.persona,
@@ -714,6 +724,64 @@ export default function Workspace() {
     },
     [chat, streaming, runTurn],
   );
+
+  /**
+   * Drop this reply and ask again with a different model. The chosen model
+   * becomes the one selected, too — you have just decided to hear from it, and
+   * the next message going to a model you moved away from would be a surprise.
+   */
+  const regenerateWith = useCallback(
+    async (messageId: string, nextProvider: string, nextModel: string) => {
+      if (!chat || streaming) return;
+      const index = chat.messages.findIndex((m) => m.id === messageId);
+      if (index < 1) return;
+      setProvider(nextProvider);
+      setModel(nextModel);
+      try {
+        localStorage.setItem(SELECTION_KEY, JSON.stringify({ provider: nextProvider, model: nextModel }));
+      } catch {
+        /* ignore */
+      }
+      await runTurn(chat, chat.messages.slice(0, index), undefined, false, { provider: nextProvider, model: nextModel });
+    },
+    [chat, streaming, runTurn],
+  );
+
+  const toggleFavoriteModel = useCallback(
+    (nextProvider: string, nextModel: string) =>
+      saveSettings({
+        ...settings,
+        favorites: toggleFavorite(settings.favorites ?? [], favoriteKey(nextProvider, nextModel)),
+      }),
+    [settings, saveSettings],
+  );
+
+  /** Kept stable between provider fetches and star changes: every message reads it. */
+  const modelsValue = useMemo<ModelsContextValue>(
+    () => ({
+      providers,
+      favorites: settings.favorites ?? [],
+      onToggleFavorite: toggleFavoriteModel,
+      onRegenerateWith: regenerateWith,
+      onOpenSettings: () => setSettingsOpen(true),
+    }),
+    [providers, settings.favorites, toggleFavoriteModel, regenerateWith],
+  );
+
+  /** How full the next request will be — the conversation, what you are typing, and what every request carries. */
+  const contextInfo = useMemo(() => {
+    const current = providers.find((p) => p.id === provider);
+    if (!current || !chat) return null;
+    const draft = input.trim() || pending.length > 0 ? [{ content: input, attachments: pending }] : [];
+    return measureContext({
+      messages: [...chat.messages, ...draft],
+      persona: chat.persona?.trim() ? chat.persona : settings.persona,
+      limit: contextCeiling(current, settings.budgets?.[current.id]),
+      toolTokens: overhead.toolTokens,
+      noteTokens: overhead.noteTokens,
+      useTools: settings.useTools,
+    });
+  }, [providers, provider, chat, input, pending, settings.persona, settings.budgets, settings.useTools, overhead]);
 
   /** Rewrite a user turn and discard everything that followed it. */
   const editMessage = useCallback(
@@ -1023,6 +1091,7 @@ export default function Workspace() {
           data-print-flow
           style={showCanvas ? { width: `${100 - canvasWidth}%` } : undefined}
         >
+          <ModelsContext.Provider value={modelsValue}>
           <ChatPane
             chat={chat}
             streaming={streaming}
@@ -1062,7 +1131,11 @@ export default function Workspace() {
               setPushToTalk(talk);
               setVoiceOpen(true);
             }}
+            context={contextInfo}
+            favorites={settings.favorites ?? []}
+            onToggleFavorite={toggleFavoriteModel}
           />
+          </ModelsContext.Provider>
         </div>
 
         {showCanvas && (

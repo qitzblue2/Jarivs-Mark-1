@@ -1,4 +1,5 @@
 import type { Tool } from "./types";
+import { describeConversion, parseConversion, UnitError } from "./units";
 
 /**
  * Arithmetic without `eval`.
@@ -146,9 +147,11 @@ export function evaluate(expression: string): number {
 
 export const calculateTool: Tool = {
   name: "calculate",
+  // Conversion rides along here, in words that cost no more than the old text
+  // did: a second tool would add its whole schema to every request.
   description:
-    "Evaluate arithmetic instead of doing it yourself. Supports + - * / % ^, " +
-    "parentheses, pi, e, sqrt, abs, round, floor, ceil, sin, cos, tan, log, log10, exp.",
+    'Use for any arithmetic or unit conversion ("5 km to mi", "72 F in C"): ' +
+    "+ - * / % ^ ( ) pi e sqrt abs round floor ceil sin cos tan log log10 exp.",
   parameters: {
     type: "object",
     properties: {
@@ -159,6 +162,10 @@ export const calculateTool: Tool = {
   async handler(args) {
     const expression = String(args.expression ?? "").trim();
     if (!expression) throw new Error("No expression given.");
+    if (expression.length > 500) throw new Error("Expression too long.");
+    // "5 km to miles", "72 F in C": null when it's ordinary arithmetic.
+    const conversion = parseConversion(expression, evaluate);
+    if (conversion) return `${expression} → ${describeConversion(conversion)}`;
     return `${expression} = ${evaluate(expression)}`;
   },
 };

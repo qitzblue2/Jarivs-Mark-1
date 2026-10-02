@@ -59,6 +59,17 @@ import { SHORTCUT_GROUPS, isHelpKey, isMac, isTypingTarget, keyLabel } from "../
 import { BANNER_TEXT, linkOf, nextCheckDelay, reachable, reduceConnection } from "../lib/connection";
 import type { ConnectionEvent, ConnectionState } from "../lib/connection";
 import { inflateSync } from "node:zlib";
+import { DEFAULT_INTRO, DEFAULT_PERSONA as PERSONA_NOW, PERSONA_RULES } from "../lib/persona";
+import { PERSONA_PRESETS, matchPreset, presetText } from "../lib/personas";
+import { UnitError, describeConversion, formatNumber, lookupUnit, parseConversion } from "../lib/tools/units";
+import { calculateTool } from "../lib/tools/calculate";
+import { toWireTool } from "../lib/tools/types";
+import { MAX_TAGS as MAX_MEMORY_TAGS, cleanTags as cleanMemoryTags, filterMemory, normalizeTag as normalizeMemoryTag, parseTagInput, tagCounts as memoryTagCounts } from "../lib/memory/filter";
+import { MAX_ENTRY_CHARS, MAX_IMPORT_ENTRIES, MAX_MEMORY_ENTRIES, exportFilename as memoryFilename, exportMemory, planImport, sameness } from "../lib/memory/transfer";
+import { MAX_FAVORITES, cleanFavorites, favoriteKey, isFavorite, parseFavorite, toggleFavorite } from "../lib/favorites";
+import { IMAGE_TOKENS, contextCeiling, conversationTokens, formatTokens, measureContext } from "../lib/context-meter";
+import { getProvider } from "../lib/providers/registry";
+import { createHash } from "node:crypto";
 import { SentenceSplitter, splitSentences } from "../lib/voice/tts/sentences";
 import { Speaker } from "../lib/voice/tts/speaker";
 import { encodeWav, durationOf } from "../lib/voice/wav";
@@ -2273,6 +2284,241 @@ console.log("\n--- installable app ---");
     ["/", "/api/chats", "/api/health", "/api/audit", "/icons-private", "/manifest.json"].map((p) => gate.test(p)),
     [true, true, true, true, true, true],
   );
+}
+
+console.log("\n--- persona presets ---");
+{
+  const sha = (t: string) => createHash("sha256").update(t).digest("hex");
+  eq("the default persona is byte-for-byte what it was before presets existed", sha(PERSONA_NOW), "e989d55aafefecae801c3ee8d954809c4781decbb4ce95ff749304bb2d43246e");
+  eq("it is the intro and the rules, joined", PERSONA_NOW, `${DEFAULT_INTRO}\n\n${PERSONA_RULES}`);
+  ok("there are several presets", PERSONA_PRESETS.length >= 5);
+  eq("with distinct ids and names", [new Set(PERSONA_PRESETS.map((p) => p.id)).size, new Set(PERSONA_PRESETS.map((p) => p.name)).size], [PERSONA_PRESETS.length, PERSONA_PRESETS.length]);
+  ok("every preset keeps the operating rules, so tools, memory and code fencing still work", PERSONA_PRESETS.every((p) => presetText(p).endsWith(PERSONA_RULES)));
+  ok("and has an intro of its own", PERSONA_PRESETS.every((p) => p.intro.length > 40) && new Set(PERSONA_PRESETS.map((p) => p.intro)).size === PERSONA_PRESETS.length);
+  eq("the first preset is the default", presetText(PERSONA_PRESETS[0]), PERSONA_NOW);
+  ok("a preset's intro costs less than 80 tokens — it is paid for on every turn", PERSONA_PRESETS.every((p) => estimateTokens(p.intro) <= 80));
+  ok("and none is much bigger than the default prompt", PERSONA_PRESETS.every((p) => estimateTokens(presetText(p)) <= estimateTokens(PERSONA_NOW) + 40));
+  eq("a preset's text is recognised as it", matchPreset(presetText(PERSONA_PRESETS[2]))?.id, PERSONA_PRESETS[2].id);
+  eq("whatever the line endings or trailing space", matchPreset(presetText(PERSONA_PRESETS[2]).replace(/\n/g, "\r\n") + "\n  ")?.id, PERSONA_PRESETS[2].id);
+  eq("an edited one is your own", matchPreset(presetText(PERSONA_PRESETS[2]) + " Also be funny."), null);
+  eq("and so is nothing", matchPreset(""), null);
+}
+
+console.log("\n--- unit conversion ---");
+{
+  const conv = (e: string) => {
+    const c = parseConversion(e, evaluate);
+    return c ? describeConversion(c) : null;
+  };
+  eq("kilometres to miles", conv("5 km to miles"), "5 km = 3.106856 mi");
+  eq("miles to kilometres", conv("1 mile to km"), "1 mi = 1.609344 km");
+  eq("feet and inches, with a connector that is also a unit", [conv("6 ft to in"), conv("12 in in cm"), conv("5 in to cm")], ["6 ft = 72 in", "12 in = 30.48 cm", "5 in = 12.7 cm"]);
+  eq("Fahrenheit to Celsius", conv("72 F in C"), "72 °F = 22.22222 °C");
+  eq("Celsius to Fahrenheit and Kelvin", [conv("100 C to F"), conv("0 C to K"), conv("0 K to C")], ["100 °C = 212 °F", "0 °C = 273.15 K", "0 K = -273.15 °C"]);
+  eq("negative temperatures", conv("-40 F to C"), "-40 °F = -40 °C");
+  eq("pounds and ounces to kilograms", [conv("1 lb to kg"), conv("16 oz to lb")], ["1 lb = 0.4535924 kg", "16 oz = 1 lb"]);
+  eq("US gallons and litres", [conv("1 gal to L"), conv("2 litres to pints")], ["1 gal = 3.785412 L", "2 L = 4.226753 pt"]);
+  eq("speed", [conv("60 mph to km/h"), conv("100 km/h to mph")], ["60 mph = 96.56064 km/h", "100 km/h = 62.13712 mph"]);
+  eq("time", [conv("1 day to seconds"), conv("90 min to hours"), conv("2 weeks to days")], ["1 d = 86400 s", "90 min = 1.5 h", "2 wk = 14 d"]);
+  eq("area", [conv("1 acre to m2"), conv("1 hectare to acres")], ["1 acre = 4046.856 m²", "1 ha = 2.471054 acre"]);
+  eq("energy, power, pressure", [conv("1 kWh to J"), conv("1 hp to W"), conv("1 atm to kPa"), conv("30 psi to bar")], ["1 kWh = 3600000 J", "1 hp = 745.6999 W", "1 atm = 101.325 kPa", "30 psi = 2.068427 bar"]);
+  eq("angles", [conv("180 deg to rad"), conv("1 turn to degrees")], ["180 ° = 3.141593 rad", "1 turn = 360 °"]);
+  eq("data sizes keep bytes and bits apart", [conv("1 GiB to MB"), conv("1 MB to KB"), conv("8 Mb to MB"), conv("1 B to bits")], ["1 GiB = 1073.742 MB", "1 MB = 1000 kB", "8 Mb = 1 MB", "1 B = 8 bit"]);
+  eq("arithmetic on the left of the unit", [conv("(2 + 3) km to m"), conv("1e3 m to km"), conv("10/4 kg to g"), conv("sqrt(16) ft to in")], ["5 km = 5000 m", "1000 m = 1 km", "2.5 kg = 2500 g", "4 ft = 48 in"]);
+  eq("no number means one", conv("km to miles"), "1 km = 0.6213712 mi");
+  eq("spelled out, in any case", [conv("5 Kilometers TO Miles"), conv("3 square feet to square meters"), conv("2 fluid ounces to ml")], ["5 km = 3.106856 mi", "3 ft² = 0.2787091 m²", "2 fl oz = 59.14706 mL"]);
+  eq("arrows work", [conv("5 km -> mi"), conv("5 km → mi")], ["5 km = 3.106856 mi", "5 km = 3.106856 mi"]);
+  eq("converting back round-trips", Math.abs(parseConversion("1 mi to km", evaluate)!.result - 1.609344) < 1e-9 && Math.abs(parseConversion("1.609344 km to mi", evaluate)!.result - 1) < 1e-9, true);
+
+  const fails = (e: string) => { try { parseConversion(e, evaluate); return "no error"; } catch (err) { return err instanceof UnitError ? err.message : `other: ${(err as Error).message}`; } };
+  eq("length to mass is refused, saying why", fails("5 km to kg"), "Can't convert length (km) to mass (kg).");
+  eq("an unknown unit is named", [fails("5 smoots to km"), fails("5 km to cubits")], ['Unknown unit "smoots".', 'Unknown unit "cubits".']);
+  eq("ambiguous units are not guessed", [fails("5 tons to kg"), fails("100 calories to kJ"), fails("2 months to days")].map((m) => m.includes("ambiguous") || m.includes("not a fixed")), [true, true, true]);
+  eq("a missing unit is asked for", fails("5 to km"), 'Say what unit the number is in, e.g. "5 km to mi".');
+  eq("milli and mega are not mixed up", [lookupUnit("mW")?.label, lookupUnit("MW")?.label, lookupUnit("mw")], ["mW", "MW", null]);
+  eq("nor bits and bytes", [lookupUnit("b")?.label, lookupUnit("B")?.label, lookupUnit("Mb")?.label, lookupUnit("MB")?.label, lookupUnit("mb")?.label], ["bit", "B", "Mb", "MB", "MB"]);
+
+  eq("ordinary arithmetic is not touched", [conv("2 + 2"), conv("(2+3)*sqrt(16)"), conv("10 / 4"), conv("5 % 3")], [null, null, null, null]);
+  eq("nor is nonsense that happens to contain 'to'", conv("tomato to potato"), null);
+  eq("numbers format without noise", [formatNumber(0), formatNumber(0.1 + 0.2), formatNumber(1 / 3), formatNumber(1e21), formatNumber(1234567.891), formatNumber(-2.5e-8)], ["0", "0.3", "0.3333333", "1e+21", "1234568", "-2.5e-8"]);
+
+  const viaTool = async (expression: string) => (await runToolCall({ id: "u", name: "calculate", arguments: JSON.stringify({ expression }) }, {})).content;
+  eq("through the tool: a conversion", await viaTool("5 km to miles"), "5 km to miles → 5 km = 3.106856 mi");
+  eq("a failed conversion is an error the model can read", (await viaTool("5 km to kg")).includes("Can't convert length"), true);
+  eq("and arithmetic still reads as before", await viaTool("6*7"), "6*7 = 42");
+
+  // Conversion rides inside `calculate` so it adds nothing to the tool list.
+  const BEFORE = 369; // JSON.stringify(toWireTool(calculateTool)).length, before conversions existed
+  const now = JSON.stringify(toWireTool(calculateTool)).length;
+  ok(`the calculate tool's schema is no bigger than it was (${now} ≤ ${BEFORE} characters)`, now <= BEFORE);
+  ok("and says it converts units", calculateTool.description.includes("unit conversion") && calculateTool.description.includes("5 km to mi"));
+  eq("there is no separate conversion tool", allTools().some((t) => /convert|unit/i.test(t.name)), false);
+}
+
+console.log("\n--- memory search and tags ---");
+{
+  const entry = (id: string, text: string, tags: string[] = []) => ({ id, text, tags, createdAt: 1, updatedAt: 1 });
+  const all = [
+    entry("1", "Prefers dark roast coffee", ["food"]),
+    entry("2", "Works on the Atlas project in Rust", ["work", "always"]),
+    entry("3", "Allergic to penicillin", ["health", "always"]),
+    entry("4", "Atlas deadline is in March", ["work"]),
+  ];
+  eq("tags are normalised", [normalizeMemoryTag("#Work"), normalizeMemoryTag("  Deep Work "), normalizeMemoryTag("##x")], ["work", "deep-work", "x"]);
+  eq("a tag list is cleaned, deduped and capped", [cleanMemoryTags(["Work", "work", "#WORK", " ", 5, "a"]), cleanMemoryTags("nope"), cleanMemoryTags(Array.from({ length: 30 }, (_, i) => `t${i}`)).length], [["work", "5", "a"], [], MAX_MEMORY_TAGS]);
+  eq("typed tags split on commas and spaces", parseTagInput("work, #Health  always,,"), ["work", "health", "always"]);
+  eq("tags are counted, most used first", memoryTagCounts(all), [{ tag: "always", count: 2 }, { tag: "work", count: 2 }, { tag: "food", count: 1 }, { tag: "health", count: 1 }]);
+  eq("no filter shows everything", filterMemory(all, {}).length, 4);
+  eq("a word must appear in the text", filterMemory(all, { query: "atlas" }).map((e) => e.id), ["2", "4"]);
+  eq("every word must, in any order", filterMemory(all, { query: "project atlas" }).map((e) => e.id), ["2"]);
+  eq("tags are searched too", filterMemory(all, { query: "health" }).map((e) => e.id), ["3"]);
+  eq("a tag filter keeps only that tag", filterMemory(all, { tag: "work" }).map((e) => e.id), ["2", "4"]);
+  eq("the tag filter forgives a # and capitals", filterMemory(all, { tag: "#Work" }).map((e) => e.id), ["2", "4"]);
+  eq("search and tag together", filterMemory(all, { query: "deadline", tag: "work" }).map((e) => e.id), ["4"]);
+  eq("nothing matching is empty, not an error", filterMemory(all, { query: "zebra" }), []);
+}
+
+console.log("\n--- memory export and import ---");
+{
+  const entry = (id: string, text: string, tags: string[] = [], at = 1000) => ({ id, text, tags, createdAt: at, updatedAt: at, sourceChatId: "chat-1" });
+  const have = [entry("a", "Likes tea", ["food"]), entry("b", "Lives in Oslo", ["always"], 2000)];
+  const file = exportMemory(have, new Date("2026-10-02T12:00:00Z"));
+  eq("an export names its format", [file.format, file.version, file.exportedAt], ["jarvis-memory", 1, "2026-10-02T12:00:00.000Z"]);
+  eq("and leaves behind what is about this install", Object.keys(file.entries[0]).sort(), ["createdAt", "tags", "text", "updatedAt"]);
+  eq("the file is named for the day", memoryFilename(new Date("2026-10-02T12:00:00Z")), "jarvis-memory-2026-10-02.json");
+  eq("same fact, whatever its capitals or spacing", sameness("  Likes   TEA "), "likes tea");
+
+  let n = 0;
+  const id = () => `new-${++n}`;
+  const nothing = planImport(have, JSON.parse(JSON.stringify(file)), id);
+  eq("importing your own export adds nothing", nothing.ok && [nothing.add.length, nothing.skipped.duplicate], [0, 2]);
+
+  const other = { format: "jarvis-memory", version: 1, entries: [
+    { text: "Likes TEA", tags: [] },
+    { text: "Plays the cello", tags: ["Hobby", "always"], createdAt: 500, updatedAt: 700, id: "a" },
+    { text: "  ", tags: [] },
+    { text: "x".repeat(MAX_ENTRY_CHARS + 1) },
+    { notText: 1 },
+    "Owns a bike",
+    "owns a BIKE",
+  ] };
+  const plan = planImport(have, other, id, 10_000);
+  ok("a mixed file imports what is good", plan.ok);
+  if (plan.ok) {
+    eq("adding only the new facts", plan.add.map((e) => e.text), ["Plays the cello", "Owns a bike"]);
+    eq("counting what it skipped, and why", plan.skipped, { duplicate: 2, invalid: 3, full: 0 });
+    eq("new ids, never the file's — so a file can't overwrite an entry by guessing its id", plan.add.map((e) => e.id).every((i) => i.startsWith("new-")) && !plan.add.some((e) => e.id === "a"), true);
+    eq("tags are cleaned and kept", plan.add[0].tags, ["hobby", "always"]);
+    eq("and it reports how many are pinned into every chat", plan.pinned, 1);
+    eq("dates come across when sensible, else now", [plan.add[0].createdAt, plan.add[0].updatedAt, plan.add[1].createdAt], [500, 700, 10_000]);
+  }
+  eq("a bare list of strings is accepted", planImport([], ["one", "two"], id).ok && (planImport([], ["one", "two"], id) as { add: unknown[] }).add.length, 2);
+  eq("another kind of file is refused", planImport([], { format: "jarvis-settings", version: 1 }, id), { ok: false, error: "That doesn't look like a JARVIS memory file." });
+  eq("so is a newer version", planImport([], { format: "jarvis-memory", version: 2, entries: [] }, id), { ok: false, error: "This file is version 2; this JARVIS reads version 1." });
+  eq("and a number", planImport([], 42, id), { ok: false, error: "That doesn't look like a JARVIS memory file." });
+  eq("and a file with no list", planImport([], { format: "jarvis-memory", version: 1 }, id), { ok: false, error: "The file has no list of entries." });
+  eq("an enormous file is refused before any of it is read", planImport([], Array.from({ length: MAX_IMPORT_ENTRIES + 1 }, () => "x"), id).ok, false);
+  const crowded = Array.from({ length: MAX_MEMORY_ENTRIES - 1 }, (_, i) => entry(`e${i}`, `fact ${i}`));
+  const full = planImport(crowded, ["fresh one", "fresh two", "fresh three"], id);
+  eq("memory has a ceiling, and says so when an import hits it", full.ok && [full.add.length, full.skipped.full], [1, 2]);
+  eq("the existing entries are never in the plan", nothing.ok && nothing.add.every((e) => !have.some((h) => h.id === e.id)), true);
+  eq("future dates are not trusted", planImport([], [{ text: "from the future", createdAt: Date.now() + 10 * 86_400_000 }], id, Date.now()).ok && (planImport([], [{ text: "from the future", createdAt: Date.now() + 10 * 86_400_000 }], id, Date.now()) as { add: { createdAt: number }[] }).add[0].createdAt <= Date.now(), true);
+
+  // The routes themselves, against a real folder.
+  const dir = mkdtempSync(join(tmpdir(), "jarvis-mem-"));
+  process.env.JARVIS_DATA_DIR = dir;
+  try {
+    const memoryRoute = await import("../app/api/memory/route");
+    const importRoute = await import("../app/api/memory/import/route");
+    const exportRoute = await import("../app/api/memory/export/route");
+    const post = (path: string, body: unknown, headers: Record<string, string> = { "Content-Type": "application/json" }) =>
+      new Request(`http://localhost${path}`, { method: "POST", headers, body: typeof body === "string" ? body : JSON.stringify(body) }) as never;
+
+    await memoryRoute.POST(post("/api/memory", { text: "Likes tea", tags: ["Food", "always"] }));
+    const [{ id: tid, tags: stored }] = (await (await memoryRoute.GET()).json()).entries;
+    eq("a tag typed with capitals is stored clean", stored, ["food", "always"]);
+    await memoryRoute.POST(post("/api/memory", { id: tid, text: "Likes green tea" }));
+    const afterEdit = (await (await memoryRoute.GET()).json()).entries[0];
+    eq("editing the words alone keeps the tags (it used to wipe them, \"always\" included)", [afterEdit.text, afterEdit.tags], ["Likes green tea", ["food", "always"]]);
+    await memoryRoute.POST(post("/api/memory", { id: tid, text: "Likes green tea", tags: [] }));
+    eq("sending an empty tag list clears them, on purpose", (await (await memoryRoute.GET()).json()).entries[0].tags, []);
+
+    const exported = await exportRoute.GET();
+    eq("export is a download", [exported.headers.get("content-type"), /^attachment; filename="jarvis-memory-\d{4}-\d{2}-\d{2}\.json"$/.test(exported.headers.get("content-disposition") ?? ""), exported.headers.get("cache-control")], ["application/json; charset=utf-8", true, "no-store"]);
+    const exportedFile = JSON.parse(await exported.text());
+    eq("holding the entries", exportedFile.entries.map((e: { text: string }) => e.text), ["Likes green tea"]);
+
+    eq("import wants application/json", (await importRoute.POST(post("/api/memory/import", "{}", { "Content-Type": "text/plain" }))).status, 415);
+    eq("and valid JSON", (await importRoute.POST(post("/api/memory/import", "{nope"))).status, 400);
+    eq("and a memory file", (await importRoute.POST(post("/api/memory/import", { format: "other" }))).status, 400);
+    eq("and not a huge one", (await importRoute.POST(post("/api/memory/import", "{}", { "Content-Type": "application/json", "Content-Length": String(3 * 1024 * 1024) }))).status, 413);
+
+    const toAdd = { format: "jarvis-memory", version: 1, entries: [{ text: "Likes green tea" }, { text: "Rides a bike", tags: ["always"] }] };
+    const dry = await (await importRoute.POST(post("/api/memory/import?dry=1", toAdd))).json();
+    eq("a dry run reports and writes nothing", [dry.dry, dry.added, dry.skipped.duplicate, dry.pinned, (await (await memoryRoute.GET()).json()).entries.length], [true, 1, 1, 1, 1]);
+    const real = await (await importRoute.POST(post("/api/memory/import", toAdd))).json();
+    eq("the real import adds it", [real.added, (await (await memoryRoute.GET()).json()).entries.length], [1, 2]);
+    const again = await (await importRoute.POST(post("/api/memory/import", toAdd))).json();
+    eq("and importing it again adds nothing", again.added, 0);
+  } finally {
+    delete process.env.JARVIS_DATA_DIR;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+console.log("\n--- favourite models ---");
+{
+  eq("a key is provider:model", favoriteKey("groq", "llama-3.3-70b"), "groq:llama-3.3-70b");
+  eq("split at the first colon, so a model id may have one", parseFavorite("local:qwen2.5:7b"), { provider: "local", model: "qwen2.5:7b" });
+  eq("malformed keys are not keys", [parseFavorite("nocolon"), parseFavorite(":model"), parseFavorite("provider:")], [null, null, null]);
+  eq("a list is cleaned", cleanFavorites(["a:b", "a:b", 5, "bad", "c:d", "x".repeat(400) + ":y", null]), ["a:b", "c:d"]);
+  eq("anything else is empty", [cleanFavorites("a:b"), cleanFavorites(undefined)], [[], []]);
+  eq("starring adds to the top", toggleFavorite(["a:1"], "b:2"), ["b:2", "a:1"]);
+  eq("starring again removes it", toggleFavorite(["b:2", "a:1"], "b:2"), ["a:1"]);
+  eq("there is a limit, and the oldest star goes first", (() => { let l: string[] = []; for (let i = 0; i < MAX_FAVORITES + 5; i++) l = toggleFavorite(l, `p:m${i}`); return [l.length, l[0], l.includes("p:m0")]; })(), [MAX_FAVORITES, `p:m${MAX_FAVORITES + 4}`, false]);
+  eq("isFavorite", [isFavorite(["a:b"], "a", "b"), isFavorite(["a:b"], "a", "c"), isFavorite(undefined, "a", "b")], [true, false, false]);
+}
+
+console.log("\n--- the context meter ---");
+{
+  const msg = (content: string, attachments?: Attachment[]) => ({ content, attachments });
+  eq("text costs a quarter of its length, plus framing", conversationTokens([msg("x".repeat(400))]), 104);
+  eq("every message pays the framing", conversationTokens([msg(""), msg(""), msg("")]), 12);
+  const image = { id: "i", kind: "image", name: "p.png", mime: "image/png", size: 1, dataUrl: "data:image/png;base64,AAAA" } as Attachment;
+  const old = { id: "j", kind: "image", name: "old.png", mime: "image/png", size: 1 } as Attachment;
+  eq("a picture still carrying its bytes costs a picture", conversationTokens([msg("", [image])]), 4 + IMAGE_TOKENS);
+  eq("an older one, lightened to a name, costs nothing", conversationTokens([msg("", [old])]), 4);
+  eq("no more than three pictures count", conversationTokens([msg("", [image, image, image, image, image])]), 4 + 3 * IMAGE_TOKENS);
+  const file = { id: "f", kind: "text", name: "a.txt", mime: "text/plain", size: 400, text: "y".repeat(400) } as Attachment;
+  eq("attached text counts", conversationTokens([msg("", [file])]), 4 + 100 + 20);
+
+  const g = (id: string, budget?: { context?: number }) => getProvider(id, undefined, budget);
+  const sizes = (id: string) => ({ maxContextTokens: g(id).maxContextTokens, maxRequestTokens: g(id).maxRequestTokens, customEndpoint: Boolean(g(id).allowCustomEndpoint) });
+  const ceilingOf = (id: string, budget?: { context?: number }) => { const c = g(id, budget); return Math.min(c.maxContextTokens, c.maxRequestTokens ?? Infinity); };
+  const providerIds = ["groq", "cerebras", "gemini", "mistral", "local"];
+  for (const id of providerIds) {
+    for (const budget of [undefined, { context: 16000 }, { context: 100 }, { context: 999999 }, { context: NaN }]) {
+      const mine = contextCeiling(sizes(id), budget);
+      const theirs = ceilingOf(id, budget);
+      if (mine !== theirs) eq(`the meter and the server agree on the ceiling for ${id} with ${JSON.stringify(budget)}`, mine, theirs);
+    }
+  }
+  ok("the meter and the server agree on the ceiling for every provider, with and without a Settings override", true);
+  eq("a free tier's request budget, not its window, is the ceiling", contextCeiling({ maxContextTokens: 96_000, maxRequestTokens: 3500 }), 3500);
+  eq("a provider with no request budget uses its window", contextCeiling({ maxContextTokens: 32_000 }), 32_000);
+  eq("a slot you may repoint takes your size (and 85% of it as the request)", contextCeiling({ maxContextTokens: 8000, maxRequestTokens: 6000, customEndpoint: true }, { context: 20_000 }), 17_000);
+  eq("but only that kind of slot", contextCeiling({ maxContextTokens: 8000, maxRequestTokens: 6000 }, { context: 20_000 }), 6000);
+
+  const base = { persona: "x".repeat(400), toolTokens: 500, noteTokens: 0, useTools: true };
+  const small = measureContext({ ...base, messages: [msg("hi")], limit: 10_000 });
+  eq("the instructions and the tool list count before a word is said", small.used, 100 + 4 + 500 + 4 + 1);
+  eq("with tools off the list is not counted", measureContext({ ...base, useTools: false, messages: [], limit: 10_000 }).used, 104);
+  eq("a roomy window is ok", [small.level, small.leftOut], ["ok", false]);
+  const near = measureContext({ ...base, messages: [msg("x".repeat(20_000))], limit: 7000 });
+  eq("past 70% it warns", [near.level, near.leftOut], ["warn", false]);
+  const over = measureContext({ ...base, messages: [msg("x".repeat(40_000))], limit: 7000 });
+  eq("past the ceiling the oldest messages are being left out", [over.level, over.leftOut, over.ratio > 1], ["full", true, true]);
+  eq("token counts read naturally", [formatTokens(850), formatTokens(2400), formatTokens(10_000), formatTokens(12_300), formatTokens(2000)], ["850", "2.4k", "10k", "12k", "2k"]);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

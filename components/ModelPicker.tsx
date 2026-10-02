@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { AlertCircle, Check, ChevronDown, Cpu, Search, Stethoscope, Zap } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { AlertCircle, Check, ChevronDown, Cpu, Search, Star, Stethoscope, Zap } from "lucide-react";
+import { favoriteKey, isFavorite, parseFavorite } from "@/lib/favorites";
 
 export interface ProviderState {
   id: string;
@@ -10,6 +11,8 @@ export interface ProviderState {
   signupUrl: string;
   envKey: string;
   maxContextTokens: number;
+  /** What one request may cost, if tighter than the window (free tiers meter per request). */
+  maxRequestTokens?: number;
   maxOutputTokens: number;
   hasKey: boolean;
   /** Usable right now — which for a local server means "needs no key". */
@@ -34,6 +37,23 @@ interface Props {
   model: string;
   onChange: (provider: string, model: string) => void;
   onOpenSettings: () => void;
+  /** Starred models, as "provider:model". With `onToggleFavorite`, each row gets a star. */
+  favorites?: string[];
+  onToggleFavorite?: (provider: string, model: string) => void;
+  /**
+   * Where the list opens. "below" hangs it from the button (the header's own).
+   * "auto" is for a picker inside something that scrolls, like a message: it is
+   * laid out against the window instead, on whichever side has more room, so a
+   * reply near the top of the chat can't open it off the top of the screen where
+   * nothing can scroll it back into view.
+   */
+  placement?: "below" | "auto";
+  /** Your own button in place of the usual one. Called with whether the list is open. */
+  trigger?: (state: { open: boolean; toggle: () => void }) => ReactNode;
+  /** Name for the list, for screen readers. */
+  label?: string;
+  /** Leave out the "can this model use tools?" check and the footnote. */
+  bare?: boolean;
 }
 
 export default function ModelPicker({
@@ -42,6 +62,12 @@ export default function ModelPicker({
   model,
   onChange,
   onOpenSettings,
+  favorites,
+  onToggleFavorite,
+  placement = "below",
+  trigger,
+  label = "Choose a model",
+  bare = false,
 }: Props) {
   const [open, setOpen] = useState(false);
   /**
@@ -54,6 +80,27 @@ export default function ModelPicker({
   const [probe, setProbe] = useState<{ ok: boolean; text: string } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  /** For placement "auto": where the list sits in the window. */
+  const [spot, setSpot] = useState<{ left: number; top?: number; bottom?: number; maxHeight: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!open || placement !== "auto" || !ref.current) {
+      setSpot(null);
+      return;
+    }
+    const r = ref.current.getBoundingClientRect();
+    const margin = 8;
+    const width = Math.min(320, window.innerWidth - margin * 2);
+    const room = { above: r.top - margin, below: window.innerHeight - r.bottom - margin };
+    const up = room.below < 320 && room.above > room.below;
+    const left = Math.min(Math.max(margin, r.left), window.innerWidth - width - margin);
+    const cap = window.innerHeight * 0.7;
+    setSpot(
+      up
+        ? { left, bottom: window.innerHeight - r.top + 6, maxHeight: Math.min(room.above - 6, cap) }
+        : { left, top: r.bottom + 6, maxHeight: Math.min(room.below - 6, cap) },
+    );
+  }, [open, placement]);
 
   useEffect(() => {
     if (!open) return;
@@ -63,15 +110,32 @@ export default function ModelPicker({
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
     }
+    // A list laid out against the window can't follow its button as the chat
+    // scrolls under it, so it closes — as a native menu does. Scrolling the list
+    // itself is not that.
+    function onScroll(e: Event) {
+      if (placement === "auto" && !(e.target instanceof Node && ref.current?.contains(e.target))) setOpen(false);
+    }
+    function onResize() {
+      if (placement === "auto") setOpen(false);
+    }
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
-    // Type straight into the filter rather than reaching for the mouse.
-    searchRef.current?.focus();
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
     };
-  }, [open]);
+  }, [open, placement]);
+
+  // Type straight into the filter rather than reaching for the mouse — once the
+  // list is where it is going to be: a hidden element can't take focus.
+  useEffect(() => {
+    if (open && (placement !== "auto" || spot)) searchRef.current?.focus();
+  }, [open, placement, spot]);
 
   // Start each visit unfiltered; a stale query reads as a missing model.
   useEffect(() => {
@@ -146,20 +210,44 @@ export default function ModelPicker({
     ? query.trim()
     : null;
 
+  // Starred models that are actually available right now: a star for a provider
+  // that has lost its key, or a model that has been retired, isn't offered.
+  const starred = (favorites ?? [])
+    .map(parseFavorite)
+    .filter((f): f is { provider: string; model: string } => f !== null)
+    .filter((f) => providers.find((p) => p.id === f.provider)?.ready && providers.find((p) => p.id === f.provider)?.models.includes(f.model))
+    .filter((f) => matches(f.model));
+
+  const toggle = () => setOpen((v) => !v);
+
   return (
     <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex max-w-[60vw] items-center gap-1.5 rounded-lg border border-line bg-raised px-2.5 py-1.5 text-[12px] text-ink transition hover:border-arc-dim/50 sm:max-w-none"
-      >
-        <Zap size={12} className="shrink-0 text-arc" />
-        <span className="truncate font-mono">{model || "Select a model"}</span>
-        <span className="hidden shrink-0 text-ink-faint sm:inline">· {current?.label ?? provider}</span>
-        <ChevronDown size={12} className="shrink-0 text-ink-faint" />
-      </button>
+      {trigger ? (
+        trigger({ open, toggle })
+      ) : (
+        <button
+          onClick={toggle}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          className="flex max-w-[60vw] items-center gap-1.5 rounded-lg border border-line bg-raised px-2.5 py-1.5 text-[12px] text-ink transition hover:border-arc-dim/50 sm:max-w-none"
+        >
+          <Zap size={12} className="shrink-0 text-arc" />
+          <span className="truncate font-mono">{model || "Select a model"}</span>
+          <span className="hidden shrink-0 text-ink-faint sm:inline">· {current?.label ?? provider}</span>
+          <ChevronDown size={12} className="shrink-0 text-ink-faint" />
+        </button>
+      )}
 
       {open && (
-        <div className="absolute right-0 z-40 mt-1.5 flex max-h-[70vh] w-[320px] flex-col rounded-xl border border-line bg-panel p-1.5 shadow-2xl shadow-black/50">
+        <div
+          role="dialog"
+          aria-label={label}
+          data-model-list
+          style={placement === "auto" && spot ? { position: "fixed", ...spot } : undefined}
+          className={`z-40 flex w-[320px] max-w-[92vw] flex-col rounded-xl border border-line bg-panel p-1.5 shadow-2xl shadow-black/50 ${
+            placement === "auto" ? (spot ? "" : "invisible absolute left-0 top-full") : "absolute right-0 mt-1.5 max-h-[70vh]"
+          }`}
+        >
           <div className="relative mb-1 shrink-0">
             <Search
               size={11}
@@ -176,6 +264,39 @@ export default function ModelPicker({
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto">
+          {starred.length > 0 && (
+            <div className="mb-1" data-model-favorites>
+              <div className="flex items-center gap-1.5 px-2 py-1.5">
+                <Star size={11} className="fill-warn text-warn" aria-hidden />
+                <span className="text-[12px] font-semibold">Favourites</span>
+              </div>
+              <ul>
+                {starred.map((f) => {
+                  const selected = f.provider === provider && f.model === model;
+                  return (
+                    <li key={favoriteKey(f.provider, f.model)} className="group flex items-center">
+                      <button
+                        onClick={() => {
+                          onChange(f.provider, f.model);
+                          setOpen(false);
+                        }}
+                        data-favorite-row
+                        className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left font-mono text-[11.5px] transition ${
+                          selected ? "bg-raised text-arc" : "text-ink-dim hover:bg-raised/60 hover:text-ink"
+                        }`}
+                      >
+                        <Check size={11} className={selected ? "shrink-0 text-arc" : "shrink-0 opacity-0"} />
+                        <span className="truncate">{f.model}</span>
+                        <span className="ml-auto shrink-0 pl-2 font-sans text-[10px] text-ink-faint">
+                          {providers.find((p) => p.id === f.provider)?.label}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
           {typedId && (
             <button
               onClick={() => {
@@ -196,6 +317,9 @@ export default function ModelPicker({
           {/* While filtering, a provider with no match is noise — its header
               and its "no key yet" prompt both distract from the one result. */}
           {providers
+            // Picking a model for one reply isn't the place to be asked for
+            // keys: leave out providers that can't answer.
+            .filter((p) => !bare || (p.ready && !p.error && p.models.length > 0))
             .filter((p) => !needle || p.models.some(matches))
             .map((p) => (
             <div key={p.id} className="mb-1 last:mb-0">
@@ -249,14 +373,16 @@ export default function ModelPicker({
                 <ul>
                   {p.models.filter(matches).map((id) => {
                     const selected = p.id === provider && id === model;
+                    const starredNow = isFavorite(favorites, p.id, id);
                     return (
-                      <li key={`${p.id}:${id}`}>
+                      <li key={`${p.id}:${id}`} className="group flex items-center">
                         <button
                           onClick={() => {
                             onChange(p.id, id);
                             setOpen(false);
                           }}
-                          className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-mono text-[11.5px] transition ${
+                          data-model-row
+                          className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left font-mono text-[11.5px] transition ${
                             selected ? "bg-raised text-arc" : "text-ink-dim hover:bg-raised/60 hover:text-ink"
                           }`}
                         >
@@ -266,6 +392,19 @@ export default function ModelPicker({
                           />
                           <span className="truncate">{id}</span>
                         </button>
+                        {onToggleFavorite && (
+                          <button
+                            onClick={() => onToggleFavorite(p.id, id)}
+                            aria-pressed={starredNow}
+                            aria-label={`${starredNow ? "Remove" : "Add"} ${id} ${starredNow ? "from" : "to"} favourites`}
+                            data-favorite-toggle={`${p.id}:${id}`}
+                            className={`shrink-0 rounded p-1.5 text-ink-faint transition hover:text-warn focus-visible:opacity-100 ${
+                              starredNow ? "" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+                            }`}
+                          >
+                            <Star size={12} className={starredNow ? "fill-warn text-warn" : ""} />
+                          </button>
+                        )}
                       </li>
                     );
                   })}
@@ -288,7 +427,7 @@ export default function ModelPicker({
 
           {/* The question a model list cannot answer: does this one actually
               do the thing JARVIS needs? */}
-          {model && (
+          {model && !bare && (
             <div className="shrink-0 border-t border-line-soft px-1 pt-1.5">
               <button
                 onClick={checkModel}
@@ -310,10 +449,12 @@ export default function ModelPicker({
             </div>
           )}
 
-          <p className="shrink-0 border-t border-line-soft px-2 pb-1 pt-2 text-[10px] leading-relaxed text-ink-faint">
-            Model lists are fetched live from each provider, so deprecations
-            never leave you on a dead model.
-          </p>
+          {!bare && (
+            <p className="shrink-0 border-t border-line-soft px-2 pb-1 pt-2 text-[10px] leading-relaxed text-ink-faint">
+              Model lists are fetched live from each provider, so deprecations
+              never leave you on a dead model.
+            </p>
+          )}
         </div>
       )}
     </div>

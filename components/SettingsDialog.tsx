@@ -8,6 +8,7 @@ import { exportSettings, importSettings } from "@/lib/settings-io";
 import { cleanPrompts, type SavedPrompt } from "@/lib/prompts";
 import PromptsEditor from "./PromptsEditor";
 import AppearanceSettings from "./AppearanceSettings";
+import PersonaPicker from "./PersonaPicker";
 import { DEFAULT_GREETING } from "@/lib/voice/session";
 import { ttsEngines, getTts, kokoroEngine, QUALITY_OPTIONS, type KokoroQuality } from "@/lib/voice/tts";
 import type { ProviderState } from "./ModelPicker";
@@ -53,6 +54,8 @@ export interface Settings {
   macs: Record<string, string>;
   /** Text you reuse, called up from the composer with "/name". */
   prompts: SavedPrompt[];
+  /** Models starred in the picker, as "provider:model". */
+  favorites: string[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -69,6 +72,7 @@ export const DEFAULT_SETTINGS: Settings = {
   budgets: {},
   macs: {},
   prompts: [],
+  favorites: [],
 };
 
 interface Props {
@@ -275,6 +279,7 @@ export default function SettingsDialog({
                 Reset
               </button>
             </div>
+            <PersonaPicker value={draft.persona} onPick={(persona) => setDraft((d) => ({ ...d, persona }))} />
             <textarea
               value={draft.persona}
               onChange={(e) => setDraft((d) => ({ ...d, persona: e.target.value }))}

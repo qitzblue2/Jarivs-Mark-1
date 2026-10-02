@@ -18,6 +18,11 @@ import { storageDriver } from "@/lib/storage";
 import { computerAccessEnabled } from "@/lib/tools/fs/workspace";
 import { authConfigured, openNetwork, requiresAuth } from "@/lib/auth/session";
 import { isSandbox, sandboxPort, selfEditEnabled } from "@/lib/sandbox/paths";
+import { allTools } from "@/lib/tools/registry";
+import { toWireTool } from "@/lib/tools/types";
+import { resolveImageKey } from "@/lib/tools/generate-image";
+import { environmentNote } from "@/lib/environment";
+import { estimateTokens } from "@/lib/tokens";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,6 +75,8 @@ export async function GET(req: NextRequest) {
         signupUrl: config.signupUrl,
         envKey: config.envKey,
         maxContextTokens: sizes.maxContextTokens,
+        /** What one request may hold, when that is less than the window. */
+        maxRequestTokens: sizes.maxRequestTokens,
         /** Whether this provider is usable — not whether a key exists. */
         ready: providerReady(id, clientKeys[id], clientEndpoints[id]),
         needsKey,
@@ -140,6 +147,12 @@ export async function GET(req: NextRequest) {
       // the sandbox copy — the UI says so loudly, so nobody tests in the
       // real one thinking it's the copy, or the other way round.
       selfEdit: { enabled: selfEditEnabled(), isSandbox: isSandbox(), port: sandboxPort() },
+      // What every request carries besides the conversation, for the context
+      // meter: the tool list (when tools are on) and the machine note.
+      overhead: {
+        toolTokens: estimateTokens(JSON.stringify(allTools({ imageKey: resolveImageKey(clientKeys.nanogpt) }).map(toWireTool))),
+        noteTokens: estimateTokens(environmentNote()),
+      },
     },
     { headers: { "Cache-Control": "no-store" } },
   );

@@ -2,11 +2,13 @@
 
 import { memo, useCallback, useState } from "react";
 import { splitReasoning } from "@/lib/reasoning";
-import { AlertTriangle, Check, ChevronRight, Copy, GitBranch, Pencil, RefreshCw, Square, Star, Volume2, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Copy, GitBranch, Pencil, RefreshCw, Square, Star, Volume2, X } from "lucide-react";
 import { describeStats, formatTime, isLongMessage } from "@/lib/format";
 import Markdown from "./Markdown";
 import ToolTrace from "./ToolTrace";
 import Attachments from "./Attachments";
+import ModelPicker from "./ModelPicker";
+import { useModels } from "./models-context";
 import type { Message as MessageType } from "@/lib/types";
 
 interface Props {
@@ -52,6 +54,7 @@ function MessageBody({
   const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState(message.content);
   const [copied, setCopied] = useState(false);
+  const models = useModels();
 
   // Bound to this message here rather than by the list, so the props coming
   // in stay reference-stable and the memo below can actually bail out.
@@ -272,6 +275,33 @@ function MessageBody({
                   <RefreshCw size={12} />
                   Regenerate
                 </button>
+              )}
+              {!isUser && canRegenerate && onRegenerate && models && (
+                <ModelPicker
+                  bare
+                  placement="auto"
+                  label="Regenerate with another model"
+                  providers={models.providers}
+                  provider={message.provider ?? ""}
+                  model={message.model ?? ""}
+                  onChange={(provider, model) => models.onRegenerateWith(message.id, provider, model)}
+                  onOpenSettings={models.onOpenSettings}
+                  favorites={models.favorites}
+                  onToggleFavorite={models.onToggleFavorite}
+                  trigger={({ open, toggle }) => (
+                    <button
+                      onClick={toggle}
+                      aria-haspopup="dialog"
+                      aria-expanded={open}
+                      aria-label="Regenerate with another model"
+                      title="Regenerate with another model"
+                      data-regenerate-with
+                      className="rounded px-1 py-1 text-ink-faint transition hover:bg-raised hover:text-ink"
+                    >
+                      <ChevronDown size={12} />
+                    </button>
+                  )}
+                />
               )}
               <time
                 dateTime={new Date(message.createdAt).toISOString()}

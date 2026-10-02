@@ -51,7 +51,7 @@ const incoming = JSON.stringify({
 });
 await dialog.locator("input[data-settings-file]").setInputFiles({ name: "s.json", mimeType: "application/json", buffer: Buffer.from(incoming) });
 await dialog.getByText("Loaded temperature").waitFor({ timeout: 5000 });
-check("import says what changed, and that nothing is saved yet", /Press Save/.test(await dialog.locator("[role=status]").innerText()));
+check("import says what changed, and that nothing is saved yet", /Press Save/.test(await dialog.locator("p[role=status]").innerText()));
 check("the slider shows the imported value", (await dialog.locator("span.font-mono", { hasText: "1.40" }).count()) > 0);
 await page.screenshot({ path: `${OUT}/settings-import.png` });
 

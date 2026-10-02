@@ -32,6 +32,8 @@ interface Props {
   prompts: SavedPrompt[];
   /** A command or prompt was chosen from the slash menu. */
   onSlash: (match: SlashMatch) => void;
+  /** Shown at the right of the hint line — the context meter. */
+  meter?: React.ReactNode;
 }
 
 export default function Composer({
@@ -49,6 +51,7 @@ export default function Composer({
   history,
   prompts,
   onSlash,
+  meter,
 }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -297,10 +300,13 @@ export default function Composer({
             </button>
           )}
         </div>
-        <div className="mt-1.5 px-1 text-[11px] text-ink-faint">
-          {dragging
-            ? "Drop to attach"
-            : "Enter to send · Shift+Enter for a new line · / for commands · ↑ for your last message"}
+        <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-1 text-[11px] text-ink-faint">
+          <span>
+            {dragging
+              ? "Drop to attach"
+              : "Enter to send · Shift+Enter for a new line · / for commands · ↑ for your last message"}
+          </span>
+          {meter}
         </div>
       </div>
     </div>

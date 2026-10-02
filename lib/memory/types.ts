@@ -16,6 +16,8 @@ export interface MemoryEntry {
 export interface MemoryStore {
   list(): Promise<MemoryEntry[]>;
   save(entry: MemoryEntry): Promise<void>;
+  /** Add several at once — one write, not one per entry. */
+  addMany(entries: MemoryEntry[]): Promise<void>;
   delete(id: string): Promise<void>;
   clear(): Promise<void>;
 }

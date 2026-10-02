@@ -5,6 +5,7 @@ import { SlidersHorizontal, X } from "lucide-react";
 import { MAX_PERSONA } from "@/lib/chat-ops";
 import { useEscape } from "@/lib/hooks/use-escape";
 import { useDialogFocus } from "@/lib/hooks/use-dialog-focus";
+import PersonaPicker from "./PersonaPicker";
 
 interface Props {
   open: boolean;
@@ -54,6 +55,7 @@ export default function ChatInstructions({ open, title, value, onSave, onClose }
           </button>
         </div>
         <div className="p-4">
+          <PersonaPicker value={draft} onPick={setDraft} customLabel={draft.trim() ? "Custom" : "Use the Settings instructions"} />
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value.slice(0, MAX_PERSONA))}

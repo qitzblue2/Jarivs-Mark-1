@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getMemory } from "@/lib/memory";
+import { cleanTags } from "@/lib/memory/filter";
 import { isValidChatId, newId } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -24,14 +25,16 @@ export async function POST(req: NextRequest) {
 
     const store = getMemory();
     const now = Date.now();
-    const tags = Array.isArray(body?.tags)
-      ? body.tags.map((t: unknown) => String(t).trim().toLowerCase()).filter(Boolean)
-      : [];
+    // Tags are only replaced when the request carries some. An edit that sends
+    // just new text used to wipe them — including "always", which is what keeps
+    // an entry in every chat.
+    const sentTags = Array.isArray(body?.tags);
+    const tags = cleanTags(body?.tags);
 
     if (body?.id) {
       const existing = (await store.list()).find((e) => e.id === body.id);
       if (!existing) return Response.json({ error: "Not found" }, { status: 404 });
-      await store.save({ ...existing, text, tags, updatedAt: now });
+      await store.save({ ...existing, text, tags: sentTags ? tags : existing.tags, updatedAt: now });
       return Response.json({ ok: true });
     }
 

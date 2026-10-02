@@ -294,6 +294,22 @@ const server = http.createServer((req, res) => {
         return streamText(res, "Arr, matey. Ye be talking to a pirate.", finish);
       }
 
+      // Persona presets: the preset's intro is what changes, so the reply keys off it.
+      if (/patient teacher/i.test(String(personaMessage?.content ?? "")) && !alreadyRanTool && /^teach/i.test(prompt)) {
+        return streamText(res, "Let's start from what you already know.", finish);
+      }
+
+      // Says which model it was asked as, so a test can see "regenerate with…" go where it was sent.
+      if (/^which model/i.test(prompt)) {
+        return streamText(res, `I am ${parsed.model}.`, finish);
+      }
+
+      // Unit conversion goes through the calculate tool, like arithmetic does.
+      const conversion = /^convert (.+)$/i.exec(prompt.trim());
+      if (conversion && parsed.tools?.some((t) => t.function?.name === "calculate") && !alreadyRanTool) {
+        return streamToolCall(res, { id: "call_conv1", name: "calculate", args: { expression: conversion[1] } }, finish);
+      }
+
       // Self-editing: the model changing its own welcome screen, in the sandbox.
       if (parsed.tools?.some((t) => t.function?.name === "code_edit") && /change your (welcome )?title/i.test(prompt) && !alreadyRanTool) {
         return streamToolCall(

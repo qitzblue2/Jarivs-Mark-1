@@ -51,13 +51,13 @@ opt-in, and every write and command still waits for approval.
 - [x] 36. Offline banner
 
 ## E. Models and memory
-- [ ] 37. Persona presets
-- [ ] 38. Context meter — how full the model's window is
-- [ ] 39. Favourite models, starred in the picker
-- [ ] 40. Regenerate a reply with a different model
-- [ ] 41. Memory export and import
-- [ ] 42. Memory search and tag filter
-- [ ] 43. Unit conversion in `calculate`, at no extra tool cost
+- [x] 37. Persona presets
+- [x] 38. Context meter — how full the model's window is
+- [x] 39. Favourite models, starred in the picker
+- [x] 40. Regenerate a reply with a different model
+- [x] 41. Memory export and import
+- [x] 42. Memory search and tag filter
+- [x] 43. Unit conversion in `calculate`, at no extra tool cost
 
 ## F. Everything else
 - [ ] 44. Scheduled-task templates (morning briefing and others)

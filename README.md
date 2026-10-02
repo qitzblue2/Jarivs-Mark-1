@@ -216,6 +216,10 @@ on your own machine.
 | See every shortcut | `?` (outside a text box), or `/help` |
 | Print a chat | `Ctrl/Cmd + P` — just the conversation |
 | Install it as an app | The install icon in Chrome's or Edge's address bar, or **Add to Home Screen** |
+| Switch model for one reply | The **▾** beside **Regenerate** under the last reply |
+| Star a model | The star beside it in the model picker — favourites are listed first |
+| Start from a persona | Settings → **Persona** → *Start from*; also in a chat's own instructions |
+| See how full the context is | The meter beside the message box |
 | Voice mode | `Ctrl/Cmd + J` |
 | Open code in the canvas | Automatic, or the **Canvas** button on any code block |
 | Close the canvas | `Esc` |
@@ -266,6 +270,35 @@ editor; everything else gets syntax highlighting, copy and download.
   export/import.
 - **Listen.** Reads a reply aloud with the browser's own voice — the words, not
   the markdown or the code. Press again to stop.
+
+### Models, personas and the context meter
+
+- **Persona presets.** *Start from* in Settings → Persona (and in a chat's own
+  instructions) fills the box with JARVIS, Brief, Teacher, Code reviewer, Editor
+  or Brainstorm. Each is a short intro joined to the same operating rules as the
+  default, so a Teacher still fences code with a filename, still uses the
+  calculator and still stores memories. It only fills the box — nothing changes
+  until you save — and once you edit the text it reads *Custom*. The default
+  persona is byte-for-byte what it was before presets existed.
+- **Context meter.** Beside the message box: how full the next request is, as
+  `~1.4k / 3.5k`. It measures against what JARVIS will actually send — the
+  smaller of the model's window and the per-request budget, which on a free tier
+  is far smaller (Groq's is 3,500 tokens against a 96,000 window) — because past
+  that line the oldest messages are left out of the request and the model
+  answers as if they never happened. It counts the instructions, the tool list,
+  the conversation, attached files and pictures, and whatever you are typing.
+  Amber at 70%; red once older messages are being left out. It is an estimate
+  (four characters a token, as the server trims with), and memory notes the
+  server adds are not counted.
+- **Favourite models.** Star a model in the picker and it is listed first, under
+  *Favourites*. Stars live in Settings (so they travel with export/import); a
+  star for a model that has since been retired, or a provider that has lost its
+  key, is not offered.
+- **Regenerate with another model.** The **▾** beside *Regenerate* under the
+  last reply opens a list of the models that can answer (favourites first, no
+  prompts for missing keys) and asks again with the one you pick. The new reply
+  names the model that wrote it, and that model becomes the selected one, so the
+  next message doesn't go somewhere you just moved away from.
 
 ### Look, feel and accessibility
 
@@ -331,7 +364,7 @@ Shipped so far:
 |---|---|
 | `web_search` | Searches the web for current information |
 | `fetch_url` | Reads a page in full, as text |
-| `calculate` | Arithmetic, via a real parser |
+| `calculate` | Arithmetic via a real parser — and unit conversion: `5 km to miles`, `72 F in C` |
 | `get_time` | The current date, which a model cannot know on its own |
 | `generate_image` | Draws a picture, or edits one — only offered with a NanoGPT key |
 | `code_read` / `code_edit` / `code_check` | Its own source, in the sandbox — only with `JARVIS_ALLOW_SELF_EDIT=1` |
@@ -403,6 +436,31 @@ it's present in every conversation regardless of topic — that's how something
 like your name stays available. No embeddings: for a few hundred personal
 facts, keyword matching is accurate enough, costs nothing, and you can see
 exactly why something was recalled.
+
+### Searching, tagging and moving memory
+
+In **Settings → Memory**:
+
+- **Search** looks in the text and the tags; every word you type must appear
+  somewhere in the entry, in any order. **Tag chips** filter to one tag (with
+  how many entries carry it); choosing a chip again clears it.
+- **Tags** are shown on each entry and edited beside its text, separated by
+  commas. (Editing an entry's words used to wipe its tags — including `always` —
+  because the editor didn't send them back; fixed, and the API now leaves tags
+  alone unless a request carries some.)
+- **Export** downloads one JSON file (`jarvis-memory-YYYY-MM-DD.json`) with every
+  entry's text, tags and dates — and nothing about this install (no ids, no chat
+  ids).
+- **Import** adds the entries from such a file, or from a plain list of strings.
+  It never edits or removes what is already remembered; an entry that says the
+  same thing as one you have (ignoring capitals and spacing) is skipped; new ids
+  are always generated, so a file can't overwrite an entry by guessing its id;
+  text and tags are cleaned and bounded; a file may hold up to 2,000 entries and
+  memory up to 5,000. The result says what was added, what was skipped and why,
+  and **how many of the new entries are tagged `always`** — that tag puts an
+  entry in every chat's prompt, so it is worth a look after importing a file
+  from someone else. (What `always` entries may cost per request is capped, as
+  before.)
 
 ## 6. Attachments
 
@@ -903,6 +961,7 @@ npm run test:settings  # settings export/import, activity list
 npm run test:organize  # tags, archive, branch, trash, restore-from-backup
 npm run test:composer  # timestamps, saved messages, folding, drafts, up arrow, slash commands
 npm run test:appearance  # theme, text size, shortcuts, resizing, focus, axe scan, print, manifest, offline
+npm run test:models  # persona presets, context meter, favourites, regenerate-with, memory search/export/import, units
 npm run test:security  # login lockout, headers — needs its own server, see the file
 npm run test:sandbox  # self-editing: start with JARVIS_ALLOW_SELF_EDIT=1, see the file
 

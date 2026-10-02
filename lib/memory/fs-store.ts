@@ -38,6 +38,11 @@ export class FsMemoryStore implements MemoryStore {
     await this.writeAll(entries);
   }
 
+  async addMany(added: MemoryEntry[]): Promise<void> {
+    if (added.length === 0) return;
+    await this.writeAll([...(await this.list()), ...added]);
+  }
+
   async delete(id: string): Promise<void> {
     await this.writeAll((await this.list()).filter((e) => e.id !== id));
   }

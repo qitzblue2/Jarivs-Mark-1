@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, AudioLines, Code2, FileDown, GitBranch, Info, Menu, Mic, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import Message from "./Message";
+import ContextMeter from "./ContextMeter";
+import type { ContextInfo } from "@/lib/context-meter";
 import Composer from "./Composer";
 import ApprovalCard, { type PendingApproval } from "./ApprovalCard";
 import ModelPicker, { type ProviderState } from "./ModelPicker";
@@ -49,6 +51,10 @@ interface Props {
   onAttachError: (message: string) => void;
   approvals: PendingApproval[];
   onApprovalSettled: (id: string) => void;
+  /** How full the next request is, for the meter beside the message box. */
+  context: ContextInfo | null;
+  favorites: string[];
+  onToggleFavorite: (provider: string, model: string) => void;
 }
 
 const STARTERS = [
@@ -65,7 +71,7 @@ export default function ChatPane(props: Props) {
     onModelChange, onOpenSettings, onToggleSidebar, onToggleCanvas, canvasOpen,
     artifactCount, notice, onDismissNotice, onStartVoice,
     attachments, onAttach, onRemoveAttachment, onAttachError,
-    approvals, onApprovalSettled,
+    approvals, onApprovalSettled, context, favorites, onToggleFavorite,
   } = props;
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -137,6 +143,8 @@ export default function ChatPane(props: Props) {
           model={model}
           onChange={onModelChange}
           onOpenSettings={onOpenSettings}
+          favorites={favorites}
+          onToggleFavorite={onToggleFavorite}
         />
 
         {chat && chat.messages.length > 0 && (
@@ -311,6 +319,7 @@ export default function ChatPane(props: Props) {
         onRemoveAttachment={onRemoveAttachment}
         onAttachError={onAttachError}
         history={sent}
+        meter={<ContextMeter info={context} />}
         prompts={prompts}
         onSlash={onSlash}
         disabled={!anyKey}
