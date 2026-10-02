@@ -64,6 +64,22 @@ export interface Chat {
   model?: string;
   /** Kept at the top of the sidebar regardless of age. */
   pinned?: boolean;
+  /** Short labels for finding it again; see lib/chat-ops.ts for the rules. */
+  tags?: string[];
+  /** Hidden from the main list, but not deleted. */
+  archived?: boolean;
+  /**
+   * Instructions for this chat alone, replacing the global persona. Empty or
+   * absent means "use the one from Settings".
+   */
+  persona?: string;
+  /** Where a branched or duplicated chat came from. */
+  branchedFrom?: { chatId: string; messageId?: string };
+}
+
+/** A chat in the trash, with when it went there. */
+export interface TrashedChat extends Chat {
+  deletedAt: number;
 }
 
 /** Lightweight row for the sidebar — avoids shipping every message. */
@@ -74,6 +90,8 @@ export interface ChatMeta {
   updatedAt: number;
   messageCount: number;
   pinned?: boolean;
+  tags?: string[];
+  archived?: boolean;
 }
 
 /** A fenced code block lifted out of a message and into the canvas. */
@@ -95,6 +113,8 @@ export function chatMeta(chat: Chat): ChatMeta {
     updatedAt: chat.updatedAt,
     messageCount: chat.messages.length,
     ...(chat.pinned ? { pinned: true } : {}),
+    ...(chat.tags?.length ? { tags: chat.tags } : {}),
+    ...(chat.archived ? { archived: true } : {}),
   };
 }
 

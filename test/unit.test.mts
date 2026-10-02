@@ -33,6 +33,16 @@ import { FORMAT, exportSettings, importSettings } from "../lib/settings-io";
 import { DEFAULT_SETTINGS } from "../components/SettingsDialog";
 import nextConfig, { securityHeaders } from "../next.config";
 import { GET as healthGet } from "../app/api/health/route";
+import { groupByDate } from "../lib/chat-groups";
+import { MAX_TAGS, applyChatPatch, branchChat, normalizeTag, normalizeTags, tagCounts } from "../lib/chat-ops";
+import { parseQuery } from "../lib/chat-search";
+import { MemoryStore } from "../lib/storage/memory-store";
+import { FsStore } from "../lib/storage/fs-store";
+import { TRASH_MS } from "../lib/storage/types";
+import { FsMemoryStore } from "../lib/memory/fs-store";
+import { readZipDirectory, readZipEntry, ZipError } from "../lib/backup/unzip";
+import { describeRestore, restoreBackup } from "../lib/backup/restore";
+import { deflateRawSync } from "node:zlib";
 import { SentenceSplitter, splitSentences } from "../lib/voice/tts/sentences";
 import { Speaker } from "../lib/voice/tts/speaker";
 import { encodeWav, durationOf } from "../lib/voice/wav";
@@ -1644,6 +1654,249 @@ console.log("\n--- headers and health ---");
   const body = await res.json();
   eq("health says it is up", [res.status, body.ok], [200, true]);
   eq("and nothing else about the install", Object.keys(body).sort(), ["ok", "uptimeSeconds"]);
+}
+
+console.log("\n--- the sidebar's sections ---");
+{
+  const now = new Date(2026, 9, 2, 12, 0, 0).getTime(); // Fri 2 Oct, noon, local time
+  const at = (y: number, m: number, d: number, h = 9) => new Date(y, m, d, h).getTime();
+  const row = (id: string, updatedAt: number, pinned = false) => ({ id, title: id, createdAt: updatedAt, updatedAt, messageCount: 1, ...(pinned ? { pinned } : {}) });
+  const chats = [
+    row("this-morning", at(2026, 9, 2, 8)),
+    row("just-after-midnight", at(2026, 9, 2, 0)),
+    row("yesterday-night", at(2026, 9, 1, 23)),
+    row("three-days", at(2026, 8, 29)),
+    row("last-week-edge", at(2026, 8, 25)),
+    row("twenty-days", at(2026, 8, 12)),
+    row("ancient", at(2025, 1, 1)),
+    row("pinned-old", at(2024, 1, 1), true),
+  ];
+  const groups = groupByDate(chats, now);
+  eq("sections in order, empty ones left out", groups.map((g) => g.label), ["Pinned", "Today", "Yesterday", "Previous 7 days", "Previous 30 days", "Older"]);
+  const of = (label: string) => groups.find((g) => g.label === label)!.chats.map((c) => c.id);
+  eq("a pinned chat leads whatever its age", of("Pinned"), ["pinned-old"]);
+  eq("today runs from local midnight, newest first", of("Today"), ["this-morning", "just-after-midnight"]);
+  eq("yesterday is the calendar day before", of("Yesterday"), ["yesterday-night"]);
+  eq("the last seven days", of("Previous 7 days"), ["three-days", "last-week-edge"]);
+  eq("then the last thirty", of("Previous 30 days"), ["twenty-days"]);
+  eq("then everything else", of("Older"), ["ancient"]);
+  eq("no chats, no sections", groupByDate([], now), []);
+}
+
+console.log("\n--- tags, branches and what a PATCH may do ---");
+{
+  eq("a tag is lowercase and hyphenated", normalizeTag("  Home Work  "), "home-work");
+  eq("punctuation that would break a search is removed", normalizeTag("tag:evil!"), "tagevil");
+  eq("an empty tag is nothing", normalizeTag("***"), null);
+  eq("a tag of the wrong type is nothing", normalizeTag(42), null);
+  eq("a tag is cut to 24 characters", normalizeTag("x".repeat(60))!.length, 24);
+  eq("duplicates collapse, order kept", normalizeTags(["Work", "work", "home", " WORK "]), ["work", "home"]);
+  eq("there are never more than eight", normalizeTags(Array.from({ length: 20 }, (_, i) => `t${i}`)).length, MAX_TAGS);
+  eq("not a list is no tags", normalizeTags("work"), []);
+  eq("the filter row counts and sorts", tagCounts([{ tags: ["a", "b"] }, { tags: ["b"] }, {}]), [{ tag: "b", count: 2 }, { tag: "a", count: 1 }]);
+
+  const base: Chat = {
+    id: "c1", title: "Original", createdAt: 1, updatedAt: 100, provider: "groq", model: "m",
+    messages: [
+      { id: "m1", role: "user", content: "first", createdAt: 1 },
+      { id: "m2", role: "assistant", content: "answer", createdAt: 2 },
+      { id: "m3", role: "user", content: "second", createdAt: 3 },
+    ],
+  };
+  const patched = (body: unknown) => applyChatPatch(base, body, 9999);
+  const ok = (body: unknown) => { const r = patched(body); return r.ok ? r.chat : null; };
+
+  eq("tidying doesn't count as activity", [ok({ pinned: true })!.updatedAt, ok({ tags: ["x"] })!.updatedAt, ok({ archived: true })!.updatedAt, ok({ title: "Renamed" })!.updatedAt], [100, 100, 100, 100]);
+  eq("saving messages does", ok({ messages: [] })!.updatedAt, 9999);
+  eq("pinning sets it, unpinning leaves nothing in the saved file", [ok({ pinned: true })!.pinned, JSON.stringify(ok({ pinned: false })).includes("pinned")], [true, false]);
+  eq("tags are cleaned on the way in", ok({ tags: ["Home Work", "home work", "!!"] })!.tags, ["home-work"]);
+  eq("an empty list clears them", ok({ tags: [] })!.tags, undefined);
+  eq("per-chat instructions are trimmed and stored", ok({ persona: "  Be terse.  " })!.persona, "Be terse.");
+  eq("null clears them", ok({ persona: null })!.persona, undefined);
+  eq("a blank title is ignored, not applied", ok({ title: "   " })!.title, "Original");
+  eq("a title is cut to 200", ok({ title: "t".repeat(500) })!.title.length, 200);
+  eq("the wrong type is an error, not a silent skip", [patched({ pinned: "yes" }).ok, patched({ tags: "a" }).ok, patched({ messages: {} }).ok, patched({ persona: 5 }).ok, patched({ archived: 1 }).ok], [false, false, false, false, false]);
+  eq("so is a body that isn't an object", [patched(null).ok, patched([]).ok, patched("x").ok], [false, false, false]);
+  eq("unknown fields can't be set", "isAdmin" in ok({ isAdmin: true, id: "other" })! || ok({ id: "other" })!.id !== "c1", false);
+
+  const full = { ...base, pinned: true, archived: true, tags: ["work"], persona: "Be terse." };
+  const dup = branchChat(full, undefined, 5000)!;
+  eq("a duplicate is a new chat", [dup.id !== full.id, dup.title, dup.messages.length], [true, "Original (copy)", 3]);
+  eq("it keeps tags and instructions", [dup.tags, dup.persona], [["work"], "Be terse."]);
+  eq("but starts unpinned and unarchived", [dup.pinned, dup.archived], [undefined, undefined]);
+  eq("and remembers its source", dup.branchedFrom, { chatId: "c1" });
+  const branch = branchChat(base, "m2", 5000)!;
+  eq("a branch stops at the chosen message", branch.messages.map((m) => m.id), ["m1", "m2"]);
+  eq("is titled so", branch.title, "Original (branch)");
+  eq("and records where from", branch.branchedFrom, { chatId: "c1", messageId: "m2" });
+  eq("branching from a message that isn't there fails", branchChat(base, "nope"), null);
+  branch.messages[0].content = "changed";
+  eq("the copy shares nothing with the original", base.messages[0].content, "first");
+}
+
+console.log("\n--- search operators ---");
+{
+  eq("operators are told from words", parseQuery("kite tag:work is:pinned storm"), { words: ["kite", "storm"], tags: ["work"], pinned: true, archived: false });
+  eq("a lookalike is just a word", parseQuery("is:foo tag: http://x").words, ["is:foo", "tag:", "http://x"]);
+  const chat = (id: string, extra: Partial<Chat>): Chat => ({ id, title: `chat ${id}`, createdAt: 1, updatedAt: 1, messages: [{ id: "m", role: "user", content: "the kite flew", createdAt: 1 }], ...extra });
+  const work = chat("w", { tags: ["work", "urgent"] });
+  const pinned = chat("p", { pinned: true });
+  const archived = chat("a", { archived: true, tags: ["work"] });
+  const ids = (q: string) => searchChats([work, pinned, archived], q).map((c) => c.id).sort();
+  eq("a tag alone lists what has it", ids("tag:work"), ["w"]);
+  eq("archived chats are hidden unless asked for", ids("kite"), ["p", "w"]);
+  eq("is:archived finds them, and only them", ids("is:archived"), ["a"]);
+  eq("operators and words combine", ids("kite is:pinned"), ["p"]);
+  eq("all tags must match", [ids("tag:work tag:urgent"), ids("tag:work tag:nope")], [["w"], []]);
+  eq("an empty search still finds nothing", ids(""), []);
+}
+
+console.log("\n--- the trash ---");
+{
+  const dir = mkdtempSync(join(tmpdir(), "jarvis-trash-"));
+  process.env.JARVIS_DATA_DIR = dir;
+  const mk = (id: string): Chat => ({ id, title: `Chat ${id}`, createdAt: 1, updatedAt: 1, messages: [{ id: "m", role: "user", content: "hello", createdAt: 1 }] });
+
+  for (const [name, store] of [["memory store", new MemoryStore()], ["file store", new FsStore()]] as const) {
+    await store.save(mk("keep"));
+    await store.save(mk("doomed"));
+    eq(`${name}: trashing moves a chat out of the list`, [await store.trash("doomed"), (await store.list()).map((c) => c.id)], [true, ["keep"]]);
+    eq(`${name}: it is in the trash, stamped`, [(await store.listTrash()).map((c) => c.id), typeof (await store.listTrash())[0].deletedAt], [["doomed"], "number"]);
+    eq(`${name}: and can no longer be opened`, await store.get("doomed"), null);
+    eq(`${name}: trashing what isn't there is false`, await store.trash("ghost"), false);
+    eq(`${name}: restoring brings it back whole`, [await store.restore("doomed"), (await store.get("doomed"))?.messages[0].content, (await store.listTrash()).length], [true, "hello", 0]);
+    eq(`${name}: restoring twice is false`, await store.restore("doomed"), false);
+    eq(`${name}: a restored chat carries no trash stamp`, "deletedAt" in ((await store.get("doomed")) as object), false);
+
+    await store.trash("doomed");
+    eq(`${name}: purging destroys it for good`, [await store.purge("doomed"), (await store.listTrash()).length, await store.purge("doomed")], [true, 0, false]);
+
+    await store.save(mk("old"));
+    await store.trash("old");
+    eq(`${name}: a recent deletion survives the sweep`, [await store.purgeExpired(), (await store.listTrash()).length], [0, 1]);
+    eq(`${name}: one older than thirty days is swept`, [await store.purgeExpired(Date.now() + TRASH_MS + 60_000), (await store.listTrash()).length], [1, 0]);
+    await store.delete("keep");
+  }
+  eq("the file store keeps trash out of the chat list's folder", existsSync(join(dir, "chats", "old.json")), false);
+  eq("and rejects an id that could climb out", await new FsStore().trash("../../etc/passwd").then(() => "no error", (e) => /Invalid chat id/.test(e.message)), true);
+  delete process.env.JARVIS_DATA_DIR;
+  rmSync(dir, { recursive: true, force: true });
+}
+
+console.log("\n--- restoring from a backup ---");
+{
+  // A zip builder that can make the files our own writer never would.
+  const zip = (files: { name: string; data: Uint8Array; deflate?: boolean; lieSize?: number; badCrc?: boolean }[]): Uint8Array => {
+    const parts: Uint8Array[] = [];
+    const central: Uint8Array[] = [];
+    let offset = 0;
+    const enc = new TextEncoder();
+    for (const f of files) {
+      const name = enc.encode(f.name);
+      const body = f.deflate ? deflateRawSync(f.data) : f.data;
+      const crc = f.badCrc ? 1234 : crc32(f.data);
+      const size = f.lieSize ?? f.data.length;
+      const local = new DataView(new ArrayBuffer(30));
+      local.setUint32(0, 0x04034b50, true); local.setUint16(4, 20, true); local.setUint16(6, 0x0800, true);
+      local.setUint16(8, f.deflate ? 8 : 0, true); local.setUint32(14, crc, true);
+      local.setUint32(18, body.length, true); local.setUint32(22, size, true); local.setUint16(26, name.length, true);
+      const head = new DataView(new ArrayBuffer(46));
+      head.setUint32(0, 0x02014b50, true); head.setUint16(4, 20, true); head.setUint16(6, 20, true); head.setUint16(8, 0x0800, true);
+      head.setUint16(10, f.deflate ? 8 : 0, true); head.setUint32(16, crc, true);
+      head.setUint32(20, body.length, true); head.setUint32(24, size, true); head.setUint16(28, name.length, true); head.setUint32(42, offset, true);
+      parts.push(new Uint8Array(local.buffer), name, body);
+      central.push(new Uint8Array(head.buffer), name);
+      offset += 30 + name.length + body.length;
+    }
+    const cdSize = central.reduce((n, c) => n + c.length, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+    end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+    return new Uint8Array(Buffer.concat([...parts, ...central, new Uint8Array(end.buffer)]));
+  };
+  const text = (t: string) => new TextEncoder().encode(t);
+  const chatJson = (id: string, title: string) => text(JSON.stringify({ id, title, createdAt: 1, updatedAt: 2, messages: [{ id: "m", role: "user", content: "hi", createdAt: 1 }] }));
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const imgId = "0f8fad5b-d9cb-469f-a165-70867728950e";
+  const imgMeta = text(JSON.stringify({ id: imgId, prompt: "a kite", model: "m", mime: "image/png", bytes: png.length, createdAt: 1 }));
+
+  const dir = mkdtempSync(join(tmpdir(), "jarvis-restore-"));
+  const imagesDir = join(dir, "images");
+  const targets = () => ({ chats: new MemoryStore(), memory: new FsMemoryStore(), imagesDir });
+  process.env.JARVIS_DATA_DIR = dir;
+
+  // reading
+  const sample = zip([{ name: "a.txt", data: text("hello"), deflate: true }, { name: "b.txt", data: text("world") }]);
+  const dirEntries = readZipDirectory(sample);
+  eq("the directory lists the files", dirEntries.map((e) => e.name), ["a.txt", "b.txt"]);
+  eq("deflated and stored entries both read", dirEntries.map((e) => new TextDecoder().decode(readZipEntry(sample, e))), ["hello", "world"]);
+  const throwsZip = (fn: () => unknown) => { try { fn(); return "no error"; } catch (e) { return e instanceof ZipError ? e.message : `wrong error: ${e}`; } };
+  eq("not a zip is refused", /isn't a zip/.test(throwsZip(() => readZipDirectory(text("this is not a zip file at all")))), true);
+  eq("a truncated zip is refused", throwsZip(() => readZipDirectory(sample.subarray(0, 40))) !== "no error", true);
+  const flipped = Uint8Array.from(sample); flipped[30 + 5 + 2] ^= 0xff;
+  eq("a flipped byte fails its checksum", /checksum|damaged/.test(throwsZip(() => readZipEntry(flipped, readZipDirectory(flipped)[0]))), true);
+  const lying = zip([{ name: "x", data: new Uint8Array(60 * 1024 * 1024), deflate: true, lieSize: 10 }]);
+  eq("a bomb that lies about its size stops at the ceiling", /expands too far|damaged/.test(throwsZip(() => readZipEntry(lying, readZipDirectory(lying)[0]))), true);
+  const big = zip([{ name: "x", data: new Uint8Array(60 * 1024 * 1024), deflate: true }]);
+  eq("an honest oversize entry is refused before inflating", /too large/.test(throwsZip(() => readZipEntry(big, readZipDirectory(big)[0]))), true);
+
+  // restoring
+  const backup = zip([
+    { name: "RESTORE.txt", data: text("how to") },
+    { name: "data/chats/aaa.json", data: chatJson("aaa", "From the backup") },
+    { name: "data/chats/bbb.json", data: chatJson("bbb", "Already here, in the backup version"), deflate: true },
+    { name: "data/chats/ccc.json", data: chatJson("not-ccc", "Id doesn't match its file") },
+    { name: "data/chats/ddd.json", data: text("{broken") },
+    { name: "data/memory.json", data: text(JSON.stringify([{ id: "m1", text: "likes tea", tags: [], createdAt: 1, updatedAt: 1 }, { id: "m2", text: 5 }])) },
+    { name: `data/images/${imgId}.png`, data: png },
+    { name: `data/images/${imgId}.json`, data: imgMeta },
+    { name: "data/images/11111111-1111-1111-1111-111111111111.png", data: text("<html>not an image</html>") },
+    { name: "data/schedule.json", data: text("[]") },
+    { name: "data/usage.json", data: text("{}") },
+    { name: "data/chats/../../.env.local", data: text("GROQ_API_KEY=planted") },
+    { name: "../../outside.txt", data: text("planted") },
+    { name: "/etc/cron.d/evil", data: text("planted") },
+    { name: "data/chats/", data: new Uint8Array() },
+  ]);
+  const t = targets();
+  await t.chats.save({ id: "bbb", title: "Already here, my version", createdAt: 1, updatedAt: 9, messages: [] });
+  const report = await restoreBackup(backup, t);
+  eq("a missing chat is added", (await t.chats.get("aaa"))?.title, "From the backup");
+  eq("an existing one is never overwritten", (await t.chats.get("bbb"))?.title, "Already here, my version");
+  eq("chats are counted", report.chats, { added: 1, skipped: 1, invalid: 2 });
+  eq("a chat whose id disagrees with its file is refused", await t.chats.get("not-ccc"), null);
+  eq("a missing memory is added, a malformed one skipped", [(await t.memory.list()).map((m) => m.id), report.memory], [["m1"], { added: 1, skipped: 0 }]);
+  eq("a real picture comes back with its metadata", [existsSync(join(imagesDir, `${imgId}.png`)), existsSync(join(imagesDir, `${imgId}.json`))], [true, true]);
+  eq("a .png that is really HTML does not", [existsSync(join(imagesDir, "11111111-1111-1111-1111-111111111111.png")), report.images], [false, { added: 1, skipped: 0, invalid: 1 }]);
+  eq("names that climb out of data/ match nothing", [existsSync(join(dir, ".env.local")), existsSync(join(dir, "..", "outside.txt")), existsSync("/etc/cron.d/evil")], [false, false, false]);
+  eq("the schedule, usage and the rest are not restored", report.ignored >= 5, true);
+  eq("the summary says what happened", describeRestore(report), "Restored 1 chat, 1 memory, 1 picture — 1 already here, left alone; 3 damaged, skipped.");
+
+  const again = await restoreBackup(backup, t);
+  eq("restoring the same file again changes nothing", [again.chats.added, again.memory.added, again.images.added], [0, 0, 0]);
+
+  // Flip a byte inside a file's actual contents (a stored entry, so its text
+  // sits in the archive verbatim) — not in a header field, which isn't read.
+  const corrupt = Uint8Array.from(backup);
+  corrupt[Buffer.from(backup).indexOf("From the backup") + 2] ^= 0xff;
+  const t2 = targets();
+  let refused = "";
+  try { await restoreBackup(corrupt, t2); } catch (e) { refused = (e as Error).message; }
+  eq("one corrupt file fails the whole restore", refused !== "", true);
+  eq("and nothing was written before it did", [(await t2.chats.list()).length, existsSync(join(dir, "memory.json")) && (await t2.memory.list()).length > 1], [0, false]);
+
+  eq("an empty restore says so", describeRestore({ chats: { added: 0, skipped: 0, invalid: 0 }, memory: { added: 0, skipped: 0 }, images: { added: 0, skipped: 0, invalid: 0 }, ignored: 0 }), "Nothing to restore.");
+
+  // Our own backup restores through our own reader.
+  const own = new Uint8Array(await new Response(zipStream((async function* () {
+    yield { name: "data/chats/own.json", data: chatJson("own", "Round trip") };
+  })())).arrayBuffer());
+  const t3 = targets();
+  await restoreBackup(own, t3);
+  eq("a zip made by this app restores", (await t3.chats.get("own"))?.title, "Round trip");
+
+  delete process.env.JARVIS_DATA_DIR;
+  rmSync(dir, { recursive: true, force: true });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

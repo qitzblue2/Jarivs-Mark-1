@@ -1,8 +1,9 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { dataPath } from "@/lib/data-dir";
 import type { MemoryEntry, MemoryStore } from "./types";
 
-const FILE = path.join(process.cwd(), "data", "memory.json");
+const file = () => dataPath("memory.json");
 
 /**
  * One JSON file you can open and read.
@@ -13,7 +14,7 @@ const FILE = path.join(process.cwd(), "data", "memory.json");
 export class FsMemoryStore implements MemoryStore {
   async list(): Promise<MemoryEntry[]> {
     try {
-      const parsed = JSON.parse(await fs.readFile(FILE, "utf8"));
+      const parsed = JSON.parse(await fs.readFile(file(), "utf8"));
       return Array.isArray(parsed) ? (parsed as MemoryEntry[]) : [];
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
@@ -23,10 +24,10 @@ export class FsMemoryStore implements MemoryStore {
   }
 
   private async writeAll(entries: MemoryEntry[]): Promise<void> {
-    await fs.mkdir(path.dirname(FILE), { recursive: true });
-    const tmp = `${FILE}.${process.pid}.tmp`;
+    await fs.mkdir(path.dirname(file()), { recursive: true });
+    const tmp = `${file()}.${process.pid}.tmp`;
     await fs.writeFile(tmp, JSON.stringify(entries, null, 2), "utf8");
-    await fs.rename(tmp, FILE);
+    await fs.rename(tmp, file());
   }
 
   async save(entry: MemoryEntry): Promise<void> {

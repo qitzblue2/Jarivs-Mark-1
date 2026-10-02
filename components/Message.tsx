@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useState } from "react";
 import { splitReasoning } from "@/lib/reasoning";
-import { AlertTriangle, Check, ChevronRight, Copy, Pencil, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, Copy, GitBranch, Pencil, RefreshCw, X } from "lucide-react";
 import Markdown from "./Markdown";
 import ToolTrace from "./ToolTrace";
 import Attachments from "./Attachments";
@@ -24,6 +24,8 @@ interface Props {
   onRegenerate?: (messageId: string) => void;
   onEdit?: (messageId: string, content: string) => void;
   onOpenInCanvas?: (messageId: string, blockIndex: number) => void;
+  /** Start a new chat from this message, leaving this one as it is. */
+  onBranch?: (messageId: string) => void;
 }
 
 function MessageBody({
@@ -34,6 +36,7 @@ function MessageBody({
   onRegenerate,
   onEdit,
   onOpenInCanvas,
+  onBranch,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content);
@@ -189,6 +192,16 @@ function MessageBody({
                 >
                   <Pencil size={12} />
                   Edit
+                </button>
+              )}
+              {onBranch && (
+                <button
+                  onClick={() => onBranch(message.id)}
+                  className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-ink-faint transition hover:bg-raised hover:text-ink"
+                  title="Start a new chat from here, keeping this one as it is"
+                >
+                  <GitBranch size={12} />
+                  Branch
                 </button>
               )}
               {!isUser && canRegenerate && onRegenerate && (

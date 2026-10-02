@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { dataPath } from "@/lib/data-dir";
 
 /**
  * A record of the things that matter after the fact.
@@ -40,7 +41,7 @@ const MAX_BYTES = 2_000_000;
 const MAX_DETAIL = 200;
 
 export function auditFile(): string {
-  return process.env.JARVIS_AUDIT_FILE || path.join(process.cwd(), "data", "audit.jsonl");
+  return process.env.JARVIS_AUDIT_FILE || dataPath("audit.jsonl");
 }
 
 // One write at a time, so concurrent entries can't interleave mid-line.

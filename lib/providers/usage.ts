@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { dataPath } from "@/lib/data-dir";
 
 /**
  * What JARVIS has spent, per provider per day.
@@ -45,7 +46,7 @@ type Shared = {
 const shared = globalThis as Shared;
 
 function usagePath(): string {
-  return process.env.JARVIS_USAGE_FILE || path.join(process.cwd(), "data", "usage.json");
+  return process.env.JARVIS_USAGE_FILE || dataPath("usage.json");
 }
 
 function state() {

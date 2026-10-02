@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { dataDir as sharedDataDir } from "@/lib/data-dir";
 import type { ZipEntry } from "./zip";
 
 /**
@@ -12,7 +13,7 @@ import type { ZipEntry } from "./zip";
  */
 
 export function dataDir(): string {
-  return process.env.JARVIS_DATA_DIR || path.join(process.cwd(), "data");
+  return sharedDataDir();
 }
 
 const RESTORE = `JARVIS backup

@@ -194,6 +194,11 @@ on your own machine.
 | Send | `Enter` (`Shift+Enter` for a newline) |
 | Stop generating | The stop button in the composer |
 | Rename a chat | Double-click it in the sidebar |
+| Tag, archive, copy, export a chat | The **…** on its row in the sidebar |
+| Branch from a message | **Branch** under any message — a new chat up to that point |
+| Instructions for one chat | The sliders icon in the chat header |
+| Get a deleted chat back | **Trash** at the bottom of the sidebar — kept 30 days |
+| Add what a backup has that you don't | **Restore** at the bottom of the sidebar |
 | Search every chat | `Ctrl/Cmd + /` — matches what was said, not just titles |
 | Pin a chat to the top | The pin on its row in the sidebar |
 | Export a chat | The download button in the header — a Markdown file |
@@ -660,12 +665,50 @@ keeps your chats in the JSON files they already live in.
 
 Chats are JSON files in `./data/chats/`, one per conversation. Pictures JARVIS
 made are in `./data/images/`, each beside a small JSON file with its prompt.
-Memory, scheduled tasks and the usage count sit beside them. `data/` is
-gitignored. Delete a chat's file to delete the chat.
+Memory, scheduled tasks, the usage count and the audit log sit beside them, and
+deleted chats wait in `./data/trash/`. `data/` is gitignored. `JARVIS_DATA_DIR`
+moves all of it.
+
+### Organising chats
+
+The sidebar groups chats by **Today, Yesterday, Previous 7 days, Previous 30
+days** and **Older**, measured from local midnight, with pinned chats on top.
+
+- **Tags** are added from a row's **…** menu — lowercase, hyphenated, up to
+  eight a chat. Click a tag chip under the search box to see only those chats.
+- **Search operators** work in the same box: `tag:work`, `is:pinned`,
+  `is:archived`, combined with each other and with words (`tag:work budget`).
+- **Archive** hides a chat from the list without deleting it. Archived chats
+  stay out of search unless you ask with `is:archived`, and wait under
+  **Archived** at the bottom of the list.
+- **Duplicate** copies a whole chat; **Branch** (under any message) copies it
+  up to that message, so you can ask something different from there. Neither
+  touches the original.
+- **Chat instructions** (the sliders icon in the header) replace your Settings
+  instructions for that one chat — "answer in French", "you're reviewing my
+  essay" — and travel with it into copies and branches.
+- **Export** a chat as Markdown (to read) or JSON (the chat exactly as stored).
+- **Delete moves a chat to the trash**, where it can be restored for 30 days.
+  Only **Delete for good** and **Empty trash**, both asking first, destroy one.
+
+### Backing up and restoring
 
 **Back up** at the bottom of the sidebar downloads all of `data/` as one zip,
-laid out exactly as on disk. To restore, stop JARVIS and unzip it next to
-`package.json`. API keys are never in it.
+laid out exactly as on disk. API keys are never in it.
+
+**Restore** reads such a zip and **adds what's missing**: a chat, memory or
+picture that already exists is left exactly as it is, so restoring over a
+working install can't lose today's work and restoring twice changes nothing.
+It says what it added and what was already there. The schedule is deliberately
+not restored — tasks that start firing the moment a file lands aren't something
+a restore should do by surprise.
+
+The zip is checked before anything is written: every file's checksum is
+verified (one corrupt file fails the whole restore, leaving nothing half-done),
+only files with the expected names and shapes are used (a zip containing
+`../../.env.local` has that entry ignored), pictures must really be images, and
+an archive that would expand past 500MB, or any file past 50MB, is refused.
+You can also still unzip a backup by hand next to `package.json`.
 
 ### What it has spent
 
@@ -762,6 +805,7 @@ npm run test:e2e    # drives a real browser against the mock
 npm run test:voice  # voice mode, with a WAV standing in for a microphone
 npm run test:chats  # search, pinning and export
 npm run test:settings  # settings export/import, activity list
+npm run test:organize  # tags, archive, branch, trash, restore-from-backup
 npm run test:security  # login lockout, headers — needs its own server, see the file
 npm run test:sandbox  # self-editing: start with JARVIS_ALLOW_SELF_EDIT=1, see the file
 

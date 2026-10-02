@@ -16,16 +16,16 @@ opt-in, and every write and command still waits for approval.
 - [x] 7. Settings export and import — move your setup between browsers (keys excluded)
 
 ## B. Chats
-- [ ] 8. Sidebar grouped by date — Today, Yesterday, Previous 7 days, Older
-- [ ] 9. Chat tags, with a filter
-- [ ] 10. Archive and unarchive chats
-- [ ] 11. Trash — deleted chats are recoverable for 30 days
-- [ ] 12. Branch a chat from any message
-- [ ] 13. Duplicate a chat
-- [ ] 14. Per-chat persona override
-- [ ] 15. Restore from a backup zip, inside the app
-- [ ] 16. Export a chat as JSON as well as Markdown
-- [ ] 17. Search operators — `tag:`, `is:pinned`, `is:archived`
+- [x] 8. Sidebar grouped by date — Today, Yesterday, Previous 7 days, Older
+- [x] 9. Chat tags, with a filter
+- [x] 10. Archive and unarchive chats
+- [x] 11. Trash — deleted chats are recoverable for 30 days
+- [x] 12. Branch a chat from any message
+- [x] 13. Duplicate a chat
+- [x] 14. Per-chat persona override
+- [x] 15. Restore from a backup zip, inside the app
+- [x] 16. Export a chat as JSON as well as Markdown
+- [x] 17. Search operators — `tag:`, `is:pinned`, `is:archived`
 
 ## C. Messages and composer
 - [ ] 18. Message timestamps

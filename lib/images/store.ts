@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { dataPath } from "@/lib/data-dir";
 
 /**
  * Pictures JARVIS has made, on disk under ./data/images.
@@ -34,7 +35,7 @@ export function keepLimit(): number {
 }
 
 export function imageDir(): string {
-  return process.env.JARVIS_IMAGE_DIR || path.join(process.cwd(), "data", "images");
+  return process.env.JARVIS_IMAGE_DIR || dataPath("images");
 }
 
 export function isImageId(id: string): boolean {

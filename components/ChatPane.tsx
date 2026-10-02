@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, AudioLines, Code2, FileDown, Info, Menu, Mic, Sparkles, X } from "lucide-react";
+import { ArrowDown, AudioLines, Code2, FileDown, GitBranch, Info, Menu, Mic, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import Message from "./Message";
 import Composer from "./Composer";
 import ApprovalCard, { type PendingApproval } from "./ApprovalCard";
@@ -19,6 +19,9 @@ interface Props {
   onRegenerate: (messageId: string) => void;
   onEditMessage: (messageId: string, content: string) => void;
   onOpenInCanvas: (messageId: string, blockIndex: number) => void;
+  onBranch: (messageId: string) => void;
+  /** Open the dialog for this chat's own instructions. */
+  onEditInstructions: () => void;
   providers: ProviderState[];
   provider: string;
   model: string;
@@ -50,7 +53,7 @@ const STARTERS = [
 export default function ChatPane(props: Props) {
   const {
     chat, streaming, streamingMessageId, input, onInputChange, onSend, onStop,
-    onRegenerate, onEditMessage, onOpenInCanvas, providers, provider, model,
+    onRegenerate, onEditMessage, onOpenInCanvas, onBranch, onEditInstructions, providers, provider, model,
     onModelChange, onOpenSettings, onToggleSidebar, onToggleCanvas, canvasOpen,
     artifactCount, notice, onDismissNotice, onStartVoice,
     attachments, onAttach, onRemoveAttachment, onAttachError,
@@ -93,9 +96,25 @@ export default function ChatPane(props: Props) {
           <Menu size={16} />
         </button>
 
-        <h1 className="min-w-0 flex-1 truncate text-[13px] font-medium">
-          {chat?.title ?? "JARVIS Mark 6"}
+        <h1 className="flex min-w-0 flex-1 items-center gap-2 truncate text-[13px] font-medium">
+          <span className="truncate">{chat?.title ?? "JARVIS Mark 6"}</span>
+          {chat?.branchedFrom && (
+            <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-normal text-ink-faint" title="Branched or copied from another chat">
+              <GitBranch size={10} /> {chat.branchedFrom.messageId ? "branch" : "copy"}
+            </span>
+          )}
         </h1>
+
+        {chat && (
+          <button
+            onClick={onEditInstructions}
+            className={`rounded-md p-1.5 transition hover:bg-raised ${chat.persona ? "text-arc" : "text-ink-faint hover:text-ink"}`}
+            title={chat.persona ? "This chat has its own instructions" : "Give this chat its own instructions"}
+            data-chat-instructions
+          >
+            <SlidersHorizontal size={16} />
+          </button>
+        )}
 
         <ModelPicker
           providers={providers}
@@ -212,6 +231,7 @@ export default function ChatPane(props: Props) {
                 onRegenerate={onRegenerate}
                 onEdit={onEditMessage}
                 onOpenInCanvas={onOpenInCanvas}
+                onBranch={streaming ? undefined : onBranch}
               />
             ))}
             {approvals.length > 0 && (

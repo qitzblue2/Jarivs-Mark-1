@@ -24,6 +24,49 @@ function excerpt(text: string, at: number, length: number): string {
 }
 
 /**
+ * What was typed in the search box, split into the words to find and the
+ * filters to apply.
+ *
+ *   tag:work        has that tag
+ *   is:pinned       pinned
+ *   is:archived     archived — which are otherwise left out of results
+ *
+ * An operator is only an operator when it is spelled exactly: `is:foo` is
+ * treated as an ordinary word, so searching for something that happens to
+ * contain a colon still works.
+ */
+export interface ParsedQuery {
+  words: string[];
+  tags: string[];
+  pinned: boolean;
+  archived: boolean;
+}
+
+export function parseQuery(query: string): ParsedQuery {
+  const parsed: ParsedQuery = { words: [], tags: [], pinned: false, archived: false };
+  for (const token of query.toLowerCase().split(/\s+/).filter(Boolean)) {
+    if (token.startsWith("tag:") && token.length > 4) parsed.tags.push(token.slice(4));
+    else if (token === "is:pinned") parsed.pinned = true;
+    else if (token === "is:archived") parsed.archived = true;
+    else parsed.words.push(token);
+  }
+  return parsed;
+}
+
+/**
+ * Does a chat (or its sidebar row) satisfy the search's filters? Shared by the
+ * server's search and the sidebar's instant filter, so the two never disagree
+ * about what `tag:work` or `is:archived` means.
+ */
+export function passesFilters(chat: Pick<ChatMeta, "pinned" | "archived" | "tags">, q: ParsedQuery): boolean {
+  if (q.pinned && !chat.pinned) return false;
+  // Archived chats are hidden everywhere unless asked for by name.
+  if (Boolean(chat.archived) !== q.archived) return false;
+  const have = chat.tags ?? [];
+  return q.tags.every((t) => have.includes(t));
+}
+
+/**
  * Find chats by what was said in them, not just their title.
  *
  * Every word must appear somewhere in the chat (title or messages), in any
@@ -32,14 +75,19 @@ function excerpt(text: string, at: number, length: number): string {
  * you are searching for what you saw, not what it muttered.
  */
 export function matchChat(chat: Chat, query: string): ChatHit | null {
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return null;
+  const q = parseQuery(query);
+  if (q.words.length === 0 && q.tags.length === 0 && !q.pinned && !q.archived) return null;
+  if (!passesFilters(chat, q)) return null;
+
+  const meta = chatMeta(chat);
+  const words = q.words;
+  // Filters alone ("tag:work") list everything that passes.
+  if (words.length === 0) return meta;
 
   const texts = shownTexts(chat);
   const haystack = `${chat.title}\n${texts.join("\n")}`.toLowerCase();
   if (!words.every((w) => haystack.includes(w))) return null;
 
-  const meta = chatMeta(chat);
   // The title matching every word says enough on its own.
   if (words.every((w) => chat.title.toLowerCase().includes(w))) return meta;
 

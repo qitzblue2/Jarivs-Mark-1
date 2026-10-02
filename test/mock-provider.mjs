@@ -271,6 +271,13 @@ const server = http.createServer((req, res) => {
         );
       }
 
+      // Proves per-chat instructions reach the model: the system prompt is what
+      // changes, so the reply is keyed off it.
+      const personaMessage = messages.find((m) => m.role === "system");
+      if (/pirate speak/i.test(String(personaMessage?.content ?? "")) && !alreadyRanTool && /^hello/i.test(prompt)) {
+        return streamText(res, "Arr, matey. Ye be talking to a pirate.", finish);
+      }
+
       // Self-editing: the model changing its own welcome screen, in the sandbox.
       if (parsed.tools?.some((t) => t.function?.name === "code_edit") && /change your (welcome )?title/i.test(prompt) && !alreadyRanTool) {
         return streamToolCall(

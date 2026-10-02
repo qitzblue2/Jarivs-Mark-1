@@ -10,6 +10,8 @@ import VoiceMode from "./VoiceMode";
 import Gallery from "./Gallery";
 import UsagePanel from "./UsagePanel";
 import SandboxPanel from "./SandboxPanel";
+import TrashPanel from "./TrashPanel";
+import ChatInstructions from "./ChatInstructions";
 import type { PendingApproval } from "./ApprovalCard";
 import { kokoroEngine } from "@/lib/voice/tts";
 import type { ProviderState } from "./ModelPicker";
@@ -58,6 +60,9 @@ export default function Workspace() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
+  /** The chat whose own instructions are being edited, loaded in full. */
+  const [instructionsFor, setInstructionsFor] = useState<{ id: string; title: string; persona?: string } | null>(null);
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [selfEdit, setSelfEdit] = useState<{ enabled: boolean; isSandbox: boolean; port: number } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -180,7 +185,7 @@ export default function Workspace() {
   useEffect(() => {
     void (async () => {
       const list = await refreshChats();
-      const latest = mostRecent(list);
+      const latest = mostRecent(list.filter((c) => !c.archived));
       if (latest) void selectChat(latest.id);
     })();
     // Runs once — selectChat is stable enough for a mount-time restore.
@@ -246,13 +251,88 @@ export default function Workspace() {
     setSidebarOpen(false);
   }
 
+  /** Moves to the trash, where it stays recoverable for 30 days. */
   async function deleteChat(id: string) {
     await fetch(`/api/chats/${id}`, { method: "DELETE" });
     const list = await refreshChats();
+    setNotice("Moved to the trash. Open Trash at the bottom of the chat list to get it back.");
     if (chat?.id === id) {
-      const latest = mostRecent(list);
+      const latest = mostRecent(list.filter((c) => !c.archived));
       if (latest) void selectChat(latest.id);
       else setChat(null);
+    }
+  }
+
+  /** Tidy-up changes: shown at once, then confirmed by the server. */
+  async function patchChat(id: string, body: Record<string, unknown>) {
+    const res = await fetch(`/api/chats/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) setNotice((await res.json().catch(() => ({})))?.error ?? "That change didn't save.");
+    await refreshChats();
+  }
+
+  async function archiveChat(id: string, archived: boolean) {
+    setChats((all) => all.map((c) => (c.id === id ? { ...c, archived: archived || undefined } : c)));
+    if (chat?.id === id) setChat((c) => (c ? { ...c, archived: archived || undefined } : c));
+    await patchChat(id, { archived });
+  }
+
+  async function setChatTags(id: string, tags: string[]) {
+    setChats((all) => all.map((c) => (c.id === id ? { ...c, tags: tags.length ? tags : undefined } : c)));
+    if (chat?.id === id) setChat((c) => (c ? { ...c, tags: tags.length ? tags : undefined } : c));
+    await patchChat(id, { tags });
+  }
+
+  /** A whole-chat copy (no messageId) or a branch from one message. */
+  async function copyChat(id: string, messageId?: string) {
+    try {
+      const res = await fetch(`/api/chats/${id}/branch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(messageId ? { messageId } : {}),
+      });
+      const data = await res.json();
+      if (!res.ok) return setNotice(data.error ?? "Couldn't copy that chat.");
+      await refreshChats();
+      await selectChat(data.chat.id);
+    } catch {
+      setNotice("Couldn't reach the server.");
+    }
+  }
+
+  async function editInstructions(id: string) {
+    try {
+      const res = await fetch(`/api/chats/${id}`);
+      const data = await res.json();
+      if (data.chat) setInstructionsFor({ id, title: data.chat.title, persona: data.chat.persona });
+    } catch {
+      setNotice("Couldn't load that chat.");
+    }
+  }
+
+  async function saveInstructions(text: string | null) {
+    if (!instructionsFor) return;
+    const { id } = instructionsFor;
+    if (chat?.id === id) setChat((c) => (c ? { ...c, persona: text ?? undefined } : c));
+    await patchChat(id, { persona: text });
+  }
+
+  /** Add what's missing from a backup zip; nothing existing is overwritten. */
+  async function restoreBackupFile(file: File) {
+    try {
+      const res = await fetch("/api/backup/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/zip" },
+        body: file,
+      });
+      const data = await res.json();
+      setNotice(res.ok ? data.summary : data.error ?? "That backup couldn't be restored.");
+      if (res.ok) await refreshChats();
+    } catch {
+      setNotice("Couldn't reach the server.");
     }
   }
 
@@ -354,7 +434,8 @@ export default function Workspace() {
             provider,
             model,
             temperature: settings.temperature,
-            persona: settings.persona,
+            // A chat's own instructions replace the Settings ones for it alone.
+            persona: target.persona?.trim() ? target.persona : settings.persona,
             useTools: settings.useTools,
             task,
             keys: settings.keys,
@@ -664,6 +745,12 @@ export default function Workspace() {
           onDelete={deleteChat}
           onRename={renameChat}
           onTogglePin={togglePin}
+          onArchive={archiveChat}
+          onTags={setChatTags}
+          onDuplicate={(id) => void copyChat(id)}
+          onEditInstructions={editInstructions}
+          onOpenTrash={() => setTrashOpen(true)}
+          onRestoreFile={restoreBackupFile}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenGallery={() => setGalleryOpen(true)}
           onOpenUsage={() => setUsageOpen(true)}
@@ -684,6 +771,15 @@ export default function Workspace() {
               onDelete={deleteChat}
               onRename={renameChat}
               onTogglePin={togglePin}
+              onArchive={archiveChat}
+              onTags={setChatTags}
+              onDuplicate={(id) => void copyChat(id)}
+              onEditInstructions={editInstructions}
+              onOpenTrash={() => {
+                setSidebarOpen(false);
+                setTrashOpen(true);
+              }}
+              onRestoreFile={restoreBackupFile}
               onOpenSettings={() => {
                 setSidebarOpen(false);
                 setSettingsOpen(true);
@@ -726,6 +822,8 @@ export default function Workspace() {
             onRegenerate={regenerate}
             onEditMessage={editMessage}
             onOpenInCanvas={openInCanvas}
+            onBranch={(messageId) => chat && void copyChat(chat.id, messageId)}
+            onEditInstructions={() => chat && void editInstructions(chat.id)}
             providers={providers}
             provider={provider}
             model={model}
@@ -796,6 +894,16 @@ export default function Workspace() {
       </div>
 
       <UsagePanel open={usageOpen} onClose={() => setUsageOpen(false)} />
+
+      <TrashPanel open={trashOpen} onClose={() => setTrashOpen(false)} onRestored={() => void refreshChats()} />
+
+      <ChatInstructions
+        open={instructionsFor !== null}
+        title={instructionsFor?.title ?? ""}
+        value={instructionsFor?.persona}
+        onSave={(text) => void saveInstructions(text)}
+        onClose={() => setInstructionsFor(null)}
+      />
 
       <SandboxPanel open={sandboxOpen} onClose={() => setSandboxOpen(false)} />
 

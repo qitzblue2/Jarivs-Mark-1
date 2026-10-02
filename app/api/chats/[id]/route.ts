@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { getStore } from "@/lib/storage";
-import { isValidChatId, type Chat, type Message } from "@/lib/types";
+import { isValidChatId } from "@/lib/types";
+import { applyChatPatch } from "@/lib/chat-ops";
+import { audit } from "@/lib/audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,9 +24,10 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 /**
- * PATCH /api/chats/:id — update the title, the model selection, or replace the
- * message list. The client owns message state while streaming and writes the
- * whole array once a turn settles; that keeps the store dumb.
+ * PATCH /api/chats/:id — rename, retarget the model, replace the messages, or
+ * tidy: pin, tag, archive, set per-chat instructions. The client owns message
+ * state while streaming and writes the whole array once a turn settles; that
+ * keeps the store dumb. What counts as activity is decided in applyChatPatch.
  */
 export async function PATCH(req: NextRequest, { params }: Params) {
   try {
@@ -34,42 +37,30 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     const existing = await store.get(id);
     if (!existing) return Response.json({ error: "Chat not found" }, { status: 404 });
 
-    const body = await req.json().catch(() => ({}));
+    const body = await req.json().catch(() => null);
+    const result = applyChatPatch(existing, body);
+    if (!result.ok) return Response.json({ error: result.error }, { status: 400 });
 
-    // Pinning alone is not activity: bumping updatedAt for it would reshuffle
-    // the "recent" order the moment you tidied it.
-    const onlyPin = typeof body?.pinned === "boolean" && Object.keys(body).length === 1;
-    if (onlyPin) {
-      const pinned: Chat = { ...existing, pinned: body.pinned || undefined };
-      await store.save(pinned);
-      return Response.json({ chat: pinned });
-    }
-
-    const updated: Chat = {
-      ...existing,
-      title: typeof body?.title === "string" && body.title.trim()
-        ? body.title.trim().slice(0, 200)
-        : existing.title,
-      messages: Array.isArray(body?.messages) ? (body.messages as Message[]) : existing.messages,
-      provider: typeof body?.provider === "string" ? body.provider : existing.provider,
-      model: typeof body?.model === "string" ? body.model : existing.model,
-      pinned: typeof body?.pinned === "boolean" ? body.pinned || undefined : existing.pinned,
-      updatedAt: Date.now(),
-    };
-
-    await store.save(updated);
-    return Response.json({ chat: updated });
+    await store.save(result.chat);
+    return Response.json({ chat: result.chat });
   } catch (err) {
     return Response.json({ error: (err as Error).message }, { status: 500 });
   }
 }
 
+/**
+ * DELETE /api/chats/:id — move to the trash. Recoverable for 30 days from
+ * /api/trash; nothing here destroys a chat.
+ */
 export async function DELETE(_req: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
     if (!isValidChatId(id)) return badId();
-    await getStore().delete(id);
-    return Response.json({ ok: true });
+    const store = getStore();
+    const title = (await store.get(id))?.title;
+    const moved = await store.trash(id);
+    if (moved) audit("chat.trash", title);
+    return Response.json({ ok: true, trashed: moved });
   } catch (err) {
     return Response.json({ error: (err as Error).message }, { status: 500 });
   }

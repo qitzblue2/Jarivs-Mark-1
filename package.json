@@ -27,7 +27,8 @@
     "test:chats": "node test/e2e-chats.mjs",
     "test:sandbox": "node test/e2e-sandbox.mjs",
     "test:security": "node test/e2e-security.mjs",
-    "test:settings": "node test/e2e-settings.mjs"
+    "test:settings": "node test/e2e-settings.mjs",
+    "test:organize": "node test/e2e-organize.mjs"
   },
   "dependencies": {
     "@ricky0123/vad-web": "^0.0.31",
