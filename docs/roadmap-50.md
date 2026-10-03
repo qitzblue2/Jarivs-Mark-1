@@ -1,4 +1,4 @@
-# Fifty additions
+# Fifty additions — and ten more
 
 Built in batches, each with tests, each in its own commit. A box is ticked only
 when the feature works and its tests pass. Anything not ticked says why.
@@ -67,3 +67,17 @@ opt-in, and every write and command still waits for approval.
 - [x] 48. Usage export as CSV
 - [x] 49. Automatic daily backups, keeping the last seven
 - [x] 50. Chat statistics — messages, words, tools used, per day
+
+## G. Emotion and initiative
+JARVIS speaking first, within limits you set. Every item here is opt-out, gentle by default, and never acts for you: a card's buttons only fill the message box, move you somewhere, or save a note when pressed. The mood is a summary of the session, not a claim of feeling, and tone reading is a heuristic, not a safety system.
+
+- [x] 51. A mood dot — how the session is going, from ratings, thanks and failures
+- [x] 52. Suggestion cards — long chat, failing provider, break, late night, waiting approval, welcome back
+- [x] 53. Interruption controls — level, master switch, quiet hours, per-kind switches, "stop suggesting this", learned mutes, opt-in desktop and spoken delivery
+- [x] 54. A focus timer — hold everything back for a while
+- [x] 55. An inbox — held suggestions and what the server said, with a badge
+- [x] 56. Scheduled answers and failed backups reach you, as a card and in the inbox
+- [x] 57. Matching your tone — direct for frustrated, short for rushed, gentle for low
+- [x] 58. Follow-up buttons under replies
+- [x] 59. "Remember that?" — offers to save a lasting fact, only on a press
+- [x] 60. 👍 / 👎 on replies, counted under Usage

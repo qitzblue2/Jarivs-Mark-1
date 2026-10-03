@@ -49,7 +49,7 @@ export default function ApprovalCard({ approval, onSettled }: Props) {
   const isCommand = approval.kind === "command";
 
   return (
-    <div className="my-3 overflow-hidden rounded-lg border border-warn/40 bg-warn/[0.06]">
+    <div className="my-3 overflow-hidden rounded-lg border border-warn/40 bg-warn/[0.06]" data-approval tabIndex={-1}>
       <div className="flex items-center gap-2 border-b border-warn/20 px-3 py-2">
         <ShieldAlert size={14} className="shrink-0 text-warn" />
         <span className="text-[12.5px] font-medium text-warn">

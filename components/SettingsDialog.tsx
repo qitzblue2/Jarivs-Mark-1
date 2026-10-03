@@ -8,6 +8,7 @@ import { exportSettings, importSettings } from "@/lib/settings-io";
 import { cleanPrompts, type SavedPrompt } from "@/lib/prompts";
 import PromptsEditor from "./PromptsEditor";
 import AppearanceSettings from "./AppearanceSettings";
+import InitiativeSettings from "./InitiativeSettings";
 import PersonaPicker from "./PersonaPicker";
 import AutoBackups from "./AutoBackups";
 import { DEFAULT_GREETING } from "@/lib/voice/session";
@@ -313,6 +314,8 @@ export default function SettingsDialog({
           </section>
 
           <AppearanceSettings />
+
+          <InitiativeSettings />
 
           <PromptsEditor prompts={draft.prompts ?? []} onChange={(prompts) => setDraft((d) => ({ ...d, prompts }))} />
 

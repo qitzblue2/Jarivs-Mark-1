@@ -17,6 +17,8 @@ export interface ChatStats {
   tools: { name: string; calls: number; errors: number }[];
   models: { model: string; replies: number }[];
   firstMessageAt: number | null;
+  /** 👍 and 👎 you gave to replies. */
+  reactions: { up: number; down: number };
 }
 
 export const MAX_DAYS = 90;
@@ -46,6 +48,7 @@ export function computeChatStats(
     tools: [],
     models: [],
     firstMessageAt: null,
+    reactions: { up: 0, down: 0 },
   };
   const tools = new Map<string, { calls: number; errors: number }>();
   const models = new Map<string, number>();
@@ -71,6 +74,8 @@ export function computeChatStats(
       // The words you read, not a thinking model's hidden working-out.
       stats.words.assistant += countWords(splitReasoning(message.content).answer);
       if (message.model) models.set(message.model, (models.get(message.model) ?? 0) + 1);
+      if (message.reaction === "up") stats.reactions.up++;
+      else if (message.reaction === "down") stats.reactions.down++;
       for (const round of message.toolRounds ?? []) {
         for (const call of round.calls) {
           const entry = tools.get(call.name) ?? { calls: 0, errors: 0 };

@@ -304,6 +304,15 @@ const server = http.createServer((req, res) => {
         return streamText(res, `I am ${parsed.model}.`, finish);
       }
 
+      // The guidance the app adds when a message sounds frustrated, rushed or low is echoed
+      // back in each reply, so a test can see that the server really received it.
+      if (/The user sounds frustrated/.test(system)) return streamText(res, "Understood. Straight to the fix: restart the service, then retry. (direct)", finish);
+      if (/may be in distress/.test(system)) return streamText(res, "I am here. How are you doing right now? (gentle)", finish);
+      if (/may be feeling low/.test(system)) return streamText(res, "That sounds heavy. Take your time. (gentle)", finish);
+      if (/under time pressure/.test(system)) return streamText(res, "Fastest route: run it as it is. (short)", finish);
+      // A reply that ends in a question of its own, which gets no follow-up buttons under it.
+      if (/ask me a question/i.test(prompt)) return streamText(res, "Happy to help with that. What would you like to build first?", finish);
+
       // Unit conversion goes through the calculate tool, like arithmetic does.
       const conversion = /^convert (.+)$/i.exec(prompt.trim());
       if (conversion && parsed.tools?.some((t) => t.function?.name === "calculate") && !alreadyRanTool) {

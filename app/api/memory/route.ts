@@ -38,6 +38,19 @@ export async function POST(req: NextRequest) {
       return Response.json({ ok: true });
     }
 
+    // A card that offers to remember something sets `dedupe`: pressing it twice,
+    // or in two tabs, should leave one note, not two. Manual adds are untouched.
+    if (body?.dedupe === true) {
+      const same = (await store.list()).find((e) => e.text.trim().toLowerCase() === text.toLowerCase());
+      if (same) {
+        // Already known — but "always keep in mind" on a note that is not pinned yet pins it.
+        if (tags.includes("always") && !same.tags.includes("always")) {
+          await store.save({ ...same, tags: [...same.tags, "always"], updatedAt: now });
+        }
+        return Response.json({ ok: true, duplicate: true });
+      }
+    }
+
     await store.save({ id: newId(), text, tags, createdAt: now, updatedAt: now });
     return Response.json({ ok: true }, { status: 201 });
   } catch (err) {

@@ -56,6 +56,9 @@ export default function ChatStatsView() {
         <Card label="Messages" value={number(stats.messages.total)} detail={`${number(stats.messages.user)} yours · ${number(stats.messages.assistant)} JARVIS`} />
         <Card label="Words" value={number(stats.words.user + stats.words.assistant)} detail={`${number(stats.words.user)} yours · ${number(stats.words.assistant)} JARVIS`} />
         <Card label="Since" value={since} />
+        {stats.reactions.up + stats.reactions.down > 0 && (
+          <Card label="Ratings" value={`${number(stats.reactions.up)} 👍 ${number(stats.reactions.down)} 👎`} detail="replies you rated" />
+        )}
       </div>
 
       <section aria-labelledby="stats-days">

@@ -28,14 +28,25 @@ export interface RunResult {
 }
 
 type Runner = (prompt: string, label: string) => Promise<RunResult>;
+type ResultHook = (task: ScheduledTask, outcome: RunResult) => void | Promise<void>;
 
 let timer: NodeJS.Timeout | null = null;
 let ticking = false;
 let runner: Runner | null = null;
+let onResult: ResultHook | null = null;
 
 /** Swapped in tests, and lets the clock avoid importing the agent at all. */
 export function setRunner(next: Runner | null): void {
   runner = next;
+}
+
+/**
+ * Told what each run said — so it can be kept somewhere you will see it. A hook
+ * rather than an import: the clock stays free of storage and of the agent, and a
+ * test of it writes nothing outside itself.
+ */
+export function setOnResult(next: ResultHook | null): void {
+  onResult = next;
 }
 
 export function isRunning(): boolean {
@@ -98,6 +109,13 @@ export async function tick(now = Date.now()): Promise<number> {
         lastResult: outcome.text,
         lastError: outcome.error,
       });
+
+      // Never allowed to break the clock: a full disk must not stop the next task.
+      try {
+        await onResult?.(task, outcome);
+      } catch {
+        /* the answer is still on the task itself */
+      }
     }
 
     return due.length;

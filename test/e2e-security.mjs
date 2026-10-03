@@ -85,6 +85,8 @@ const asVisitor = (path) =>
   });
 const gated = await asVisitor("/api/chats");
 check("a visitor without a session is refused the API", gated.status === 401, String(gated.status));
+const inbox = await asVisitor("/api/inbox");
+check("so is the inbox: what JARVIS said while you were away is for you, not for a visitor", inbox.status === 401, String(inbox.status));
 const page = await asVisitor("/");
 check("and sent to the login page from the app", page.status >= 300 && page.status < 400 && page.location.includes("/login"), `${page.status} ${page.location}`);
 const manifest = await asVisitor("/manifest.webmanifest");

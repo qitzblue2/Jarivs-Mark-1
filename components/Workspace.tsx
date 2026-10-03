@@ -13,6 +13,8 @@ import SandboxPanel from "./SandboxPanel";
 import TrashPanel from "./TrashPanel";
 import SavedPanel from "./SavedPanel";
 import ChatInstructions from "./ChatInstructions";
+import InboxPanel from "./InboxPanel";
+import InitiativeHost from "./InitiativeHost";
 import type { PendingApproval } from "./ApprovalCard";
 import { kokoroEngine, getTts } from "@/lib/voice/tts";
 import { forSpeech } from "@/lib/voice/tts/types";
@@ -36,6 +38,11 @@ import { consumeJarvisStream } from "@/lib/stream";
 import { artifactsFromMessage, artifactsFromMessages } from "@/lib/codeblocks";
 import { newId, type Attachment, type Chat, type ChatMeta, type Message, type ToolRound } from "@/lib/types";
 import { lighten } from "@/lib/attachments";
+import { getInitiative, moodEvent, noteTone, offerNow } from "@/lib/initiative/store";
+import { readTone, type Tone } from "@/lib/initiative/tone";
+import { detectFact } from "@/lib/initiative/suggest";
+import { rememberNudge, type Nudge, type NudgeAction } from "@/lib/initiative/rules";
+import { RULE_INFO, type RuleId } from "@/lib/initiative/config";
 
 const SETTINGS_KEY = "jarvis.settings.v1";
 const SELECTION_KEY = "jarvis.selection.v1";
@@ -52,6 +59,29 @@ function deriveTitle(text: string): string {
 function mostRecent(list: ChatMeta[]): ChatMeta | undefined {
   return list.reduce<ChatMeta | undefined>((best, c) => (!best || c.updatedAt > best.updatedAt ? c : best), undefined);
 }
+
+/** The tone of the message being answered, if Settings lets it be read; the server only learns a name. */
+function toneOf(history: Message[]): Tone | undefined {
+  if (!getInitiative().config.adaptTone) return undefined;
+  const last = [...history].reverse().find((m) => m.role === "user");
+  const tone = last ? readTone(last.content) : "neutral";
+  return tone === "neutral" ? undefined : tone;
+}
+
+/**
+ * What a message you've just sent changes beyond being answered: its tone moves
+ * the mood (and after a hard one, keeps cards away), and a lasting fact in it may
+ * be offered to memory once the reply is in.
+ */
+function noticeUserMessage(text: string) {
+  const { config } = getInitiative();
+  if (config.adaptTone) noteTone(readTone(text));
+  const fact = config.rules["remember-offer"] ? detectFact(text) : null;
+  // Held until the reply has arrived: asking about memory over the top of an answer is rude.
+  if (fact) offerNow(rememberNudge(fact, Date.now()), { streaming: true });
+}
+
+const RECAP_PROMPT = "Where did we leave off? Give me a quick recap.";
 
 export default function Workspace() {
   const [chats, setChats] = useState<ChatMeta[]>([]);
@@ -84,6 +114,7 @@ export default function Workspace() {
   /** The chat whose own instructions are being edited, loaded in full. */
   const [instructionsFor, setInstructionsFor] = useState<{ id: string; title: string; persona?: string } | null>(null);
   const [sandboxOpen, setSandboxOpen] = useState(false);
+  const [inboxOpen, setInboxOpen] = useState(false);
   const [selfEdit, setSelfEdit] = useState<{ enabled: boolean; isSandbox: boolean; port: number } | null>(null);
   /** What each request carries besides the conversation, for the context meter. */
   const [overhead, setOverhead] = useState({ toolTokens: 0, noteTokens: 0 });
@@ -268,6 +299,7 @@ export default function Workspace() {
   }, [provider, model, refreshChats]);
 
   function newChat() {
+    moodEvent("new-chat");
     setChat(null);
     setActiveArtifactId(null);
     setSidebarOpen(false);
@@ -466,6 +498,9 @@ export default function Workspace() {
             temperature: settings.temperature,
             // A chat's own instructions replace the Settings ones for it alone.
             persona: target.persona?.trim() ? target.persona : settings.persona,
+            // How the message being answered read — a name the server turns into
+            // one sentence of guidance. Read here, in the browser, and not stored.
+            tone: toneOf(history),
             useTools: settings.useTools,
             task,
             keys: settings.keys,
@@ -559,6 +594,11 @@ export default function Workspace() {
         setActiveArtifactId(produced[produced.length - 1].id);
         setCanvasOpen(true);
       }
+
+      // How it went, for the mood: a stopped reply says nothing either way.
+      if (errorMessage) moodEvent("reply-failed");
+      else if (!controller.signal.aborted) moodEvent("reply-ok");
+      if (toolRounds.some((r) => r.results.some((x) => x.isError))) moodEvent("tool-failed");
 
       // Returned so voice mode can speak the answer it just produced.
       return errorMessage ? `Sorry — ${errorMessage}` : acc;
@@ -669,6 +709,7 @@ export default function Workspace() {
         ? { ...target, title: deriveTitle(text || attachments[0]?.name || "Attachment") }
         : target;
 
+    noticeUserMessage(text);
     await runTurn(titled, history, undefined, task);
   }
 
@@ -702,6 +743,7 @@ export default function Workspace() {
           ? { ...target, title: deriveTitle(text) }
           : target;
 
+      noticeUserMessage(text);
       return runTurn(titled, history, onToken);
     },
     [chat, createChat, runTurn],
@@ -722,6 +764,8 @@ export default function Workspace() {
       if (!chat || streaming) return;
       const index = chat.messages.findIndex((m) => m.id === messageId);
       if (index < 1) return;
+      // Asking again says the first answer wasn't it.
+      moodEvent("regenerated");
       await runTurn(chat, chat.messages.slice(0, index));
     },
     [chat, streaming, runTurn],
@@ -737,6 +781,7 @@ export default function Workspace() {
       if (!chat || streaming) return;
       const index = chat.messages.findIndex((m) => m.id === messageId);
       if (index < 1) return;
+      moodEvent("regenerated");
       setProvider(nextProvider);
       setModel(nextModel);
       try {
@@ -795,6 +840,7 @@ export default function Workspace() {
         ...chat.messages.slice(0, index),
         { ...chat.messages[index], content },
       ];
+      noticeUserMessage(content);
       await runTurn(chat, history);
     },
     [chat, streaming, runTurn],
@@ -818,6 +864,28 @@ export default function Workspace() {
         m.id === messageId ? { ...m, starred: m.starred ? undefined : true } : m,
       );
       setChat({ ...chat, messages });
+      await fetch(`/api/chats/${chat.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages, quiet: true }),
+      }).catch(() => setNotice("That didn't save."));
+    },
+    [chat, streaming],
+  );
+
+  /**
+   * Rate a reply. Quiet like a star — it isn't conversation, so the chat keeps its
+   * place in the list — and it moves the mood only when a rating is given, not
+   * when one is taken back.
+   */
+  const reactTo = useCallback(
+    async (messageId: string, reaction: "up" | "down") => {
+      if (!chat || streaming) return;
+      const current = chat.messages.find((m) => m.id === messageId)?.reaction;
+      const next = current === reaction ? undefined : reaction;
+      const messages = chat.messages.map((m) => (m.id === messageId ? { ...m, reaction: next } : m));
+      setChat({ ...chat, messages });
+      if (next) moodEvent(next === "up" ? "thumbs-up" : "thumbs-down");
       await fetch(`/api/chats/${chat.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -1000,6 +1068,81 @@ export default function Workspace() {
 
   const showCanvas = canvasOpen;
 
+  /** Put text in the message box and put the cursor after it. Nothing is sent. */
+  function fillComposer(text: string) {
+    updateInput(text);
+    setTimeout(() => {
+      const box = document.getElementById("message-input") as HTMLTextAreaElement | null;
+      if (!box) return;
+      box.focus();
+      box.setSelectionRange(box.value.length, box.value.length);
+    }, 0);
+  }
+
+  /**
+   * What a card's button does. Every one is something you could do yourself —
+   * fill the message box, move to a chat, pick a model, save a note — and none
+   * sends anything on your behalf.
+   */
+  function runNudgeAction(_nudge: Nudge, action: NudgeAction) {
+    if (action.kind !== "open-inbox") setInboxOpen(false);
+    switch (action.kind) {
+      case "fill":
+        return fillComposer(action.text);
+      case "new-chat":
+        return newChat();
+      case "open-chat":
+        // Already in it (the last chat opens by itself): a recap is the useful thing to offer.
+        return action.chatId === chat?.id ? fillComposer(RECAP_PROMPT) : void selectChat(action.chatId);
+      case "switch-model":
+        changeModel(action.provider, action.model);
+        return setNotice(`Switched to ${action.model}. Your next message goes there.`);
+      case "remember":
+        return void (async () => {
+          try {
+            const res = await fetch("/api/memory", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text: action.text, tags: action.always ? ["always"] : [], dedupe: true }),
+            });
+            const data = await res.json().catch(() => ({}));
+            setNotice(
+              !res.ok
+                ? (data.error ?? "That didn't save.")
+                : data.duplicate
+                  ? "Already in memory."
+                  : action.always
+                    ? "Remembered — and kept in mind in every chat."
+                    : "Remembered. Change or remove it under Settings → Memory.",
+            );
+          } catch {
+            setNotice("Couldn't reach the server.");
+          }
+        })();
+      case "show-approval": {
+        const card = document.querySelector<HTMLElement>("[data-approval]");
+        if (!card) return setNotice("That question has already been answered.");
+        card.scrollIntoView({ block: "center" });
+        return card.focus();
+      }
+      case "open-inbox":
+        return setInboxOpen(true);
+    }
+  }
+
+  function onRuleMuted(rule: RuleId, learned: boolean) {
+    setNotice(
+      learned
+        ? `Won't suggest “${RULE_INFO[rule].label}” any more — you waved it away three times. Settings → Initiative turns it back on.`
+        : `Won't suggest “${RULE_INFO[rule].label}” any more. Settings → Initiative turns it back on.`,
+    );
+  }
+
+  const lastChat = useMemo(() => {
+    const latest = mostRecent(chats.filter((c) => !c.archived));
+    return latest ? { id: latest.id, title: latest.title } : null;
+  }, [chats]);
+
   return (
     <div className="flex h-dvh w-full flex-col overflow-hidden" data-print-flow>
       {/* First stop for Tab: past the chat list and the header, straight to typing. */}
@@ -1163,6 +1306,8 @@ export default function Workspace() {
             recent={recent}
             onOpenChat={selectChat}
             onQuickAction={quickAction}
+            onReact={reactTo}
+            onOpenInbox={() => setInboxOpen(true)}
           />
           </ModelsContext.Provider>
         </div>
@@ -1237,6 +1382,32 @@ export default function Workspace() {
       />
 
       <SandboxPanel open={sandboxOpen} onClose={() => setSandboxOpen(false)} />
+
+      <InboxPanel
+        open={inboxOpen}
+        onClose={() => setInboxOpen(false)}
+        onAction={runNudgeAction}
+        onOpenSettings={() => {
+          setInboxOpen(false);
+          setSettingsOpen(true);
+        }}
+      />
+
+      <InitiativeHost
+        chatId={chat?.id ?? null}
+        messages={chat?.messages ?? []}
+        providers={providers}
+        provider={provider}
+        model={model}
+        favorites={settings.favorites ?? []}
+        contextRatio={contextInfo?.ratio ?? null}
+        streaming={streaming}
+        voiceOpen={voiceOpen}
+        approvalCount={approvals.length}
+        lastChat={lastChat}
+        onAction={runNudgeAction}
+        onMuted={onRuleMuted}
+      />
 
       <Gallery
         open={galleryOpen}

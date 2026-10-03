@@ -33,6 +33,7 @@
     "test:appearance": "node test/e2e-appearance.mjs",
     "test:models": "node test/e2e-models.mjs",
     "test:extras": "node test/e2e-extras.mjs",
+    "test:initiative": "node test/e2e-initiative.mjs",
     "icons": "node scripts/make-icons.mjs"
   },
   "dependencies": {

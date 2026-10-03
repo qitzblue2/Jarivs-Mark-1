@@ -8,6 +8,8 @@ import Welcome, { type QuickActionId } from "./Welcome";
 import type { ChatMeta } from "@/lib/types";
 import type { ContextInfo } from "@/lib/context-meter";
 import Composer from "./Composer";
+import InitiativeBar from "./InitiativeBar";
+import Suggestions from "./Suggestions";
 import ApprovalCard, { type PendingApproval } from "./ApprovalCard";
 import ModelPicker, { type ProviderState } from "./ModelPicker";
 import type { Attachment, Chat } from "@/lib/types";
@@ -61,6 +63,8 @@ interface Props {
   recent: ChatMeta[];
   onOpenChat: (id: string) => void;
   onQuickAction: (id: QuickActionId) => void;
+  onReact: (messageId: string, reaction: "up" | "down") => void;
+  onOpenInbox: () => void;
 }
 
 const STARTERS = [
@@ -78,6 +82,7 @@ export default function ChatPane(props: Props) {
     artifactCount, notice, onDismissNotice, onStartVoice,
     attachments, onAttach, onRemoveAttachment, onAttachError,
     approvals, onApprovalSettled, context, favorites, onToggleFavorite, recent, onOpenChat, onQuickAction,
+    onReact, onOpenInbox,
   } = props;
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -131,6 +136,8 @@ export default function ChatPane(props: Props) {
             </span>
           )}
         </h1>
+
+        <InitiativeBar onOpenInbox={onOpenInbox} />
 
         {chat && (
           <button
@@ -272,8 +279,23 @@ export default function ChatPane(props: Props) {
                 onStar={streaming ? undefined : onStar}
                 onSpeak={onSpeak}
                 speaking={speakingId === message.id}
+                onReact={streaming ? undefined : onReact}
               />
             ))}
+            <Suggestions
+              last={messages[messages.length - 1]}
+              streaming={streaming}
+              onPick={(text) => {
+                onInputChange(text);
+                // After the box has the text, so the cursor lands after it.
+                setTimeout(() => {
+                  const box = document.getElementById("message-input") as HTMLTextAreaElement | null;
+                  if (!box) return;
+                  box.focus();
+                  box.setSelectionRange(box.value.length, box.value.length);
+                }, 0);
+              }}
+            />
             {approvals.length > 0 && (
               <div className="px-4 sm:px-6">
                 <div className="mx-auto max-w-3xl">

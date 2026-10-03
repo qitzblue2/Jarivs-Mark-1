@@ -3,6 +3,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { audit } from "@/lib/audit";
+import { postToInbox } from "@/lib/inbox";
 import { backupDir, backupEntries } from "./index";
 import { zipStream } from "./zip";
 
@@ -156,7 +157,16 @@ export function startAutoBackup(): void {
   if (shared.__jarvisAutoBackup || !autoBackupEnabled() || process.env.JARVIS_IS_SANDBOX === "1") return;
   const check = () => {
     void runAutoBackup().then((r) => {
-      if (r.error) console.error("[backup] automatic backup failed:", r.error);
+      if (r.error) {
+        console.error("[backup] automatic backup failed:", r.error);
+        // Hourly retries of the same failure are one line in the inbox, not many.
+        void postToInbox({
+          kind: "backup",
+          title: "Daily backup failed",
+          body: `${r.error} — your chats aren't being copied until this is fixed.`,
+          collapseWithin: 12 * 60 * 60 * 1000,
+        }).catch(() => {});
+      }
     });
   };
   const first = setTimeout(() => {

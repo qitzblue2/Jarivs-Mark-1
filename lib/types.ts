@@ -42,6 +42,8 @@ export interface Message {
   stats?: ResponseStats;
   /** Saved for later; listed under Saved across every chat. */
   starred?: boolean;
+  /** A 👍 or 👎 on an assistant reply: feeds the mood and the counts under Settings → Stats, nothing else. */
+  reaction?: "up" | "down";
 }
 
 /**

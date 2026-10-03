@@ -246,6 +246,30 @@ body {
   }
 }
 
+/* A faint pulse on the mood dot when things are going well. */
+@keyframes mood-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(110 231 183 / 0.5); }
+  50% { box-shadow: 0 0 0 4px rgb(110 231 183 / 0); }
+}
+.mood-glow {
+  animation: mood-glow 2.4s ease-out infinite;
+}
+
+/* A card from JARVIS slides in rather than popping. */
+@keyframes nudge-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.nudge-in {
+  animation: nudge-in 0.22s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mood-glow,
+  .nudge-in {
+    animation: none;
+  }
+}
+
 /* --- Keyboard focus --------------------------------------------------------
    Every control shows where focus is — a component that wants something else
    sets its own outline (and the browser suite fails if one has none). Fields

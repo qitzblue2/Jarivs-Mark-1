@@ -80,6 +80,21 @@ import { usageFilename, usageToCsv } from "../lib/usage-csv";
 import { AUTO_NAME, autoName, backupsKept, listAutoBackups, runAutoBackup, startAutoBackup } from "../lib/backup/auto";
 import { backupDir, backupEntries } from "../lib/backup";
 import { MAX_DAYS, computeChatStats, dayKey } from "../lib/chat-stats";
+import { DEFAULT_CONFIG, HOURLY_CAP, LEVELS, RULE_IDS, cleanConfig, inQuietHours } from "../lib/initiative/config";
+import { CALM, HALF_LIFE_MS, applyEvent, decay, labelOf, moodSummary } from "../lib/initiative/mood";
+import { TONES, isTone, quietFor, readTone, toneHint, toneMoodEvent } from "../lib/initiative/tone";
+import { THRESHOLDS, evaluateRules, focusOverNudge, inboxNudge, rememberNudge } from "../lib/initiative/rules";
+import type { Nudge, RuleContext } from "../lib/initiative/rules";
+import { COOLDOWN_MS, EMPTY_GATE, MUTE_AFTER, SNOOZE_MS, channels, decide, forgetRule, recordAccepted, recordDismissal, recordShown } from "../lib/initiative/gate";
+import type { Situation } from "../lib/initiative/gate";
+import { detectFact, suggestFollowUps } from "../lib/initiative/suggest";
+import { troubleOf } from "../lib/initiative/trouble";
+import { KEEP_MS, MAX_ITEMS, clearInbox, listInbox, markRead, postToInbox } from "../lib/inbox";
+import { setOnResult, setRunner as setClockRunner, tick as clockTick } from "../lib/schedule/clock";
+import {
+  KEY as INITIATIVE_KEY, QUEUE_PATIENCE_MS, clearHistory, closeToast, endFocus, flushQueue, focusActive, focusUntilOf, getInitiative,
+  markHistoryRead, moodEvent, moodLabel, noteTone, offer, resetInitiative, setConfig, setRule, setServerInbox, startFocus, unreadCount,
+} from "../lib/initiative/store";
 import { SentenceSplitter, splitSentences } from "../lib/voice/tts/sentences";
 import { Speaker } from "../lib/voice/tts/speaker";
 import { encodeWav, durationOf } from "../lib/voice/wav";
@@ -2758,6 +2773,450 @@ console.log("\n--- chat statistics ---");
   eq("the chart is capped", computeChatStats([], { now: NOW, days: 5000 }).perDay.length, MAX_DAYS);
   eq("and has at least a day", computeChatStats([], { now: NOW, days: 0 }).perDay.length, 1);
   eq("no chats is a quiet zero, not an error", computeChatStats([], { now: NOW }).busiest, null);
+}
+
+console.log("\n--- initiative: settings ---");
+{
+  eq("nothing stored is the defaults", cleanConfig(undefined), DEFAULT_CONFIG);
+  eq("so is junk", [cleanConfig("x"), cleanConfig(42), cleanConfig([1])], [DEFAULT_CONFIG, DEFAULT_CONFIG, DEFAULT_CONFIG]);
+  eq("the defaults are the gentle end", [DEFAULT_CONFIG.level, DEFAULT_CONFIG.desktop, DEFAULT_CONFIG.speak, DEFAULT_CONFIG.enabled], ["balanced", false, false, true]);
+  const messy = cleanConfig({ level: "shouty", desktop: "yes", quietHours: { on: false, from: "25:00", to: "7am" }, rules: { break: false, bogus: false }, adaptTone: 0, showMood: false });
+  eq("each field is cleaned on its own", [messy.level, messy.desktop, messy.quietHours, messy.rules.break, messy.rules["long-chat"], messy.adaptTone, messy.showMood], ["balanced", false, { on: false, from: "22:30", to: "07:00" }, false, true, true, false]);
+  eq("only known rules are kept", Object.keys(messy.rules).sort(), [...RULE_IDS].sort());
+  eq("every level has a cap, and quiet means none", [LEVELS.map((l) => HOURLY_CAP[l]), HOURLY_CAP.quiet], [[0, 3, 8], 0]);
+  const at = (h: number, m = 0) => new Date(2026, 9, 3, h, m);
+  const night = { on: true, from: "22:30", to: "07:00" };
+  eq("quiet hours wrap midnight", [at(23).getHours(), inQuietHours(at(23), night), inQuietHours(at(2), night), inQuietHours(at(6, 59), night)], [23, true, true, true]);
+  eq("the end is not inside them, nor the minute before the start", [inQuietHours(at(7), night), inQuietHours(at(22, 29), night), inQuietHours(at(12), night)], [false, false, false]);
+  eq("a daytime window", [inQuietHours(at(12), { on: true, from: "09:00", to: "17:00" }), inQuietHours(at(18), { on: true, from: "09:00", to: "17:00" })], [true, false]);
+  eq("off is off, and two equal times are an empty window rather than all day", [inQuietHours(at(23), { ...night, on: false }), inQuietHours(at(23), { on: true, from: "08:00", to: "08:00" })], [false, false]);
+}
+
+console.log("\n--- initiative: mood ---");
+{
+  const T0 = 1_000_000_000_000;
+  const mood = (events: Parameters<typeof applyEvent>[1][], at = T0) => events.reduce((m, e) => applyEvent(m, e, at), { ...CALM, at });
+  eq("it starts calm", labelOf(CALM), "calm");
+  eq("a thumbs-up pleases it, two delight it", [labelOf(mood(["thumbs-up"])), labelOf(mood(["thumbs-up", "thumbs-up"]))], ["pleased", "delighted"]);
+  eq("a thumbs-down makes it sorry — it was the reply", labelOf(mood(["thumbs-down"])), "apologetic");
+  eq("failures make it concerned — it was the situation", labelOf(mood(["reply-failed", "reply-failed"])), "concerned");
+  eq("a busy run of good replies is focused, and then pleased", [labelOf(mood(["frustration"])), labelOf(mood(["reply-ok", "reply-ok", "reply-ok", "reply-ok"]))], ["focused", "pleased"]);
+  eq("regenerating a reply dents it", mood(["regenerated"]).valence < 0, true);
+  eq("finishing a focus session lifts it", labelOf(mood(["focus-done"])), "pleased");
+  eq("it never leaves its range", [mood(Array(10).fill("thumbs-up")).valence, mood(Array(10).fill("thumbs-down")).valence], [1, -1]);
+  const sorry = mood(["thumbs-down"]);
+  eq("it drifts back: half the way in ten minutes", Math.abs(decay(sorry, T0 + HALF_LIFE_MS).valence - sorry.valence / 2) < 1e-9, true);
+  eq("and is calm within the hour", [labelOf(decay(sorry, T0 + 3_600_000)), decay(sorry, T0 + 3_600_000).cause], ["calm", null]);
+  eq("time never runs backwards", decay(sorry, T0 - 5000).valence, sorry.valence);
+  eq("a new chat takes the edge off", Math.abs(applyEvent(sorry, "new-chat", T0).valence - sorry.valence / 2) < 1e-9, true);
+  eq("late at night it quietens", mood(["late-night"]).energy < CALM.energy, true);
+  eq("each mood has a summary, worded as how the session is going", (["calm", "focused", "pleased", "delighted", "concerned", "apologetic"] as const).every((l) => moodSummary(l).length > 10 && !/feel/i.test(moodSummary(l))), true);
+}
+
+console.log("\n--- initiative: reading tone ---");
+{
+  const row = (text: string, want: string) => eq(`"${text.slice(0, 48)}" is ${want}`, readTone(text), want);
+  row("How do I centre a div?", "neutral");
+  row("kill the process on port 3000", "neutral");
+  row("this query is killing performance", "neutral");
+  row("I'm killing it today", "neutral");
+  row("What's the deadline for filing taxes?", "neutral");
+  row("Write a function that sorts a list", "neutral");
+  row("ugh this still doesn't work", "frustrated");
+  row("WHY IS THIS NOT WORKING AT ALL", "frustrated");
+  row("it's still broken!!!", "frustrated");
+  row("this is useless", "frustrated");
+  row("thanks but it doesn't work", "frustrated");
+  row("I need this done asap", "stressed");
+  row("I'm overwhelmed with work", "stressed");
+  row("the deadline is tomorrow", "stressed");
+  row("thanks!", "grateful");
+  row("perfect, thank you", "grateful");
+  row("this is awesome!!", "excited");
+  row("I feel so lonely lately", "sad");
+  row("i'm really depressed", "sad");
+  row("I want to die", "distress");
+  row("I keep thinking about suicide", "distress");
+  row("I might hurt myself", "distress");
+  eq("a pasted log is not a mood", readTone(`ugh\n${"line\n".repeat(20)}`), "neutral");
+  eq("nor a long message", readTone(`ugh ${"x".repeat(700)}`), "neutral");
+  eq("nor anything with code in it", readTone("ugh ```js\nconsole.log(1)\n```"), "neutral");
+  eq("an empty message is neutral", readTone("   "), "neutral");
+  eq("hints exist for the tones that need one, and for no other", (["neutral", "excited", "grateful", "frustrated", "stressed", "sad", "distress"] as const).map((t) => toneHint(t) !== null), [false, false, false, true, true, true, true]);
+  eq("the frustrated hint asks for a fix, not a lecture", /fix the problem/.test(toneHint("frustrated")!) && /no lecture/.test(toneHint("frustrated")!), true);
+  eq("the distress hint is about care and real help, with no humour", /care/.test(toneHint("distress")!) && /crisis services/.test(toneHint("distress")!) && /without judgement or humour/.test(toneHint("distress")!), true);
+  eq("a hint is one short paragraph", (["frustrated", "stressed", "sad", "distress"] as const).every((t) => toneHint(t)!.length < 320 && !toneHint(t)!.includes("\n")), true);
+  eq("only some tones touch the mood — a sad moment is not for it to perform", (["neutral", "frustrated", "stressed", "grateful", "excited", "sad", "distress"] as const).map(toneMoodEvent), [null, "frustration", "stress", "thanked", null, null, null]);
+  eq("distress keeps cards away for six hours, sadness for two, the rest not at all", [quietFor("distress"), quietFor("sad"), quietFor("frustrated"), quietFor("neutral")], [6 * 3_600_000, 2 * 3_600_000, 0, 0]);
+}
+
+console.log("\n--- initiative: what it might say ---");
+{
+  const NOW = new Date(2026, 9, 2, 14, 0, 0).getTime();
+  const base: RuleContext = { now: NOW, chatId: "c1", contextRatio: 0.5, trouble: null, activeMs: 0, approvalWaitMs: 0, awayMs: 0, lastChat: null, hour: 14, mood: "calm" };
+  const rules = (over: Partial<RuleContext> = {}) => evaluateRules({ ...base, ...over });
+  const ids = (over: Partial<RuleContext> = {}) => rules(over).map((n) => n.rule);
+  eq("an ordinary moment says nothing", rules(), []);
+
+  eq("a nearly full chat offers a summary or a fresh start", [ids({ contextRatio: 0.85 }), rules({ contextRatio: 0.85 })[0].actions.map((a) => a.kind), rules({ contextRatio: 0.85 })[0].id], [["long-chat"], ["fill", "new-chat"], "long-chat:c1"]);
+  eq("a little under is quiet", ids({ contextRatio: 0.84 }), []);
+  eq("one that no longer fits says so", rules({ contextRatio: 1.3 })[0].title, "This chat no longer fits");
+  eq("with no chat open there's nothing to summarise", ids({ chatId: null, contextRatio: 2 }), []);
+  const summary = rules({ contextRatio: 0.9 })[0].actions[0];
+  eq("the summary button only fills the box — nothing is sent", summary.kind === "fill" && summary.text.startsWith("Summarize our conversation"), true);
+
+  const alt = { provider: "cerebras", model: "m2", label: "m2 · Cerebras" };
+  eq("one failure is bad luck", ids({ trouble: { failures: 1, provider: "groq", model: "m1", alternative: alt } }), []);
+  const trouble = rules({ trouble: { failures: 2, provider: "groq", model: "m1", alternative: alt } })[0];
+  eq("two in a row offers another model", [trouble.rule, trouble.actions.map((a) => a.kind === "switch-model" && a.model)], ["provider-trouble", ["m2"]]);
+  eq("with nothing else ready it says what would help", rules({ trouble: { failures: 3, provider: "groq", model: "m1", alternative: null } })[0].actions.length === 0 && /key in Settings/.test(rules({ trouble: { failures: 3, provider: "groq", model: "m1", alternative: null } })[0].body ?? ""), true);
+
+  const MIN = 60_000;
+  eq("steady work for an hour and a half earns a break", [ids({ activeMs: 89 * MIN }), ids({ activeMs: 90 * MIN })], [[], ["break"]]);
+  eq("and a second after three hours is a different card", [rules({ activeMs: 91 * MIN })[0].id, rules({ activeMs: 181 * MIN })[0].id], ["break:1", "break:2"]);
+  eq("its wording follows the mood", [rules({ activeMs: 95 * MIN, mood: "concerned" })[0].title.startsWith("Hey"), rules({ activeMs: 95 * MIN, mood: "pleased" })[0].title.startsWith("Good session"), rules({ activeMs: 95 * MIN })[0].title.startsWith("You've been at it")], [true, true, true]);
+
+  eq("late and still going", [ids({ hour: 23, activeMs: 11 * MIN }), ids({ hour: 23, activeMs: 5 * MIN }), ids({ hour: 12, activeMs: 11 * MIN }), ids({ hour: 3, activeMs: 11 * MIN })], [["late-night"], [], [], ["late-night"]]);
+  const at11pm = new Date(2026, 9, 2, 23, 30).getTime();
+  const at2am = new Date(2026, 9, 3, 2, 0).getTime();
+  eq("2am is still last night, so the night is offered once", rules({ now: at11pm, hour: 23, activeMs: 20 * MIN })[0].id === rules({ now: at2am, hour: 2, activeMs: 20 * MIN })[0].id, true);
+  eq("the next night is a new one", rules({ now: at11pm + 24 * 3_600_000, hour: 23, activeMs: 20 * MIN })[0].id !== rules({ now: at11pm, hour: 23, activeMs: 20 * MIN })[0].id, true);
+
+  eq("an unanswered approval is mentioned after 45 seconds", [ids({ approvalWaitMs: 44_000 }), ids({ approvalWaitMs: 45_000 })], [[], ["approval-waiting"]]);
+  const chat = { id: "c9", title: "Rust lifetimes" };
+  eq("coming back after four hours offers the last chat", [ids({ awayMs: 3 * 3_600_000, lastChat: chat }), ids({ awayMs: 4 * 3_600_000, lastChat: chat }), ids({ awayMs: 9 * 3_600_000, lastChat: null })], [[], ["welcome-back"], []]);
+  const back = rules({ awayMs: 5 * 3_600_000, lastChat: chat })[0];
+  eq("by name, with a button that opens it", [back.body, back.actions[0]], ["Last time: “Rust lifetimes”.", { kind: "open-chat", label: "Pick it up", chatId: "c9" }]);
+
+  const remember = rememberNudge("User is allergic to penicillin", NOW);
+  eq("a memory offer saves only when pressed, and can pin it", [remember.actions.map((a) => a.kind), remember.actions.map((a) => a.kind === "remember" && Boolean(a.always))], [["remember", "remember"], [false, true]]);
+  eq("a timer you set is exempt from the hourly limit", [focusOverNudge(25, NOW).requested, focusOverNudge(25, NOW).title, focusOverNudge(null, NOW).title], [true, "Focus time's up — 25 minutes", "Focus is over"]);
+  eq("so is what the server sends", [inboxNudge({ id: "a1", title: "Morning briefing", body: "It is raining." }, NOW).requested, inboxNudge({ id: "a1", title: "t", body: "b" }, NOW).id], [true, "inbox:a1"]);
+  eq("thresholds are the ones the README states", [THRESHOLDS.contextRatio, THRESHOLDS.breakAfterMs / MIN, THRESHOLDS.approvalAfterMs / 1000, THRESHOLDS.awayMs / 3_600_000], [0.85, 90, 45, 4]);
+}
+
+console.log("\n--- initiative: when it keeps quiet ---");
+{
+  const NOW = new Date(2026, 9, 2, 14, 0, 0).getTime();
+  const HOUR = 3_600_000;
+  const card = (rule: Nudge["rule"], extra: Partial<Nudge> = {}): Nudge => ({ id: `${rule}:1`, rule, title: "t", actions: [], at: NOW, ...extra });
+  const calm: Situation = { now: NOW, typing: false, streaming: false, dialogOpen: false, voiceOpen: false, hidden: false, focusUntil: 0, distressUntil: 0 };
+  const verdict = (n: Nudge, over: { config?: Partial<typeof DEFAULT_CONFIG>; gate?: Partial<typeof EMPTY_GATE>; sit?: Partial<Situation> } = {}) =>
+    decide(n, { ...DEFAULT_CONFIG, ...over.config }, { ...EMPTY_GATE, ...over.gate }, { ...calm, ...over.sit }).action;
+
+  eq("a calm moment shows it", verdict(card("long-chat")), "show");
+  eq("off means it never existed — but what you asked for waits in the inbox", [verdict(card("long-chat"), { config: { enabled: false } }), verdict(card("inbox", { requested: true }), { config: { enabled: false } })], ["drop", "inbox"]);
+  eq("a rule you turned off is dropped", verdict(card("break"), { config: { rules: { ...DEFAULT_CONFIG.rules, break: false } } }), "drop");
+  eq("so is one it learned to stop", verdict(card("break"), { gate: { learnedMutes: ["break"] } }), "drop");
+  eq("and one snoozed", [verdict(card("break"), { gate: { snoozedUntil: { break: NOW + 1000 } } }), verdict(card("break"), { gate: { snoozedUntil: { break: NOW - 1 } } })], ["drop", "show"]);
+  eq("after a hard message nothing appears; what you asked for goes to the inbox", [verdict(card("break"), { sit: { distressUntil: NOW + 1 } }), verdict(card("inbox", { requested: true }), { sit: { distressUntil: NOW + 1 } })], ["drop", "inbox"]);
+  eq("the same thing isn't offered again within its cooldown", [verdict(card("long-chat"), { gate: { lastByRule: { "long-chat": NOW - 10 * 60_000 } } }), verdict(card("long-chat"), { gate: { lastByRule: { "long-chat": NOW - 31 * 60_000 } } })], ["drop", "show"]);
+  eq("every rule has a cooldown", [...RULE_IDS, "focus-over", "inbox"].every((r) => typeof COOLDOWN_MS[r as keyof typeof COOLDOWN_MS] === "number"), true);
+  eq("during focus it is held back for the inbox", [verdict(card("break"), { sit: { focusUntil: NOW + HOUR } }), verdict(card("break"), { sit: { focusUntil: NOW - 1 } })], ["inbox", "show"]);
+  eq("at the quiet level nothing pops up", verdict(card("break"), { config: { level: "quiet" } }), "inbox");
+  const used = (n: number) => ({ shown: Array.from({ length: n }, (_, i) => NOW - (i + 1) * 60_000) });
+  eq("balanced allows three an hour", [verdict(card("break"), { gate: used(2) }), verdict(card("break"), { gate: used(3) })], ["show", "inbox"]);
+  eq("chatty allows eight", [verdict(card("break"), { config: { level: "chatty" }, gate: used(7) }), verdict(card("break"), { config: { level: "chatty" }, gate: used(8) })], ["show", "inbox"]);
+  eq("an old one doesn't count against the hour", verdict(card("break"), { gate: { shown: [NOW - 61 * 60_000, NOW - 62 * 60_000, NOW - 63 * 60_000] } }), "show");
+  eq("a card you asked for isn't capped", verdict(card("focus-over", { requested: true }), { gate: used(9) }), "show");
+  eq("typing, a reply arriving, a dialog or voice mode wait for a calm moment", [{ typing: true }, { streaming: true }, { dialogOpen: true }, { voiceOpen: true }].map((sit) => verdict(card("break"), { sit })), ["queue", "queue", "queue", "queue"]);
+  eq("muted beats busy: it isn't kept waiting for something that will never show", verdict(card("break"), { config: { rules: { ...DEFAULT_CONFIG.rules, break: false } }, sit: { typing: true } }), "drop");
+  eq("focus beats busy: it goes to the inbox rather than waiting", verdict(card("break"), { sit: { typing: true, focusUntil: NOW + HOUR } }), "inbox");
+
+  eq("showing one is counted, and a requested one isn't", [recordShown(EMPTY_GATE, card("break"), NOW).shown.length, recordShown(EMPTY_GATE, card("inbox", { requested: true }), NOW).shown.length], [1, 0]);
+  eq("and remembered per rule", recordShown(EMPTY_GATE, card("break"), NOW).lastByRule.break, NOW);
+  eq("old entries are pruned as it goes", recordShown({ ...EMPTY_GATE, shown: [NOW - 2 * HOUR] }, card("break"), NOW).shown, [NOW]);
+
+  const d1 = recordDismissal(EMPTY_GATE, "break", NOW);
+  eq("waving a card away quietens that rule for an hour", [d1.gate.snoozedUntil.break - NOW, d1.mutedNow, SNOOZE_MS], [SNOOZE_MS, false, SNOOZE_MS]);
+  const d2 = recordDismissal(d1.gate, "break", NOW + 1000);
+  const d3 = recordDismissal(d2.gate, "break", NOW + 2000);
+  eq(`the ${MUTE_AFTER}rd time in a week it stops for good`, [d2.mutedNow, d3.mutedNow, d3.gate.learnedMutes], [false, true, ["break"]]);
+  eq("dismissals a week old don't count", recordDismissal({ ...EMPTY_GATE, dismissals: { break: [NOW - 8 * 24 * HOUR, NOW - 9 * 24 * HOUR] } }, "break", NOW).mutedNow, false);
+  eq("only suggestions are ever muted — never your own timer or the server's messages", [recordDismissal(EMPTY_GATE, "inbox", NOW).gate.learnedMutes, recordDismissal(recordDismissal(recordDismissal(EMPTY_GATE, "inbox", NOW).gate, "inbox", NOW).gate, "inbox", NOW).mutedNow], [[], false]);
+  eq("using a card forgives what dismissing it cost", [recordAccepted(d2.gate, "break").dismissals.break, recordAccepted(d2.gate, "break").snoozedUntil.break], [undefined, undefined]);
+  eq("turning a rule back on forgets the mute", forgetRule(d3.gate, "break").learnedMutes, []);
+
+  eq("desktop notifications need the tab hidden, the setting and no quiet hours", [channels({ ...DEFAULT_CONFIG, desktop: true }, { hidden: true }, false), channels({ ...DEFAULT_CONFIG, desktop: true }, { hidden: false }, false), channels({ ...DEFAULT_CONFIG, desktop: true }, { hidden: true }, true), channels(DEFAULT_CONFIG, { hidden: true }, false)].map((c) => c.desktop), [true, false, false, false]);
+  eq("speech needs the tab visible, the setting and no quiet hours", [channels({ ...DEFAULT_CONFIG, speak: true }, { hidden: false }, false), channels({ ...DEFAULT_CONFIG, speak: true }, { hidden: true }, false), channels({ ...DEFAULT_CONFIG, speak: true }, { hidden: false }, true), channels(DEFAULT_CONFIG, { hidden: false }, false)].map((c) => c.speak), [true, false, false, false]);
+}
+
+console.log("\n--- initiative: suggestions ---");
+{
+  const labels = (a: string, o?: { error?: boolean }) => suggestFollowUps(a, o).map((s) => s.id);
+  const prose = "Here is a reasonably detailed explanation of how that works, with enough words to count as an answer.";
+  eq("code gets code follow-ups", labels(`${prose}\n\n\`\`\`js\nconsole.log(1)\n\`\`\``), ["explain-code", "errors", "tests"]);
+  eq("a table gets a summary", labels(`${prose}\n\n| a | b |\n|---|---|\n| 1 | 2 |`)[0], "table");
+  eq("steps get a walk-through", labels(`${prose}\n\n1. one\n2. two\n3. three`)[0], "step-one");
+  eq("a long answer offers a shorter one", labels(`${prose} ${"word ".repeat(400)}`)[0], "shorter");
+  eq("a picture offers edits", labels("Here it is.\n\n![a lighthouse](/api/images/00000000-0000-4000-8000-000000000001)\n\nA lighthouse at dusk.").slice(0, 2), ["night", "style"]);
+  eq("a failed reply offers a retry", labels("", { error: true }), ["retry", "what-went-wrong"]);
+  eq("plain prose gets the general three", labels(prose), ["deeper", "example", "downsides"]);
+  eq("never more than three", Math.max(...[`${prose}\n\`\`\`x\n\`\`\`\n| a |\n|---|\n1. a\n2. b\n3. c`].map((t) => suggestFollowUps(t).length)), 3);
+  eq("a reply that asks you something gets none — buttons would talk over it", labels(`${prose} Which of those would you like me to start with?`), []);
+  eq("nor a one-word reply", labels("Done."), []);
+  eq("each has a button and the words it puts in the box", suggestFollowUps(prose).every((s) => s.label.length > 2 && s.text.length > 5), true);
+
+  const fact = (t: string) => detectFact(t);
+  eq("a name", [fact("My name is Ada"), fact("you can call me Grace.")], ["User's name is Ada", "User's name is Grace"]);
+  eq("but not a lower-case word that isn't one", fact("my name is not important"), null);
+  eq("an allergy or a diet", [fact("I'm allergic to penicillin"), fact("I am vegetarian"), fact("I'm left-handed.")], ["User is allergic to penicillin", "User is vegetarian", "User is left-handed"]);
+  eq("where you live, where you're from, who you work for", [fact("I live in Oslo"), fact("I'm from New Zealand"), fact("I work at Acme Corp")], ["User lives in Oslo", "User is from New Zealand", "User works at Acme Corp"]);
+  eq("what you do, in your own words", fact("I work as a nurse"), "User works as a nurse");
+  eq("a standing preference", [fact("I prefer tabs over spaces"), fact("I always use dark mode"), fact("I never use semicolons")], ["User prefers tabs over spaces", "User always uses dark mode", "User never uses semicolons"]);
+  eq("a birthday and pronouns", [fact("my birthday is March 3"), fact("my pronouns are they/them")], ["User's birthday is March 3", "User's pronouns are they/them"]);
+  eq("one fact from a longer message", fact("Thanks. I live in Lisbon. Can you plan a weekend there?"), "User lives in Lisbon");
+  eq("not a hypothetical", [fact("If I live in Oslo, what's the weather like?"), fact("What if I work at Acme Corp?")], [null, null]);
+  eq("not a question", fact("Do I live in Oslo or Bergen?"), null);
+  eq("not a place or a company that isn't named", [fact("I live in a van"), fact("I work at night")], [null, null]);
+  eq("not code, a long paste, or nothing", [fact("```\nmy name is Ada\n```"), fact(`I prefer ${"x".repeat(400)}`), fact(""), fact("how do I sort a list?")], [null, null, null, null]);
+}
+
+console.log("\n--- the inbox ---");
+{
+  const dir = mkdtempSync(join(tmpdir(), "jarvis-inbox-"));
+  const before = process.env.JARVIS_DATA_DIR;
+  process.env.JARVIS_DATA_DIR = dir;
+  try {
+    const T = 1_000_000_000_000;
+    eq("nothing yet is an empty list, not an error", await listInbox(T), []);
+    const a = await postToInbox({ kind: "scheduled", title: "Morning briefing", body: "It is raining." }, T);
+    const b = await postToInbox({ kind: "backup", title: "Daily backup failed", body: "disk full" }, T + 1000);
+    eq("what arrives is kept, newest first, unread", (await listInbox(T + 2000)).map((i) => [i.title, i.read]), [["Daily backup failed", false], ["Morning briefing", false]]);
+    eq("with an id and a time", [typeof a.id, a.at, a.id !== b.id], ["string", T, true]);
+    eq("it is a file you can open", JSON.parse(readFileSync(join(dir, "inbox.json"), "utf8")).items.length, 2);
+    eq("titles and bodies are tidied and bounded", await (async () => { const i = await postToInbox({ kind: "scheduled", title: "  ", body: `  ${"x".repeat(5000)}  ` }, T + 3000); return [i.title, i.body.length]; })(), ["JARVIS", 2000]);
+
+    eq("marking some read leaves the others", [await markRead([a.id], T + 4000), (await listInbox(T + 4000)).filter((i) => i.read).map((i) => i.title)], [1, ["Morning briefing"]]);
+    eq("marking all read", [await markRead(undefined, T + 5000), (await listInbox(T + 5000)).every((i) => i.read)], [2, true]);
+    eq("again changes nothing", await markRead(undefined, T + 6000), 0);
+    eq("clearing some", [await clearInbox([a.id], T + 7000), (await listInbox(T + 7000)).length], [1, 2]);
+    eq("clearing all", [await clearInbox(undefined, T + 8000), await listInbox(T + 8000)], [2, []]);
+
+    // A failure that repeats every hour is one line.
+    const first = await postToInbox({ kind: "backup", title: "Daily backup failed", body: "disk full", collapseWithin: 12 * 3_600_000 }, T);
+    const again = await postToInbox({ kind: "backup", title: "Daily backup failed", body: "disk full (still)", collapseWithin: 12 * 3_600_000 }, T + 3_600_000);
+    eq("a repeat within the window replaces the unread one", [again.id === first.id, (await listInbox(T + 3_600_001)).length, (await listInbox(T + 3_600_001))[0].body], [true, 1, "disk full (still)"]);
+    eq("after it, a new one", (await postToInbox({ kind: "backup", title: "Daily backup failed", body: "again", collapseWithin: 12 * 3_600_000 }, T + 13 * 3_600_000), (await listInbox(T + 13 * 3_600_000)).length), 2);
+    await markRead(undefined, T + 14 * 3_600_000);
+    eq("a read one isn't collapsed into: you've seen it, so a repeat is news", (await postToInbox({ kind: "backup", title: "Daily backup failed", body: "and again", collapseWithin: 12 * 3_600_000 }, T + 14 * 3_600_000 + 1), (await listInbox(T + 14 * 3_600_000 + 2)).length), 3);
+    await clearInbox(undefined, T + 15 * 3_600_000);
+
+    eq("the oldest go at two weeks", await (async () => { await postToInbox({ kind: "scheduled", title: "old", body: "x" }, T); await postToInbox({ kind: "scheduled", title: "new", body: "x" }, T + KEEP_MS - 1000); return (await listInbox(T + KEEP_MS + 1000)).map((i) => i.title); })(), ["new"]);
+    await clearInbox(undefined, T + KEEP_MS);
+    await Promise.all(Array.from({ length: MAX_ITEMS + 25 }, (_, i) => postToInbox({ kind: "scheduled", title: `n${i}`, body: "x" }, T + i)));
+    const full = await listInbox(T + MAX_ITEMS + 100);
+    eq("arriving together, none are lost to each other — and the surplus is dropped", [full.length, full[0].title, full.at(-1)?.title], [MAX_ITEMS, `n${MAX_ITEMS + 24}`, "n25"]);
+
+    writeFileSync(join(dir, "inbox.json"), "{ not json");
+    eq("a damaged file is an empty inbox, not a crash", await listInbox(T), []);
+    writeFileSync(join(dir, "inbox.json"), JSON.stringify({ items: [{ id: 1 }, { id: "ok", at: T, kind: "scheduled", title: "kept", body: "b", read: false }, { id: "x", at: T, kind: "other", title: "t", body: "b", read: false }] }));
+    eq("entries that aren't well-formed are skipped", (await listInbox(T)).map((i) => i.id), ["ok"]);
+
+    // The routes.
+    const route = await import("../app/api/inbox/route");
+    await clearInbox();
+    await postToInbox({ kind: "scheduled", title: "one", body: "b" }, Date.now() - 5000);
+    const second = await postToInbox({ kind: "scheduled", title: "two", body: "b" }, Date.now());
+    const get = async (q = "") => (await route.GET(new Request(`http://localhost/api/inbox${q}`) as never)).json();
+    const post = (body: unknown, headers: Record<string, string> = { "Content-Type": "application/json" }) =>
+      route.POST(new Request("http://localhost/api/inbox", { method: "POST", headers, body: typeof body === "string" ? body : JSON.stringify(body) }) as never);
+    eq("GET lists them with the unread count", await (async () => { const r = await get(); return [r.items.length, r.unread]; })(), [2, 2]);
+    eq("?since returns only what is newer", (await get(`?since=${second.at - 1}`)).items.map((i: { title: string }) => i.title), ["two"]);
+    eq("POST wants application/json", (await post("{}", { "Content-Type": "text/plain" })).status, 415);
+    eq("and an action it knows", [(await post({ action: "post", title: "hi" })).status, (await post({ action: "nonsense" })).status], [400, 400]);
+    eq("there is no way to add an item from a page", (await get()).items.some((i: { title: string }) => i.title === "hi"), false);
+    eq("reading one", [(await (await post({ action: "read", ids: [second.id] })).json()).changed, (await get()).unread], [1, 1]);
+    eq("clearing all", [(await (await post({ action: "clear" })).json()).removed, (await get()).items], [1 + 1, []]);
+
+    // What the scheduler's clock hands over.
+    const clockTasks: unknown[] = [];
+    setClockRunner(async () => ({ text: "Good morning." }));
+    setOnResult((task, outcome) => { clockTasks.push([task.label, outcome.text]); });
+    let stored: ScheduledTask[] = [{ id: "t1", prompt: "p", label: "Briefing", schedule: { kind: "daily", hhmm: "08:00" }, enabled: true, createdAt: 0, nextRunAt: 1 }];
+    setScheduleStore({
+      async list() { return stored.map((t) => ({ ...t })); },
+      async save(task) { const i = stored.findIndex((x) => x.id === task.id); if (i === -1) stored.push(task); else stored[i] = task; },
+      async delete(id) { stored = stored.filter((t) => t.id !== id); },
+    });
+    await clockTick(Date.now());
+    eq("a task that has run reports what it said", clockTasks, [["Briefing", "Good morning."]]);
+    stored[0].nextRunAt = 1;
+    setOnResult(() => { throw new Error("disk full"); });
+    eq("a hook that fails cannot stop the clock", await clockTick(Date.now()), 1);
+    setOnResult(null);
+    setClockRunner(null);
+    stored = [];
+  } finally {
+    if (before === undefined) delete process.env.JARVIS_DATA_DIR; else process.env.JARVIS_DATA_DIR = before;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+console.log("\n--- initiative: spotting a failing model ---");
+{
+  const reply = (extra: object = {}) => ({ role: "assistant", provider: "groq", model: "m1", ...extra });
+  const user = { role: "user" };
+  const providers = [
+    { id: "groq", label: "Groq", ready: true, models: ["m1", "m1b"] },
+    { id: "cerebras", label: "Cerebras", ready: true, models: ["c1", "c2"] },
+    { id: "mistral", label: "Mistral", ready: false, models: ["x1"] },
+  ];
+  const now = { provider: "groq", model: "m1" };
+  eq("healthy replies are no trouble", troubleOf([user, reply(), user, reply()], providers, now, []), null);
+  eq("nor is no reply", troubleOf([user], providers, now, []), null);
+  eq("one failure is counted", troubleOf([user, reply({ error: "429" })], providers, now, [])?.failures, 1);
+  eq("failures count only while unbroken, from the latest", troubleOf([user, reply({ error: "x" }), user, reply(), user, reply({ error: "y" })], providers, now, [])?.failures, 1);
+  eq("a fallback counts as a failure of the one it fell back from", [troubleOf([user, reply({ error: "x" }), user, reply({ fellBackFrom: "groq", provider: "cerebras", model: "c1" })], providers, now, [])?.failures, troubleOf([user, reply({ fellBackFrom: "groq", provider: "cerebras" })], providers, now, [])?.provider], [2, "groq"]);
+  const t = troubleOf([user, reply({ error: "x" }), user, reply({ error: "y" })], providers, now, []);
+  eq("with nothing starred, the first ready model elsewhere", t?.alternative, { provider: "cerebras", model: "c1", label: "c1 · Cerebras" });
+  eq("a provider with no key is never offered", troubleOf([user, reply({ error: "x" })], [providers[0], providers[2]], now, [])?.alternative, null);
+  eq("a starred model comes first", troubleOf([user, reply({ error: "x" })], providers, now, ["cerebras:c2"])?.alternative?.model, "c2");
+  eq("but not a star for the failing provider, or a model that has gone", [troubleOf([user, reply({ error: "x" })], providers, now, ["groq:m1b"])?.alternative?.provider, troubleOf([user, reply({ error: "x" })], providers, now, ["cerebras:retired"])?.alternative?.model], ["cerebras", "c1"]);
+}
+
+console.log("\n--- initiative: the live state ---");
+{
+  const NOW = new Date(2026, 9, 2, 14, 0, 0).getTime();
+  const MIN = 60_000;
+  const calm: Situation = { now: NOW, typing: false, streaming: false, dialogOpen: false, voiceOpen: false, hidden: false, focusUntil: 0, distressUntil: 0 };
+  const card = (rule: Nudge["rule"], key = "1", extra: Partial<Nudge> = {}): Nudge => ({ id: `${rule}:${key}`, rule, title: `${rule} ${key}`, actions: [], at: NOW, ...extra });
+  const fresh = () => { resetInitiative(); };
+
+  fresh();
+  eq("it starts with the gentle defaults and a calm mood", [getInitiative().config.level, getInitiative().toasts.length, moodLabel(getInitiative(), NOW)], ["balanced", 0, "calm"]);
+
+  eq("a calm moment puts a card on screen", [offer(card("break"), calm).action, getInitiative().toasts.length, getInitiative().history[0].state, getInitiative().history[0].read], ["show", 1, "shown", false]);
+  eq("offering it again is ignored — on screen already", [offer(card("break"), calm).reason, getInitiative().toasts.length], ["already pending", 1]);
+  eq("and counts toward the hour", getInitiative().gate.shown.length, 1);
+
+  fresh();
+  eq("typing holds a card for a calm moment", [offer(card("break"), { ...calm, typing: true }).action, getInitiative().queue.length, getInitiative().toasts.length], ["queue", 1, 0]);
+  eq("it is the same card, not two, if offered again meanwhile", [offer(card("break"), { ...calm, typing: true }).reason, getInitiative().queue.length], ["already pending", 1]);
+  eq("still busy: it keeps waiting", [flushQueue({ ...calm, typing: true }).length, getInitiative().queue.length], [0, 1]);
+  eq("at a calm moment it appears", [flushQueue(calm).map((n) => n.id), getInitiative().toasts.length, getInitiative().queue.length], [["break:1"], 1, 0]);
+
+  fresh();
+  offer(card("break"), { ...calm, typing: true });
+  eq("after too long a wait it goes to the inbox instead of appearing late", [flushQueue({ ...calm, now: NOW + QUEUE_PATIENCE_MS + MIN }).length, getInitiative().history[0].state, getInitiative().toasts.length], [0, "held", 0]);
+
+  fresh();
+  eq("during focus a card is held, with a badge", [offer(card("long-chat"), { ...calm, focusUntil: NOW + 30 * MIN }).action, getInitiative().history[0].state, unreadCount()], ["inbox", "held", 1]);
+  eq("and isn't re-held every few seconds: its cooldown has started", offer(card("long-chat", "2"), { ...calm, focusUntil: NOW + 30 * MIN }).reason, "recently offered");
+
+  fresh();
+  setServerInbox([{ id: "s1", at: NOW, kind: "scheduled", title: "Briefing", body: "x", read: false }]);
+  eq("a card made from a server item appears, but isn't counted a second time beside that item", [offer(inboxNudge({ id: "s1", title: "Briefing", body: "x" }, NOW), calm).action, getInitiative().toasts.length, getInitiative().history.length, unreadCount()], ["show", 1, 0, 1]);
+  eq("held during focus it is the item's badge, not a second one", [offer(inboxNudge({ id: "s2", title: "Backup", body: "x" }, NOW), { ...calm, focusUntil: NOW + 30 * MIN }).action, getInitiative().history.length, unreadCount()], ["inbox", 0, 1]);
+  closeToast("inbox:s1", "timeout", NOW);
+  eq("when it times out it leaves nothing extra behind", [getInitiative().toasts.length, getInitiative().history.length], [0, 0]);
+
+  fresh();
+  offer(card("break"), calm);
+  eq("using a card closes it and marks it used and read", [closeToast("break:1", "used", NOW).mutedRule, getInitiative().toasts.length, getInitiative().history[0].state, getInitiative().history[0].read], [null, 0, "used", true]);
+  fresh();
+  offer(card("break"), calm);
+  eq("letting it time out leaves it unread, and costs the rule nothing", [closeToast("break:1", "timeout", NOW).mutedRule, getInitiative().history[0].read, getInitiative().gate.dismissals.break, getInitiative().gate.snoozedUntil.break], [null, false, undefined, undefined]);
+  fresh();
+  offer(card("break"), calm);
+  closeToast("break:1", "dismiss", NOW);
+  eq("waving it away snoozes the rule for an hour", [getInitiative().history[0].state, (getInitiative().gate.snoozedUntil.break ?? 0) - NOW, offer(card("break", "2"), { ...calm, now: NOW + 5 * MIN }).reason], ["dismissed", 60 * MIN, "snoozed"]);
+  eq("and the third time in a week stops that rule", (() => { let r = { mutedRule: null as string | null }; for (let i = 0; i < 2; i++) { const t = NOW + (i + 1) * 3 * 60 * MIN; offer(card("break", `d${i}`), { ...calm, now: t }); r = closeToast(`break:d${i}`, "dismiss", t); } return [r.mutedRule, getInitiative().gate.learnedMutes]; })(), ["break", ["break"]]);
+  eq("turning it back on in Settings forgets that", (() => { setRule("break", false); setRule("break", true); return getInitiative().gate.learnedMutes; })(), []);
+  fresh();
+  offer(card("long-chat"), calm);
+  eq("'stop suggesting this' mutes it now, in Settings too", [closeToast("long-chat:1", "mute", NOW).mutedRule, getInitiative().config.rules["long-chat"], offer(card("long-chat", "2"), calm).action], ["long-chat", false, "drop"]);
+  fresh();
+  offer(card("inbox", "s1", { requested: true }), calm);
+  eq("a message from the server can't be muted into silence", [closeToast("inbox:s1", "mute", NOW).mutedRule, getInitiative().config.enabled], [null, true]);
+
+  fresh();
+  offer(card("break"), calm);
+  offer(card("long-chat"), { ...calm, typing: true });
+  noteTone("distress", NOW);
+  eq("after a hard message the cards are cleared and nothing new appears", [getInitiative().toasts.length, getInitiative().queue.length, getInitiative().distressUntil - NOW, offer(card("late-night"), { ...calm, distressUntil: getInitiative().distressUntil }).action], [0, 0, 6 * 60 * MIN, "drop"]);
+  fresh();
+  noteTone("frustrated", NOW);
+  eq("frustration moves the mood and clears nothing", [moodLabel(getInitiative(), NOW), getInitiative().distressUntil], ["focused", 0]);
+  noteTone("grateful", NOW);
+  eq("thanks lifts it", getInitiative().mood.valence > -0.15, true);
+  fresh();
+  moodEvent("thumbs-down", NOW);
+  eq("a thumbs-down makes it sorry, and it drifts back", [moodLabel(getInitiative(), NOW), moodLabel(getInitiative(), NOW + 60 * MIN)], ["apologetic", "calm"]);
+
+  fresh();
+  eq("no focus at first", [focusActive(getInitiative(), NOW), focusUntilOf(getInitiative()), endFocus(NOW)], [false, 0, null]);
+  startFocus(25, NOW);
+  eq("a timed focus is active until it runs out", [focusActive(getInitiative(), NOW + 24 * MIN), focusActive(getInitiative(), NOW + 25 * MIN), focusUntilOf(getInitiative()) - NOW], [true, false, 25 * MIN]);
+  eq("ending it says how long it lasted", [endFocus(NOW + 10 * MIN), getInitiative().focus], [10, null]);
+  startFocus(null, NOW);
+  eq("'until I stop it' is as far off as it goes", [focusActive(getInitiative(), NOW + 99 * 60 * MIN), focusUntilOf(getInitiative()) === Number.MAX_SAFE_INTEGER], [true, true]);
+  endFocus(NOW);
+
+  fresh();
+  offer(card("long-chat"), { ...calm, focusUntil: NOW + 99 * MIN });
+  setServerInbox([{ id: "a", at: NOW, kind: "scheduled", title: "Briefing", body: "x", read: false }, { id: "b", at: NOW, kind: "backup", title: "Backup", body: "x", read: true }]);
+  eq("the badge counts held cards and the server's unread", unreadCount(), 2);
+  markHistoryRead();
+  eq("opening the inbox marks the held ones read", unreadCount(), 1);
+  clearHistory();
+  eq("clearing empties them", getInitiative().history, []);
+
+  fresh();
+  setConfig({ level: "chatty", desktop: true, quietHours: { on: true, from: "23:00", to: "06:00" } });
+  eq("settings are cleaned as they are set", [getInitiative().config.level, getInitiative().config.quietHours.from], ["chatty", "23:00"]);
+  setConfig({ level: "bogus" as never });
+  eq("a nonsense value falls back rather than breaking it", getInitiative().config.level, "balanced");
+
+  // Saved, and back after a reload — the cards on screen are not.
+  const saved = new Map<string, string>();
+  (globalThis as { window?: unknown }).window = { localStorage: { getItem: (k: string) => saved.get(k) ?? null, setItem: (k: string, v: string) => void saved.set(k, v), removeItem: (k: string) => void saved.delete(k) }, addEventListener() {} };
+  try {
+    fresh();
+    setConfig({ level: "quiet" });
+    setRule("break", false);
+    moodEvent("thumbs-up", NOW);
+    startFocus(30, NOW);
+    offer(card("long-chat"), calm);
+    offer(card("late-night"), { ...calm, typing: true });
+    eq("it writes to storage as it goes", JSON.parse(saved.get(INITIATIVE_KEY)!).config.level, "quiet");
+    fresh();
+    const back = getInitiative();
+    eq("after a reload the settings, the mood and the focus timer are back", [back.config.level, back.config.rules.break, back.mood.valence > 0.3, back.focus?.until === NOW + 30 * MIN], ["quiet", false, true, true]);
+    eq("and so is what it has learned and offered", [back.gate.lastByRule["long-chat"], back.history.length], [NOW, 2]);
+    eq("but not the cards that were on screen", [back.toasts.length, back.queue.length], [0, 0]);
+    saved.set(INITIATIVE_KEY, "{ nope");
+    fresh();
+    eq("storage that was damaged is the defaults, not a crash", [getInitiative().config.level, getInitiative().history.length], ["balanced", 0]);
+    saved.set(INITIATIVE_KEY, JSON.stringify({ config: { level: "chatty" }, gate: { learnedMutes: ["break"] }, mood: { valence: "x" }, focus: { until: "soon" }, history: "lots" }));
+    fresh();
+    const odd = getInitiative();
+    eq("and odd fields are taken one at a time", [odd.config.level, odd.gate.learnedMutes, odd.mood.valence, odd.focus, odd.history], ["chatty", ["break"], 0, null, []]);
+  } finally {
+    delete (globalThis as { window?: unknown }).window;
+    resetInitiative();
+  }
+}
+
+// --- initiative: ratings and the tone the server is told ---
+{
+  console.log("\n--- initiative: ratings, and the tone the server is told ---");
+  const rated = [
+    { id: "r", title: "R", createdAt: 1, updatedAt: 1, messages: [
+      { id: "1", role: "user", content: "hi", createdAt: 1 },
+      { id: "2", role: "assistant", content: "hello there", createdAt: 2, reaction: "up" },
+      { id: "3", role: "assistant", content: "again", createdAt: 3, reaction: "down" },
+      { id: "4", role: "assistant", content: "more", createdAt: 4, reaction: "up" },
+      { id: "5", role: "user", content: "thanks", createdAt: 5, reaction: "up" },
+      { id: "6", role: "assistant", content: "fine", createdAt: 6 },
+    ] },
+  ] as never[];
+  eq("ratings are counted from replies only", computeChatStats(rated).reactions, { up: 2, down: 1 });
+  eq("no ratings is zeros", computeChatStats([]).reactions, { up: 0, down: 0 });
+
+  eq("every tone the reader can produce is one the server accepts", TONES.every(isTone), true);
+  eq("a made-up tone is refused", [isTone("furious"), isTone(""), isTone(undefined), isTone(7), isTone({ toString: () => "sad" })], [false, false, false, false, false]);
+  eq("only the tones that call for it have guidance, and the server looks the sentence up itself", TONES.map((t) => toneHint(t) !== null), [false, true, true, false, false, true, true]);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

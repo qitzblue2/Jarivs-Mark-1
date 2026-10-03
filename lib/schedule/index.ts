@@ -1,6 +1,7 @@
 import { newId } from "@/lib/types";
 import { describe, nextRun, parseHhmm } from "./due";
-import { setRunner, start, tick } from "./clock";
+import { setOnResult, setRunner, start, tick } from "./clock";
+import { postToInbox } from "@/lib/inbox";
 import { runScheduled } from "./run";
 import { scheduleStore } from "./store";
 import type { Schedule, ScheduledTask } from "./types";
@@ -23,6 +24,15 @@ export type { Schedule, ScheduledTask } from "./types";
  */
 export function ensureClock(): void {
   setRunner((prompt, label) => runScheduled(prompt, label));
+  // What a task said goes where you will see it, not only to a speaker that
+  // may be in an empty room.
+  setOnResult(async (task, outcome) => {
+    if (outcome.error) {
+      await postToInbox({ kind: "scheduled", title: `${task.label} — didn't run`, body: outcome.error });
+    } else if (outcome.text?.trim()) {
+      await postToInbox({ kind: "scheduled", title: task.label, body: outcome.text });
+    }
+  });
   start();
 }
 

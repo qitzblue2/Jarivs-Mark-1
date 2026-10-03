@@ -24,6 +24,7 @@ import { MAX_ROUNDS, runAgentTurn } from "@/lib/agent";
 import { resolveImageKey } from "@/lib/tools/generate-image";
 import { denyAll } from "@/lib/tools/fs/approval";
 import { DEFAULT_PERSONA } from "@/lib/persona";
+import { isTone, toneHint } from "@/lib/initiative/tone";
 import { environmentNote } from "@/lib/environment";
 import { forPrompt, getMemory } from "@/lib/memory";
 
@@ -61,6 +62,12 @@ interface ChatBody {
   model?: string;
   temperature?: number;
   persona?: string;
+  /**
+   * How the user's latest message read (see lib/initiative/tone.ts). A name, not
+   * a sentence: the server looks the guidance up itself, so nothing a page sends
+   * can put its own words into the system prompt this way.
+   */
+  tone?: string;
   /** Set false to disable tool use for this turn. */
   useTools?: boolean;
   /**
@@ -177,7 +184,9 @@ export async function POST(req: NextRequest) {
   // Prepend the persona unless the caller already supplied a system turn.
   // A custom persona gets the environment note too: it describes the machine,
   // not the character.
-  const systemPrompt = (persona?.trim() || DEFAULT_PERSONA) + environmentNote() + memoryBlock;
+  const styleHint = isTone(body.tone) ? toneHint(body.tone) : null;
+  const systemPrompt =
+    (persona?.trim() || DEFAULT_PERSONA) + environmentNote() + memoryBlock + (styleHint ? `\n\n${styleHint}` : "");
   const hasImages = messages.some((m) => m.attachments?.some((a) => a.kind === "image"));
   // Pictures still carrying their bytes are the ones attached this turn —
   // older ones are lightened before they are stored. These are what "edit

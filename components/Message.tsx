@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useState } from "react";
 import { splitReasoning } from "@/lib/reasoning";
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Copy, GitBranch, Pencil, RefreshCw, Square, Star, Volume2, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Copy, GitBranch, Pencil, RefreshCw, Square, Star, ThumbsDown, ThumbsUp, Volume2, X } from "lucide-react";
 import { describeStats, formatTime, isLongMessage } from "@/lib/format";
 import Markdown from "./Markdown";
 import ToolTrace from "./ToolTrace";
@@ -35,6 +35,8 @@ interface Props {
   onSpeak?: (messageId: string) => void;
   /** Whether this message is being read aloud right now. */
   speaking?: boolean;
+  /** Rate a reply 👍 or 👎; pressing the same one again takes it back. */
+  onReact?: (messageId: string, reaction: "up" | "down") => void;
 }
 
 function MessageBody({
@@ -49,6 +51,7 @@ function MessageBody({
   onStar,
   onSpeak,
   speaking,
+  onReact,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -142,7 +145,7 @@ function MessageBody({
         </div>
 
         <div className="min-w-0 flex-1">
-          {!isUser && (message.model || message.fellBackFrom || message.stats) && (
+          {!isUser && (message.model || message.fellBackFrom || message.stats || message.reaction || message.starred) && (
             <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[11px] text-ink-faint">
               {message.model && <span className="font-mono">{message.model}</span>}
               {message.stats && (
@@ -151,6 +154,12 @@ function MessageBody({
                 </span>
               )}
               {message.starred && <Star size={11} className="fill-warn text-warn" aria-label="Saved" />}
+              {message.reaction && (
+                <span data-reaction-mark={message.reaction} className="flex items-center" title={message.reaction === "up" ? "You rated this reply helpful" : "You rated this reply not helpful"}>
+                  {message.reaction === "up" ? <ThumbsUp size={11} className="text-ok" aria-hidden /> : <ThumbsDown size={11} className="text-warn" aria-hidden />}
+                  <span className="sr-only">{message.reaction === "up" ? "Rated helpful" : "Rated not helpful"}</span>
+                </span>
+              )}
               {message.fellBackFrom && (
                 <span className="flex items-center gap-1 rounded bg-warn/10 px-1.5 py-0.5 text-warn">
                   <AlertTriangle size={10} />
@@ -256,6 +265,30 @@ function MessageBody({
                   {speaking ? <Square size={11} className="fill-arc text-arc" /> : <Volume2 size={12} />}
                   {speaking ? "Stop" : "Listen"}
                 </button>
+              )}
+              {!isUser && onReact && !message.error && message.content && (
+                <>
+                  <button
+                    onClick={() => onReact(message.id, "up")}
+                    className="flex items-center rounded px-1.5 py-1 text-[11px] text-ink-faint transition hover:bg-raised hover:text-ink"
+                    title="Good reply"
+                    aria-label="Good reply"
+                    aria-pressed={message.reaction === "up"}
+                    data-react="up"
+                  >
+                    <ThumbsUp size={12} className={message.reaction === "up" ? "fill-ok text-ok" : ""} aria-hidden />
+                  </button>
+                  <button
+                    onClick={() => onReact(message.id, "down")}
+                    className="flex items-center rounded px-1.5 py-1 text-[11px] text-ink-faint transition hover:bg-raised hover:text-ink"
+                    title="Not helpful"
+                    aria-label="Not helpful"
+                    aria-pressed={message.reaction === "down"}
+                    data-react="down"
+                  >
+                    <ThumbsDown size={12} className={message.reaction === "down" ? "fill-warn text-warn" : ""} aria-hidden />
+                  </button>
+                </>
               )}
               {onBranch && (
                 <button

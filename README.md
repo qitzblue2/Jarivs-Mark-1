@@ -699,6 +699,93 @@ hand-editable, like `data/memory.json`.
 > of schema on every request, and a laptop with no speaker shouldn't pay for a
 > reminder it can't deliver. The panel and the API work everywhere regardless.
 
+### Suggestions, interruptions and mood
+
+Scheduled tasks speak when *you* told them to. This is JARVIS noticing things
+on its own — that a chat has got too long to keep everything, that the model
+you're using has failed twice in a row, that it is two in the morning — and
+saying so, in a way you can turn down, silence, or switch off entirely.
+
+**What it can bring up** — each one a small card, bottom right, that never
+takes keyboard focus, waits while you are typing or a reply is arriving or a
+dialog is open, and goes away by itself if you ignore it:
+
+| | |
+|---|---|
+| **A chat is getting long** | the context meter is past 85% — offers *Summarise it* (fills the message box) or *Start fresh* |
+| **A provider keeps failing** | two replies in a row failed or fell back — offers a model that is ready, one you starred first |
+| **Time for a break** | about an hour and a half of steady work |
+| **It's late** | after 23:00, once a night, if you are still going — offers a summary for tomorrow |
+| **Waiting for your OK** | an approval has gone unanswered for 45 seconds |
+| **Welcome back** | after four hours away — offers a recap of the last chat |
+| **Remember that?** | you said something lasting about yourself ("my name is Dana", "I'm allergic to peanuts") — offers to save it, *only if you press the button* |
+
+**Nothing happens on a card's own.** Its buttons put words in the message box
+(you read them and press Enter), take you to a chat, pick a model, or save a
+note — each is something you could do yourself. Nothing is ever sent for you.
+And noticing costs nothing: these are plain checks in your browser, with no
+model call and no quota.
+
+**Making it stop** is most of the design, so there are several ways:
+
+- **Settings → Initiative → How often**: *Quiet* (nothing pops up; cards wait in
+  the inbox behind a badge), *Balanced* (the default — at most three an hour) or
+  *Chatty* (eight). The master switch turns it all off.
+- **Every card has *Stop suggesting this***, and each kind has its own switch.
+- **Wave one away and it takes the hint**: that kind stays quiet for an hour, and
+  the third wave-away in a week switches it off — it tells you when it does, and
+  *Forget what it learned* brings them back. *Using* a card forgives.
+- **Focus timer** (the stopwatch in the title bar): 15, 25, 45, 60 minutes or
+  until you stop it. Nothing pops up; what would have waits in the inbox, and a
+  card tells you when the time is up.
+- **After a hard message** (below) cards stay away for hours.
+
+**The inbox** (the bell) is where everything that wasn't shown ends up: cards
+held back by focus or by *Quiet*, and what the server has to say — **the answer
+a scheduled task came back with at eight this morning**, or **"Daily backup
+failed"**, which used to go nowhere. A badge counts what's unread, and a card
+announces a result when you open JARVIS (and again every thirty seconds while it
+is open). Only the server can put something there; a page can mark items read or
+clear them, but cannot make JARVIS say something. It is a file, `data/inbox.json`.
+
+**Louder, only if you ask**: a desktop notification when the tab is in the
+background (the browser asks permission), and reading cards aloud with the
+browser's voice. Quiet hours (22:30–07:00 by default) silence both. The tab title
+also shows a count while you are in another tab.
+
+**How it seems to be doing.** A dot and a word beside the title — *calm*,
+*focused*, *pleased*, *delighted*, *concerned*, *sorry*. To be plain about what
+that is: **a summary, not a feeling.** Two numbers move when you 👍 or 👎 a
+reply, thank it, send a reply back for another try, or a request fails, and
+drift back to calm with a ten-minute half-life. It colours the wording of a
+card ("Hey — that's 95 minutes without a break" instead of "You've been at it…")
+and nothing else. Hide it under Settings → Initiative.
+
+**Matching your tone.** If a message sounds frustrated ("this is broken again"),
+rushed ("ASAP"), or low ("I feel so hopeless"), the reply is told — in one
+sentence, for that reply only — to be more direct, shorter, or gentler. The
+reading is a handful of phrase patterns run in your browser; it is not stored or
+logged, and the server is sent only the *name* of the tone and looks the sentence
+up itself. It will be wrong sometimes, in English only, and the cost of being
+wrong is a slightly shorter or warmer reply. A message about self-harm gets a
+gentle reply that points toward someone to talk to, and **silences cards for six
+hours**. **This is not a safety system** — it doesn't detect danger and it
+doesn't replace a person. Turn it off under *Match my tone*.
+
+**Follow-ups and ratings.** Under the last reply, up to three buttons offer a next
+question ("Explain how it works", "Add error handling", "Shorter, please") — shapes found in the
+reply, filling the message box, never sent. Replies ending in a question of their
+own get none. 👍/👎 on any reply feed the mood and the counts under Usage → Chats.
+
+**What it can't do.** Cards live in the page, so JARVIS can only interrupt while
+JARVIS is open in a browser tab; with the browser closed, a scheduled result
+waits in the inbox for your next visit. (Pushing to a closed browser would need a
+service worker and a push service, and this doesn't pretend to.) The settings,
+mood, focus timer and the last fifty cards (including the text of a "Remember
+that?" offer) are kept in this browser's localStorage, so a phone and a desktop
+differ — *Clear suggestion history* wipes the cards — while the inbox is per
+server.
+
 ## 9. Letting JARVIS use your computer
 
 Off by default. Turn it on with `JARVIS_ALLOW_COMPUTER=1` — an environment
@@ -985,6 +1072,7 @@ lib/
   memory/           durable facts, relevance scoring, prompt injection
   tools/fs/         workspace containment, approval gate, file and shell tools
   sandbox/          self-editing: the sandbox copy, its server, checks, apply/undo
+  initiative/       suggestions and interruptions: rules, the gate, mood, tone, follow-ups
   voice/            wake word (local ONNX), speech to text, speech out
   providers/        registry + one OpenAI-compatible adapter for all of them
   tools/            tool definitions, registry and runner
@@ -1013,6 +1101,7 @@ npm run test:composer  # timestamps, saved messages, folding, drafts, up arrow, 
 npm run test:appearance  # theme, text size, shortcuts, resizing, focus, axe scan, print, manifest, offline
 npm run test:models  # persona presets, context meter, favourites, regenerate-with, memory search/export/import, units
 npm run test:extras  # templates, welcome screen, gallery families, usage CSV, daily backups, chat statistics
+npm run test:initiative  # mood, cards, controls, focus timer, inbox, tone, follow-ups, ratings — takes a minute and a half (it waits for the real scheduler)
 npm run test:security  # login lockout, headers — needs its own server, see the file
 npm run test:sandbox  # self-editing: start with JARVIS_ALLOW_SELF_EDIT=1, see the file
 
