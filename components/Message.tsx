@@ -119,7 +119,7 @@ function MessageBody({
   if (isUser && editing) {
     return (
       <div className="px-4 py-4 sm:px-6">
-        <div className="mx-auto max-w-3xl">
+        <div className="mx-auto max-w-[var(--chat-w)]">
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -155,9 +155,12 @@ function MessageBody({
       id={`msg-${message.id}`}
       data-msg
       data-role={message.role}
+      // With the privacy blur on, a message can be focused (a tap, or Tab) to lift the blur —
+      // there is no pointer to hover with on a phone.
+      {...(prefs.privacyBlur ? { tabIndex: 0, role: "group", "aria-label": `${isUser ? "Your" : "JARVIS's"} message, blurred until you point at it` } : {})}
       className={`group px-4 py-5 sm:px-6 ${isUser ? "" : "border-y border-line-soft bg-panel/40"}`}
     >
-      <div className="mx-auto flex max-w-3xl gap-3 sm:gap-4">
+      <div className="mx-auto flex max-w-[var(--chat-w)] gap-3 sm:gap-4">
         <div
           className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[10px] font-bold tracking-wider ${
             isUser
@@ -249,7 +252,7 @@ function MessageBody({
           )}
 
           {!isStreaming && (
-            <div data-no-find className="mt-2 flex items-center gap-1 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+            <div data-no-find className={`mt-2 flex items-center gap-1 ${prefs.alwaysActions ? "" : "opacity-0 transition group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100"}`}>
               <button
                 onClick={copyAll}
                 className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-ink-faint transition hover:bg-raised hover:text-ink"

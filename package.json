@@ -38,6 +38,7 @@
     "test:writing": "node test/e2e-writing.mjs",
     "test:organising": "node test/e2e-organising.mjs",
     "test:choosing": "node test/e2e-choosing.mjs",
+    "test:polish": "node test/e2e-polish.mjs",
     "icons": "node scripts/make-icons.mjs"
   },
   "dependencies": {

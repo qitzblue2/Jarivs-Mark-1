@@ -22,7 +22,7 @@ export const MAX_PROMPT_NAME = 24;
  * "tag" would otherwise vanish the next time prompts are saved, so on the way in
  * it is renamed ("tag-prompt") instead of dropped.
  */
-const ADDED_LATER = ["model", "title", "tag", "undo"];
+const ADDED_LATER = ["model", "title", "tag", "undo", "palette"];
 
 function slug(raw: unknown): string | null {
   if (typeof raw !== "string") return null;

@@ -37,7 +37,7 @@ export default function Suggestions({ last, streaming, onPick }: Props) {
 
   return (
     <div className="px-4 pb-2 sm:px-6" data-suggestions>
-      <div className="mx-auto flex max-w-3xl items-center gap-2 pl-10 sm:pl-11">
+      <div className="mx-auto flex max-w-[var(--chat-w)] items-center gap-2 pl-10 sm:pl-11">
         <ul className="flex min-w-0 flex-1 flex-wrap gap-1.5" aria-label="Suggested follow-ups">
           {chips.map((chip) => (
             <li key={chip.id}>

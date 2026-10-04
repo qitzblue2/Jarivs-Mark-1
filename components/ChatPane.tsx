@@ -120,6 +120,18 @@ export default function ChatPane(props: Props) {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
   }, [lastId, tail, pinned]);
 
+  // The command palette can ask for these two without knowing where they live.
+  useEffect(() => {
+    const find = () => setFindOpen(true);
+    const info = () => setInfoOpen(true);
+    window.addEventListener("jarvis:find", find);
+    window.addEventListener("jarvis:chat-info", info);
+    return () => {
+      window.removeEventListener("jarvis:find", find);
+      window.removeEventListener("jarvis:chat-info", info);
+    };
+  }, []);
+
   // Ctrl/Cmd+Shift+F finds in this chat; Alt+Up/Down moves between your messages.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -363,7 +375,7 @@ export default function ChatPane(props: Props) {
             />
             {approvals.length > 0 && (
               <div className="px-4 sm:px-6">
-                <div className="mx-auto max-w-3xl">
+                <div className="mx-auto max-w-[var(--chat-w)]">
                   {approvals.map((approval) => (
                     <ApprovalCard
                       key={approval.id}

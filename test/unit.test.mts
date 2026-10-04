@@ -109,6 +109,14 @@ import { chatMeta } from "../lib/types";
 import { cleanModelNotes, withModelNote, cleanDisabledTools, toggleTool } from "../lib/model-prefs";
 import { REPLY_LENGTHS, lengthHint, nextLength, isReplyLength } from "../lib/composing";
 import { chatInfo, spanLabel } from "../lib/chat-info";
+import { matchScore, rankPalette } from "../lib/palette";
+import { formatDiagnostics, shortPath } from "../lib/diagnostics";
+import { keysToReset, listKeys } from "../lib/reset-browser";
+import { contrastRatio } from "../lib/contrast";
+import { ACCENT_COLORS, SURFACES, accentCss } from "../lib/accents";
+import { ACCENTS, FONTS, WIDTHS, COLLAPSE_CHOICES, PREFS_INIT_SCRIPT, PREFS_KEY, applyPrefs } from "../lib/prefs";
+import { matchesAllWords } from "../lib/hooks/use-section-filter";
+import { readFileSync } from "node:fs";
 import { SentenceSplitter, splitSentences } from "../lib/voice/tts/sentences";
 import { Speaker } from "../lib/voice/tts/speaker";
 import { encodeWav, durationOf } from "../lib/voice/wav";
@@ -3384,7 +3392,7 @@ console.log("\n--- initiative: the live state ---");
   eq("style: a value is a preset to within a hair", [presetOf(0.7)?.id, presetOf(0.72)?.id, presetOf(0.9), presetOf(1.1)?.id], ["balanced", "balanced", null, "creative"]);
   eq("style: pressing cycles; from a custom value it lands on balanced", [nextPreset(0.2).id, nextPreset(0.7).id, nextPreset(1.1).id, nextPreset(0.95).id], ["balanced", "creative", "precise", "balanced"]);
 
-  eq("prefs: defaults", DEFAULT_PREFS, { sendKey: "enter", spellcheck: true, chatSort: "recent", compactList: false, reasoningOpen: false, hideMeta: false, newChatModel: null });
+  eq("prefs: defaults", DEFAULT_PREFS, { sendKey: "enter", spellcheck: true, chatSort: "recent", compactList: false, reasoningOpen: false, hideMeta: false, newChatModel: null, privacyBlur: false, font: "sans", accent: "sky", width: "normal", alwaysActions: false, collapseCode: 0 });
   eq("prefs: junk becomes the defaults, field by field", [cleanPrefs(null), cleanPrefs({ sendKey: "tab", spellcheck: "no" }), cleanPrefs({ sendKey: "mod-enter", spellcheck: false })], [DEFAULT_PREFS, DEFAULT_PREFS, { ...DEFAULT_PREFS, sendKey: "mod-enter", spellcheck: false }]);
 
   eq("slash: the new commands are listed, and the ones that need words say so", [COMMAND_NAMES.includes("model"), COMMAND_NAMES.includes("title"), COMMAND_NAMES.includes("tag"), COMMAND_NAMES.includes("undo"), matchSlash("/mo").map((m) => m.takesArgs), matchSlash("/un").map((m) => m.takesArgs)], [true, true, true, true, [true], [undefined]]);
@@ -3523,6 +3531,68 @@ console.log("\n--- initiative: the live state ---");
   const settingsBad = importSettings(JSON.stringify({ format: "jarvis-settings", version: 1, settings: { replyLength: "essay", noFallback: "yes", disabledTools: "all" } }), DEFAULT_SETTINGS);
   eq("settings file: wrong-typed ones are ignored", settingsBad.ok ? [settingsBad.settings.replyLength, settingsBad.settings.noFallback, settingsBad.settings.disabledTools] : null, [undefined, undefined, undefined]);
   eq("prefs: the new-chat model must be well-formed", [cleanPrefs({ newChatModel: { provider: "groq", model: "m" } }).newChatModel, cleanPrefs({ newChatModel: { provider: "../x", model: "m" } }).newChatModel, cleanPrefs({ newChatModel: { provider: "g" } }).newChatModel, cleanPrefs({ newChatModel: "groq:m" }).newChatModel], [{ provider: "groq", model: "m" }, null, null, null]);
+}
+
+// --- polish: palette, settings search, diagnostics, reset, accents, prefs on the page ---
+{
+  console.log("\n--- polish and ops ---");
+  eq("palette: nothing typed scores zero", matchScore("", "New chat"), 0);
+  const ladder = [matchScore("chat", "Chat"), matchScore("chat", "Chat room"), matchScore("chat", "New chat"), matchScore("chat", "Archat")].map((n) => n ?? -1);
+  eq("palette: an exact label beats a prefix beats a word start beats the middle", [ladder[0] > ladder[1], ladder[1] > ladder[2], ladder[2] > ladder[3], ladder[3] > 0], [true, true, true, true]);
+  eq("palette: every word typed has to be there", [matchScore("new zebra", "New chat"), matchScore("settings open", "Open settings") !== null], [null, true]);
+  eq("palette: letters in order find it (nwch → New chat), and one letter alone doesn't", [matchScore("nwch", "New chat") !== null, matchScore("z", "New chat")], [true, null]);
+  eq("palette: extra words find it too, but rank below the label", [matchScore("dark", "Switch theme", "dark light colour") !== null, (matchScore("theme", "Switch theme", "dark") ?? 0) > (matchScore("dark", "Switch theme", "dark") ?? 0)], [true, true]);
+  eq("palette: special characters are just characters", matchScore("(a", "Ask (anything)") !== null, true);
+  const items = [
+    { id: "a", label: "Open settings", group: "Actions" as const },
+    { id: "b", label: "New chat", group: "Actions" as const, keywords: "start" },
+    { id: "c", label: "Planning the new kitchen", group: "Chats" as const },
+    { id: "d", label: "Switch to mock-smart-120b", group: "Models" as const },
+  ];
+  eq("palette: best first — a title starting with the word beats one that merely has it", rankPalette(items, "new").map((i) => i.id), ["b", "c"]);
+  eq("palette: nothing typed lists them in the order given, up to the limit", [rankPalette(items, "").map((i) => i.id), rankPalette(items, "", 2).length], [["a", "b", "c", "d"], 2]);
+  eq("palette: nonsense is nothing; a model is found by part of its name", [rankPalette(items, "zzzz").length, rankPalette(items, "smart")[0]?.id], [0, "d"]);
+  eq("palette: ties keep the order given", rankPalette([{ id: "x", label: "Chat one", group: "Chats" as const }, { id: "y", label: "Chat two", group: "Chats" as const }], "chat").map((i) => i.id), ["x", "y"]);
+
+  eq("settings search: every word, any order, any case", [matchesAllWords("Send with Enter or Ctrl+Enter", "ctrl send"), matchesAllWords("Send with Enter", "ctrl send"), matchesAllWords("anything", ""), matchesAllWords("anything", "   ")], [true, false, true, true]);
+
+  const server = { app: { name: "JARVIS Mark 6", version: "1.2.3" }, node: "v22.1.0", platform: "linux x64", uptimeSeconds: 7200, dataDir: "jarvis/data", storage: "fs", counts: { chats: 12, trash: 1, memory: 30, pictures: 4, scheduled: 2 }, flags: { computerAccess: false, selfEdit: true, isSandbox: false, passwordSet: true, listensOnNetwork: false, applianceMode: false } };
+  const client = { userAgent: "Mozilla/5.0 test", language: "en-GB", timeZone: "Europe/London", viewport: "1440×900", online: true, providers: [{ label: "Groq", ready: true, models: 14 }, { label: "Local", ready: false, models: 0 }], appearance: { theme: "dark", textSize: "normal", density: "comfortable" }, settings: { temperature: 0.7, toolsOn: true, toolsOff: 2, favourites: 3, savedPrompts: 4, modelNotes: 1, noFallback: false, replyLength: "normal" }, initiative: { enabled: true, level: "balanced" }, prefs: { sendKey: "enter", font: "sans", accent: "sky", width: "normal" } };
+  const report = formatDiagnostics(server, client, new Date(Date.UTC(2026, 9, 3)));
+  eq("diagnostics: names, versions and counts", [report.includes("JARVIS Mark 6 1.2.3"), report.includes("12 chats, 1 in the trash, 30 memories, 4 pictures, 2 scheduled tasks"), report.includes("up 2.0 h"), report.includes("Groq: ready, 14 models"), report.includes("Local: not ready")], [true, true, true, true, true]);
+  eq("diagnostics: which gates are open, plainly", [report.includes("computer access: no · self-editing: yes"), report.includes("password set: yes · listens on the network: no")], [true, true]);
+  eq("diagnostics: only the listed facts — a key or an address smuggled into the data doesn't appear", (() => {
+    const dirty = { ...client, userAgent: "ok", providers: [{ label: "Groq", ready: true, models: 1, key: "gsk_SECRET", endpoint: "http://user:pw@host" } as never], settings: { ...client.settings, keys: { groq: "gsk_SECRET2" }, persona: "my secret persona" } as never };
+    const out = formatDiagnostics({ ...server, extra: "sk-LEAK" } as never, dirty, new Date(0));
+    return ["gsk_", "SECRET", "user:pw", "sk-LEAK", "persona"].some((bad) => out.includes(bad));
+  })(), false);
+  eq("diagnostics: a path is shortened to where, not whose", [shortPath("/home/dana/projects/jarvis/data"), shortPath("C:\\Users\\Dana\\jarvis\\data"), shortPath("data")], ["jarvis/data", "jarvis/data", "data"]);
+  eq("diagnostics: uptime reads naturally", [30, 600, 7200, 400_000].map((n) => formatDiagnostics({ ...server, uptimeSeconds: n }, client, new Date(0)).match(/up ([^\n]+)/)![1]), ["30s", "10 min", "2.0 h", "5 days"]);
+
+  const stored = ["jarvis.prefs.v1", "jarvis.appearance", "jarvis.settings.v1", "jarvis.draft.abc", "jarvis.drafts.index", "other-site.token", "theme", "jarvisX", "JARVIS.prefs"];
+  eq("reset: only jarvis.* keys, and not Settings unless asked", [keysToReset(stored, { includeSettings: false }), keysToReset(stored, { includeSettings: true })], [["jarvis.prefs.v1", "jarvis.appearance", "jarvis.draft.abc", "jarvis.drafts.index"], ["jarvis.prefs.v1", "jarvis.appearance", "jarvis.settings.v1", "jarvis.draft.abc", "jarvis.drafts.index"]]);
+  eq("reset: listing a storage that throws is an empty list", [listKeys({ get length(): number { throw new Error("no"); }, key: () => null }), listKeys({ length: 2, key: (i: number) => (i === 0 ? "a" : null) })], [[], ["a"]]);
+
+  eq("accents: five of them, sky the default; the theme names exist", [ACCENTS.length, Object.keys(ACCENT_COLORS).sort().join()], [5, [...ACCENTS].sort().join()]);
+  for (const id of ACCENTS) {
+    const c = ACCENT_COLORS[id];
+    eq(`accents: ${id} text is readable (4.5:1) on every surface in both themes`, [...SURFACES.dark.map((b) => contrastRatio(c.dark.arc, b) >= 4.5), ...SURFACES.light.map((b) => contrastRatio(c.light.arc, b) >= 4.5)], [true, true, true, true, true, true]);
+    eq(`accents: ${id} fills take white text (4.5:1), hovered too; borders hold 3:1`, [contrastRatio("#ffffff", c.solid) >= 4.5, contrastRatio("#ffffff", c.solidHover) >= 4.5, ...SURFACES.dark.map((b) => contrastRatio(c.dark.dim, b) >= 3), ...SURFACES.light.map((b) => contrastRatio(c.light.dim, b) >= 3)], [true, true, true, true, true, true, true, true]);
+  }
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  eq("accents: the stylesheet carries exactly what lib/accents.ts says", css.includes(accentCss()), true);
+  eq("accents: the default really is the theme's own colours", [ACCENT_COLORS.sky.dark.arc, ACCENT_COLORS.sky.solid, css.includes("--color-arc: #38bdf8;"), css.includes("--color-arc-solid: #0369a1;")], ["#38bdf8", "#0369a1", true, true]);
+  eq("contrast: the known extremes", [contrastRatio("#000000", "#ffffff").toFixed(1), contrastRatio("#777777", "#777777").toFixed(1)], ["21.0", "1.0"]);
+
+  const attrs = (prefs: Record<string, unknown>) => { const got: Record<string, string> = {}; applyPrefs({ setAttribute: (n: string, v: string) => void (got[n] = v) }, cleanPrefs(prefs)); return got; };
+  const viaScript = (stored: unknown) => { const got: Record<string, string> = {}; new Function("document", "localStorage", PREFS_INIT_SCRIPT)({ documentElement: { setAttribute: (n: string, v: string) => void (got[n] = v) } }, { getItem: (k: string) => (k === PREFS_KEY ? (typeof stored === "string" ? stored : JSON.stringify(stored)) : null) }); return got; };
+  const combos = [{}, { font: "serif", accent: "rose", width: "wide", privacyBlur: true, alwaysActions: true }, { font: "readable", accent: "emerald", width: "narrow" }, { font: "mono", accent: "violet" }, { font: "comic", accent: "pink", width: "huge", privacyBlur: "yes" }, { accent: "orange", privacyBlur: false }];
+  eq("page: the head script applies exactly what the real code does, for every kind of stored value", combos.map((c) => JSON.stringify(viaScript(c)) === JSON.stringify(attrs(c))), combos.map(() => true));
+  eq("page: nothing stored, or damage, is the defaults", [JSON.stringify(viaScript(null)) === JSON.stringify(attrs({})), JSON.stringify(viaScript("{ nope")) === JSON.stringify(attrs({}))], [true, true]);
+  eq("page: a storage that throws can't stop the page loading", (() => { try { new Function("document", "localStorage", PREFS_INIT_SCRIPT)({ documentElement: { setAttribute() {} } }, { getItem: () => { throw new Error("blocked"); } }); return true; } catch { return false; } })(), true);
+  eq("page: the attributes", attrs({ font: "serif", accent: "rose", width: "wide", privacyBlur: true, alwaysActions: true }), { "data-font": "serif", "data-accent": "rose", "data-width": "wide", "data-blur": "true", "data-actions": "always" });
+  eq("prefs: the choices are the ones the stylesheet and the settings page know", [FONTS.join(), WIDTHS.join(), COLLAPSE_CHOICES.join()], ["sans,serif,mono,readable", "narrow,normal,wide", "0,20,40"]);
+  eq("prefs: each rule in the stylesheet for a font and width exists", [FONTS.filter((f) => f !== "sans").every((f) => css.includes(`html[data-font="${f}"]`)), WIDTHS.filter((w) => w !== "normal").every((w) => css.includes(`html[data-width="${w}"]`)), css.includes('html[data-blur="true"]')], [true, true, true]);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

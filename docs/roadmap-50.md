@@ -129,3 +129,15 @@ JARVIS speaking first, within limits you set. Every item here is opt-out, gentle
 - [x] 98. Reply length — Brief, Normal, Detailed
 - [x] 99. Hide the model and speed under replies
 - [x] 100. Don't fall back to another provider
+
+## L. Polish and ops
+- [x] 101. Command palette — every action, chat and model in one box
+- [x] 102. Blur messages until you point at them
+- [x] 103. Search the Settings dialog
+- [x] 104. Copy diagnostics for a bug report — with nothing secret in it
+- [x] 105. Choose the typeface for messages
+- [x] 106. Choose the highlight colour (five, each checked for contrast)
+- [x] 107. Choose the width of the conversation
+- [x] 108. Always show the buttons under messages
+- [x] 109. Fold long code blocks
+- [x] 110. Reset this browser, keeping your Settings unless you say otherwise

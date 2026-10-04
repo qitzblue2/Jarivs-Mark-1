@@ -31,6 +31,7 @@ export const COMMANDS: SlashCommand[] = [
   { name: "title", summary: "Rename this chat — /title New name", kind: "action", takesArgs: true },
   { name: "tag", summary: "Add or remove tags — /tag work -old", kind: "action", takesArgs: true },
   { name: "undo", summary: "Take back your last message and its reply", kind: "action" },
+  { name: "palette", summary: "Open the command palette", kind: "action" },
   { name: "help", summary: "Show keyboard shortcuts", kind: "action" },
   {
     name: "summarize",

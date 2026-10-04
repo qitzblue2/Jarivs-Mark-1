@@ -4,6 +4,7 @@ import { memo, useRef, useState, type ReactElement, type ReactNode } from "react
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
+import { usePrefs } from "@/lib/prefs-store";
 import { Check, Copy, Download, Maximize2, PanelRightOpen, Table2, WrapText } from "lucide-react";
 import { codeFileName } from "@/lib/codeblocks";
 import { toCsv } from "@/lib/csv";
@@ -138,6 +139,12 @@ function CodeBlock({
   const [wrap, setWrap] = useState(false);
   const source = nodeText(children);
   const lang = languageOf(children);
+  // A long block can fold to its first lines, if Settings says so; the button opens it again.
+  const limit = usePrefs().collapseCode;
+  const lines = source.replace(/\n$/, "").split("\n").length;
+  const foldable = limit > 0 && lines > limit;
+  const [opened, setOpened] = useState(false);
+  const folded = foldable && !opened;
 
   return (
     <div className="group my-3 overflow-hidden rounded-lg border border-[#30363d] bg-[#0d1117]" data-code-block>
@@ -174,7 +181,24 @@ function CodeBlock({
       {/* Must stay a real <pre>: swapping it for a div drops
           white-space: pre and collapses every newline. */}
       {/* Focusable so the keyboard can scroll a long line; the arrow keys do. */}
-      <pre tabIndex={0} className={`m-0 p-3 ${wrap ? "whitespace-pre-wrap break-words" : "overflow-x-auto"}`}>{children}</pre>
+      <pre
+        tabIndex={0}
+        style={folded ? { maxHeight: `${limit * 1.5}em` } : undefined}
+        className={`m-0 p-3 ${wrap ? "whitespace-pre-wrap break-words" : "overflow-x-auto"} ${folded ? "overflow-y-hidden" : ""}`}
+      >
+        {children}
+      </pre>
+      {foldable && (
+        <button
+          type="button"
+          onClick={() => setOpened((o) => !o)}
+          aria-expanded={!folded}
+          data-code-fold
+          className="block w-full border-t border-[#30363d] bg-[#161b22] px-3 py-1 text-left text-[11.5px] text-[#58a6ff] transition hover:bg-[#1c2230]"
+        >
+          {folded ? `Show all ${lines} lines` : "Show less"}
+        </button>
+      )}
     </div>
   );
 }

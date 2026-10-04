@@ -28,11 +28,11 @@ import { isHelpKey, isTypingTarget } from "@/lib/shortcuts";
 import { getAppearance, setAppearance } from "@/lib/appearance-store";
 import { THEMES } from "@/lib/appearance";
 import { contextCeiling, measureContext } from "@/lib/context-meter";
-import { favoriteKey, toggleFavorite } from "@/lib/favorites";
+import { favoriteKey, parseFavorite, toggleFavorite } from "@/lib/favorites";
 import { ModelsContext, type ModelsContextValue } from "./models-context";
 import type { QuickActionId } from "./Welcome";
 import { recentChats } from "@/lib/welcome";
-import { estimateReplyTokens } from "@/lib/format";
+import { estimateReplyTokens, relativeTime } from "@/lib/format";
 import type { ProviderState } from "./ModelPicker";
 import { consumeJarvisStream } from "@/lib/stream";
 import { artifactsFromMessage, artifactsFromMessages } from "@/lib/codeblocks";
@@ -46,6 +46,9 @@ import { appendQuote, quoteText } from "@/lib/reading";
 import { applyTagCommand, findModel, fillVariables, promptVariables, undoLastExchange } from "@/lib/composing";
 import PromptVariables from "./PromptVariables";
 import RememberDialog from "./RememberDialog";
+import CommandPalette, { type RunnableItem } from "./CommandPalette";
+import { setPrefs, usePrefs } from "@/lib/prefs-store";
+import { endFocus, focusActive, startFocus } from "@/lib/initiative/store";
 import ChatNotes from "./ChatNotes";
 import { rememberDraft } from "@/lib/memory/housekeeping";
 import type { ChatColor } from "@/lib/types";
@@ -128,6 +131,7 @@ export default function Workspace() {
   /** Something offered to memory from a message, waiting to be kept or reworded. */
   const [remembering, setRemembering] = useState<string | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   /** A saved prompt with blanks, waiting for them to be filled. */
   const [fillingPrompt, setFillingPrompt] = useState<{ name: string; text: string; args: string } | null>(null);
   const [selfEdit, setSelfEdit] = useState<{ enabled: boolean; isSandbox: boolean; port: number } | null>(null);
@@ -778,6 +782,8 @@ export default function Workspace() {
           `Took back your last message${undone.removed > 1 ? ` and ${undone.removed - 1} repl${undone.removed - 1 === 1 ? "y" : "ies"}` : ""}. It is in the message box${undone.hadAttachments ? " — its attachments aren't kept, so add them again" : ""}.`,
         );
       }
+      case "palette":
+        return setPaletteOpen(true);
       case "theme": {
         const { theme } = getAppearance();
         return setAppearance({ theme: THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length] });
@@ -1183,6 +1189,11 @@ export default function Workspace() {
         e.preventDefault();
         newChat();
       }
+      // Cmd/Ctrl+Shift+P: the command palette.
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        setPaletteOpen((open) => !open);
+      }
       // Cmd/Ctrl+/ searches every chat.
       if ((e.metaKey || e.ctrlKey) && e.key === "/") {
         e.preventDefault();
@@ -1302,6 +1313,63 @@ export default function Workspace() {
         : `Won't suggest “${RULE_INFO[rule].label}” any more. Settings → Initiative turns it back on.`,
     );
   }
+
+  const prefs = usePrefs();
+
+  /** Everything the palette can run. Rebuilt when it opens, so "end focus" and the chat list are current. */
+  const paletteItems = useMemo<RunnableItem[]>(() => {
+    const link = (href: string) => () => {
+      const a = document.createElement("a");
+      a.href = href;
+      a.download = "";
+      a.click();
+    };
+    const act = (id: string, label: string, run: () => void, extra: { hint?: string; keywords?: string } = {}): RunnableItem => ({ id: `act:${id}`, label, group: "Actions", run, ...extra });
+    const items: RunnableItem[] = [
+      act("new", "New chat", newChat, { hint: "Ctrl+K", keywords: "start fresh conversation" }),
+      act("search", "Search every chat", focusChatSearch, { hint: "Ctrl+/", keywords: "find" }),
+      act("settings", "Open settings", () => setSettingsOpen(true), { keywords: "preferences options keys configure" }),
+      act("usage", "Open usage", () => setUsageOpen(true), { keywords: "requests tokens limits statistics speed" }),
+      act("pictures", "Open pictures", () => setGalleryOpen(true), { keywords: "gallery images" }),
+      act("saved", "Open saved messages", () => setSavedOpen(true), { keywords: "starred bookmarks" }),
+      act("trash", "Open the trash", () => setTrashOpen(true), { keywords: "deleted restore" }),
+      act("inbox", "Open the inbox", () => setInboxOpen(true), { keywords: "notifications suggestions results" }),
+      act("voice", "Start voice mode", () => { setPushToTalk(false); setVoiceOpen(true); }, { hint: "Ctrl+J", keywords: "talk speak microphone" }),
+      act("shortcuts", "Show keyboard shortcuts", () => setShortcutsOpen(true), { hint: "?", keywords: "keys help" }),
+      focusActive() ? act("focus-end", "End the focus timer", () => void endFocus()) : act("focus", "Start a 25-minute focus timer", () => startFocus(25), { keywords: "do not disturb quiet pomodoro" }),
+      act("theme", "Switch theme: system, dark, light", () => setAppearance({ theme: THEMES[(THEMES.indexOf(getAppearance().theme) + 1) % THEMES.length] }), { keywords: "dark light colour mode appearance" }),
+      act("blur", prefs.privacyBlur ? "Stop blurring messages" : "Blur messages until I point at them", () => setPrefs({ privacyBlur: !prefs.privacyBlur }), { keywords: "privacy hide screen" }),
+      act("export-all", "Download every chat as Markdown", link("/api/export/markdown"), { keywords: "export zip" }),
+      act("backup", "Download a backup of everything", link("/api/backup"), { keywords: "export zip restore" }),
+    ];
+    if (selfEdit?.enabled) items.push(act("sandbox", "Open the sandbox", () => setSandboxOpen(true), { keywords: "self edit code" }));
+    if (chat) {
+      items.push(
+        act("find", "Find in this chat", () => window.dispatchEvent(new Event("jarvis:find")), { hint: "Ctrl+Shift+F", keywords: "search words" }),
+        act("info", "About this chat", () => window.dispatchEvent(new Event("jarvis:chat-info")), { keywords: "size tokens words models statistics" }),
+        act("notes", "Notes about this chat", () => setNotesOpen(true)),
+        act("instructions", "Instructions for this chat", () => void editInstructions(chat.id), { keywords: "persona" }),
+        act("html", "Download this chat as a web page", link(`/api/chats/${chat.id}/export?format=html`)),
+        act("markdown", "Download this chat as Markdown", link(`/api/chats/${chat.id}/export`)),
+      );
+    }
+    for (const c of chats.filter((x) => !x.archived).slice(0, 300)) {
+      items.push({ id: `chat:${c.id}`, label: c.title, group: "Chats", hint: relativeTime(c.updatedAt), run: () => void selectChat(c.id) });
+    }
+    const here = providers.find((p) => p.id === provider);
+    const starred = (settings.favorites ?? []).map(parseFavorite).filter((f): f is { provider: string; model: string } => f !== null);
+    const seen = new Set<string>();
+    for (const f of [...starred, ...(here?.models.slice(0, 60).map((m) => ({ provider: here.id, model: m })) ?? [])]) {
+      const key = favoriteKey(f.provider, f.model);
+      const p = providers.find((x) => x.id === f.provider);
+      if (seen.has(key) || !p?.ready || !p.models.includes(f.model)) continue;
+      seen.add(key);
+      items.push({ id: `model:${key}`, label: `Switch to ${f.model}`, group: "Models", hint: p.label, run: () => changeModel(f.provider, f.model) });
+    }
+    return items;
+    // Rebuilt when the palette opens or what it lists changes — not on every keystroke in the message box.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paletteOpen, chats, chat?.id, providers, provider, settings.favorites, prefs.privacyBlur, selfEdit?.enabled]);
 
   const lastChat = useMemo(() => {
     const latest = mostRecent(chats.filter((c) => !c.archived));
@@ -1559,6 +1627,8 @@ export default function Workspace() {
       />
 
       <SandboxPanel open={sandboxOpen} onClose={() => setSandboxOpen(false)} />
+
+      <CommandPalette open={paletteOpen} items={paletteItems} onClose={() => setPaletteOpen(false)} />
 
       <RememberDialog
         draft={remembering}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { cleanPrefs, DEFAULT_PREFS, PREFS_KEY, type Prefs } from "@/lib/prefs";
+import { applyPrefs, cleanPrefs, DEFAULT_PREFS, PREFS_KEY, type Prefs } from "@/lib/prefs";
 
 /**
  * The live preferences for this tab: one value shared by everything that reads
@@ -36,9 +36,11 @@ function start(): void {
   if (started || typeof window === "undefined") return;
   started = true;
   current = read();
+  applyPrefs(document.documentElement, current);
   window.addEventListener("storage", (e) => {
     if (e.key !== PREFS_KEY) return;
     current = read();
+    applyPrefs(document.documentElement, current);
     emit();
   });
 }
@@ -51,6 +53,7 @@ export function getPrefs(): Prefs {
 export function setPrefs(patch: Partial<Prefs>): void {
   start();
   current = cleanPrefs({ ...current, ...patch });
+  applyPrefs(document.documentElement, current);
   try {
     storage()?.setItem(PREFS_KEY, JSON.stringify(current));
   } catch {
@@ -62,6 +65,7 @@ export function setPrefs(patch: Partial<Prefs>): void {
 export function resetPrefs(): void {
   start();
   current = DEFAULT_PREFS;
+  applyPrefs(document.documentElement, current);
   try {
     storage()?.removeItem(PREFS_KEY);
   } catch {

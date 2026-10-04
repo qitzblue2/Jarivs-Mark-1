@@ -21,6 +21,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     items: [
       { keys: ["Mod", "K"], action: "New chat" },
       { keys: ["Mod", "/"], action: "Search every chat" },
+      { keys: ["Mod", "Shift", "P"], action: "Command palette: run anything, open any chat" },
       { keys: ["Mod", "Shift", "F"], action: "Find in this chat" },
       { keys: ["Alt", "↑"], action: "Jump to your previous message" },
       { keys: ["Alt", "↓"], action: "Jump to your next message" },

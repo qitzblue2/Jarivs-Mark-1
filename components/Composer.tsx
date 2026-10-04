@@ -247,7 +247,7 @@ export default function Composer({
         void ingest(e.dataTransfer.files);
       }}
     >
-      <div className="relative mx-auto max-w-3xl">
+      <div className="relative mx-auto max-w-[var(--chat-w)]">
         {menuOpen && (
           <ul
             id="slash-menu"

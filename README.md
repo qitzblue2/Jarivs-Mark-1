@@ -395,6 +395,49 @@ pictures, saved messages and the shortcuts.
   text on the accent fill is 5.9:1; the fill is now a deeper blue than the
   bright accent used for outlines and text.)
 - **Reduced motion.** Respected, including the smooth scroll-to-latest.
+- **Messages and colour** (Settings). A typeface for messages and the message box
+  — sans-serif, serif, monospace, or an *easy to read* face (Verdana-style, with
+  open spacing; code stays monospaced). A **highlight colour**: sky (the
+  default), violet, emerald, rose or orange. Each has a bright variant for dark
+  surfaces and a deeper one for light, and a unit test holds every one to 4.5:1
+  on every surface its text is drawn on, 4.5:1 for white text on its button fill,
+  and 3:1 for its borders — and checks that the stylesheet carries exactly the
+  values in `lib/accents.ts`. **Width** of the conversation (narrow, normal,
+  wide), the **buttons under messages** always showing instead of on hover,
+  and **folding long code** (over 20 or 40 lines, with a button that says how
+  many are hidden). All apply at once and are remembered per device; a small
+  script in the page head sets them before first paint, and a test runs it
+  against the real code for every value.
+- **Privacy blur.** *Blur messages until I point at them* is for working where
+  others can see your screen. Hovering a message — or tapping or tabbing to it,
+  since a phone has no hover — lifts the blur on that one only. (Copying still
+  works; exports aren't blurred.)
+
+### Command palette, search and housekeeping
+
+- **Command palette** — `Ctrl/⌘+Shift+P` (or `/palette`). One box for every
+  action (new chat, settings, usage, pictures, saved, trash, inbox, voice, focus
+  timer, theme, blur, exports, the sandbox if it is on), the things to do with
+  the chat you're in (find, about, notes, instructions, download as a page or
+  Markdown), every chat by title, and models (your favourites and the current
+  provider's). Words typed must all appear — as the start of a word if possible,
+  otherwise inside, otherwise as letters in order (`nwch` finds *New chat*) — and
+  the closest ranks first.
+- **Search settings.** The box at the top of Settings shows only the sections that
+  mention what you type, and says how many are left.
+- **About this install.** *Copy diagnostics* puts a summary on the clipboard for a
+  bug report: versions, counts, which gates (computer access, self-editing,
+  password, network) are open, which providers are ready, this browser, and a
+  few settings. It is built from a short fixed list of facts, so what can appear
+  is decided in `lib/diagnostics.ts`: **no API keys, no addresses, none of your
+  chats, notes, instructions or prompts**, and the data folder is shortened to its
+  last two parts. A test feeds it keys and personas deliberately and checks they
+  don't come out.
+- **Reset this browser.** Clears everything this app keeps in the browser — look,
+  layout and behaviour choices, unsent drafts, the last model — and reloads.
+  Only keys starting `jarvis.` are touched (nothing belonging to other sites), and
+  your **Settings** (API keys pasted there, instructions, saved prompts,
+  favourites) are kept unless you tick *Also forget my Settings*.
 - **Printing.** `Ctrl/Cmd + P` prints only the conversation: no chat list,
   message box, buttons or canvas; black on white whatever the theme; long
   messages are unfolded; a message isn't split across pages when avoidable.
@@ -1227,6 +1270,7 @@ npm run test:composer  # timestamps, saved messages, folding, drafts, up arrow, 
 npm run test:appearance  # theme, text size, shortcuts, resizing, focus, axe scan, print, manifest, offline
 npm run test:models  # persona presets, context meter, favourites, regenerate-with, memory search/export/import, units
 npm run test:extras  # templates, welcome screen, gallery families, usage CSV, daily backups, chat statistics
+npm run test:polish  # command palette, settings search, diagnostics, reset, typeface, accents, width, blur, folding
 npm run test:choosing  # chat info, speeds, model notes, new-chat model, tools off, reply length, no fallback, quieter page
 npm run test:organising  # remember from a message, expiring memory, add many, duplicates, notes, colours, order, storage
 npm run test:writing  # counter, send key, spellcheck, reply style, /model /title /tag /undo, prompt blanks, searching what you sent

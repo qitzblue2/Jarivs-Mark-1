@@ -167,6 +167,8 @@ try {
   await row("imperial").getByRole("button", { name: /^Edit:/ }).click();
   await mem.locator("[data-memory-expiry]").fill("");
   await mem.getByRole("button", { name: "Save" }).click();
+  // Saved when the editing fields are gone — the row has no label while it is being edited, so "no label" alone proves nothing.
+  await mem.locator("[data-memory-expiry]").waitFor({ state: "detached", timeout: 5000 });
   await page.waitForFunction((t) => ![...document.querySelectorAll("[data-memory-entry]")].find((e) => e.textContent.includes(t))?.querySelector("[data-memory-expiry-label]"), "imperial", { timeout: 3000 });
   check("clearing the date makes it last again", (await memories()).find((e) => e.text.includes("imperial")).expires === undefined);
   await mem.locator("[data-memory-search]").fill("");

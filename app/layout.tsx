@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "highlight.js/styles/github-dark.css";
 import "./globals.css";
 import { INIT_SCRIPT } from "@/lib/appearance";
+import { PREFS_INIT_SCRIPT } from "@/lib/prefs";
 
 export const metadata: Metadata = {
   title: "JARVIS Mark 6",
@@ -26,6 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         {/* Before first paint, so the chosen theme never flashes the other one. */}
         <script dangerouslySetInnerHTML={{ __html: INIT_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: PREFS_INIT_SCRIPT }} />
       </head>
       <body>{children}</body>
     </html>

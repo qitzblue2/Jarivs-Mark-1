@@ -66,6 +66,49 @@ html:not([data-theme]) {
   color-scheme: dark;
 }
 
+/* --- Accent colour ------------------------------------------------------
+   Chosen in Settings; lands on <html data-accent>. The default (sky) is the
+   theme itself. These rules are generated from lib/accents.ts, and a unit test
+   fails if the two disagree or if any accent is unreadable on a surface. */
+html[data-accent="violet"]{--color-arc:#a78bfa;--color-arc-dim:#8b5cf6;--color-arc-solid:#6d28d9;--color-arc-solid-hover:#5b21b6}
+html[data-theme="light"][data-accent="violet"]{--color-arc:#5b21b6;--color-arc-dim:#6d28d9}
+html[data-accent="emerald"]{--color-arc:#34d399;--color-arc-dim:#10b981;--color-arc-solid:#047857;--color-arc-solid-hover:#065f46}
+html[data-theme="light"][data-accent="emerald"]{--color-arc:#047857;--color-arc-dim:#059669}
+html[data-accent="rose"]{--color-arc:#fb7185;--color-arc-dim:#f43f5e;--color-arc-solid:#be123c;--color-arc-solid-hover:#9f1239}
+html[data-theme="light"][data-accent="rose"]{--color-arc:#9f1239;--color-arc-dim:#be123c}
+html[data-accent="orange"]{--color-arc:#fb923c;--color-arc-dim:#f97316;--color-arc-solid:#c2410c;--color-arc-solid-hover:#9a3412}
+html[data-theme="light"][data-accent="orange"]{--color-arc:#9a3412;--color-arc-dim:#c2410c}
+
+/* --- Fonts, width, privacy ----------------------------------------------
+   What messages and the message box are set in, how wide the column is, and
+   whether message text is blurred until you point at it. */
+html[data-font="serif"] .chat-text,
+html[data-font="serif"] .prose-jarvis { font-family: Georgia, "Iowan Old Style", "Times New Roman", serif; }
+html[data-font="mono"] .chat-text,
+html[data-font="mono"] .prose-jarvis { font-family: var(--font-mono); }
+html[data-font="readable"] .chat-text,
+html[data-font="readable"] .prose-jarvis { font-family: Verdana, Tahoma, "Trebuchet MS", sans-serif; letter-spacing: 0.01em; word-spacing: 0.04em; }
+.prose-jarvis pre,
+.prose-jarvis code { font-family: var(--font-mono); letter-spacing: normal; word-spacing: normal; }
+
+html { --chat-w: 48rem; }
+html[data-width="narrow"] { --chat-w: 38rem; }
+html[data-width="wide"] { --chat-w: 66rem; }
+
+html[data-blur="true"] [data-msg] .chat-text,
+html[data-blur="true"] [data-msg] .prose-jarvis {
+  filter: blur(7px);
+  transition: filter 0.15s;
+  user-select: none;
+}
+html[data-blur="true"] [data-msg]:hover .chat-text,
+html[data-blur="true"] [data-msg]:hover .prose-jarvis,
+html[data-blur="true"] [data-msg]:focus-within .chat-text,
+html[data-blur="true"] [data-msg]:focus-within .prose-jarvis {
+  filter: none;
+  user-select: auto;
+}
+
 /* --- Text size and density -----------------------------------------------
    Text size scales what you read and write — messages and the composer —
    rather than the whole interface; the browser's own zoom does that. */
@@ -233,7 +276,7 @@ body {
 
 /* A message arrived at from the Saved list: pulse it so the eye finds it. */
 @keyframes jarvis-flash {
-  0% { background-color: rgb(56 189 248 / 0.22); }
+  0% { background-color: color-mix(in srgb, var(--color-arc) 22%, transparent); }
   100% { background-color: transparent; }
 }
 .flash {
@@ -242,7 +285,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .flash {
     animation: none;
-    background-color: rgb(56 189 248 / 0.12);
+    background-color: color-mix(in srgb, var(--color-arc) 12%, transparent);
   }
 }
 

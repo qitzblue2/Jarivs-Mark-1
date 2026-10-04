@@ -11,6 +11,9 @@ import AppearanceSettings from "./AppearanceSettings";
 import InitiativeSettings from "./InitiativeSettings";
 import DataSettings from "./DataSettings";
 import PrefsSettings from "./PrefsSettings";
+import LookSettings from "./LookSettings";
+import AboutSettings from "./AboutSettings";
+import { useSectionFilter } from "@/lib/hooks/use-section-filter";
 import PersonaPicker from "./PersonaPicker";
 import AutoBackups from "./AutoBackups";
 import { DEFAULT_GREETING } from "@/lib/voice/session";
@@ -141,6 +144,13 @@ export default function SettingsDialog({
   }, [open, onClose]);
 
   const dialogRef = useDialogFocus(open);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [find, setFind] = useState("");
+  // Re-run the filter when what is in the form changes too: sections like memory fill in after they load.
+  const matching = useSectionFilter(bodyRef, find, `${open}:${providers.length}:${draft.prompts?.length ?? 0}`);
+  useEffect(() => {
+    if (!open) setFind("");
+  }, [open]);
   if (!open) return null;
 
   function save() {
@@ -201,7 +211,29 @@ export default function SettingsDialog({
           </button>
         </header>
 
-        <div className="max-h-[70vh] space-y-5 overflow-y-auto px-4 py-4">
+        <div ref={bodyRef} className="max-h-[70vh] space-y-5 overflow-y-auto px-4 py-4">
+          <div data-filter-keep>
+            <input
+              type="search"
+              value={find}
+              onChange={(e) => setFind(e.target.value)}
+              placeholder="Search settings…"
+              aria-label="Search settings"
+              data-settings-search
+              className="w-full rounded-md border border-line bg-base px-2.5 py-1.5 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:border-arc-dim"
+            />
+            {matching === 0 && (
+              <p role="status" className="mt-2 text-[12px] text-ink-faint" data-settings-none>
+                No setting mentions “{find.trim()}”.
+              </p>
+            )}
+            {matching !== null && matching > 0 && (
+              <p role="status" className="mt-1.5 text-[11.5px] text-ink-faint" data-settings-found>
+                {matching} section{matching === 1 ? "" : "s"} match{matching === 1 ? "es" : ""}.
+              </p>
+            )}
+          </div>
+
           <section>
             <h3 className="mb-1 flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-ink-dim">
               <KeyRound size={12} />
@@ -338,6 +370,8 @@ export default function SettingsDialog({
 
           <AppearanceSettings />
 
+          <LookSettings />
+
           <PrefsSettings providers={providers} />
 
           <InitiativeSettings />
@@ -349,6 +383,8 @@ export default function SettingsDialog({
           <AutoBackups open={open} />
 
           <DataSettings />
+
+          <AboutSettings settings={draft} providers={providers} />
 
           <section className="space-y-2.5">
             <h3 className="text-[12px] font-semibold uppercase tracking-wide text-ink-dim">
