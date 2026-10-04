@@ -310,6 +310,9 @@ const server = http.createServer((req, res) => {
       if (/may be in distress/.test(system)) return streamText(res, "I am here. How are you doing right now? (gentle)", finish);
       if (/may be feeling low/.test(system)) return streamText(res, "That sounds heavy. Take your time. (gentle)", finish);
       if (/under time pressure/.test(system)) return streamText(res, "Fastest route: run it as it is. (short)", finish);
+      // The one-sentence reply-length guidance, echoed so a test can see it arrived.
+      if (/Keep the reply short/.test(system)) return streamText(res, "Short answer, no preamble. (brief)", finish);
+      if (/Give a thorough reply/.test(system)) return streamText(res, "A thorough answer with reasoning and an example. (detailed)", finish);
       // A reply that ends in a question of its own, which gets no follow-up buttons under it.
       if (/ask me a question/i.test(prompt)) return streamText(res, "Happy to help with that. What would you like to build first?", finish);
 

@@ -26,6 +26,8 @@ export interface AgentOptions {
   signal?: AbortSignal;
   /** Set false to run a plain completion with no tools at all. */
   useTools?: boolean;
+  /** Tools switched off in Settings. */
+  disabledTools?: readonly string[];
   /** Base URL chosen in Settings, for a slot that permits one. */
   endpoint?: string;
   /** Context and output sizes chosen in Settings, for the same slot. */
@@ -77,7 +79,7 @@ export async function* runAgentTurn(
     });
   }
 
-  const tools = allTools({ imageKey: options.imageKey }).map(toWireTool);
+  const tools = allTools({ imageKey: options.imageKey, disabledTools: options.disabledTools }).map(toWireTool);
   // Flips to false if the model turns out not to support tools.
   let toolsEnabled = options.useTools !== false && tools.length > 0;
 
@@ -160,6 +162,7 @@ export async function* runAgentTurn(
       signal,
       imageKey: options.imageKey,
       uploads: options.uploads,
+      disabledTools: options.disabledTools,
       onApprovalRequest: (request) => {
         queue.push({
           type: "approval_request",

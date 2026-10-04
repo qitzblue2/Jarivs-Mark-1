@@ -142,6 +142,49 @@ export default function ChatStatsView() {
           )}
         </section>
       </div>
+
+      {stats.speeds.length > 0 && (
+        <section aria-labelledby="stats-speed" data-model-speeds>
+          <h3 id="stats-speed" className="mb-2 text-[10px] uppercase tracking-widest text-ink-faint">How fast each model has answered</h3>
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-left text-[10px] uppercase tracking-wider text-ink-faint">
+                <th scope="col" className="pb-1 font-normal">Model</th>
+                <th scope="col" className="pb-1 text-right font-normal">Replies</th>
+                <th scope="col" className="pb-1 text-right font-normal">Speed</th>
+                <th scope="col" className="pb-1 text-right font-normal">First word</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stats.speeds.map((m) => (
+                <tr key={m.model} data-speed-row={m.model} className="border-t border-line-soft">
+                  <td className="max-w-0 truncate py-1 pr-2 font-mono text-ink-dim" title={m.model}>{m.model}</td>
+                  <td className="py-1 text-right font-mono tabular-nums">{m.replies}</td>
+                  <td className="py-1 text-right font-mono tabular-nums">~{m.tokensPerSecond} tok/s</td>
+                  <td className="py-1 text-right font-mono tabular-nums">{m.firstTokenMs >= 1000 ? `${(m.firstTokenMs / 1000).toFixed(1)} s` : `${m.firstTokenMs} ms`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-1 text-[11px] text-ink-faint">Measured in your browser, including the network. Speed is estimated from the length of each reply.</p>
+        </section>
+      )}
+
+      {stats.recentTools.length > 0 && (
+        <section aria-labelledby="stats-recent-tools" data-recent-tools>
+          <h3 id="stats-recent-tools" className="mb-2 text-[10px] uppercase tracking-widest text-ink-faint">Latest tool calls</h3>
+          <ul className="space-y-1 text-[12px]">
+            {stats.recentTools.map((t, i) => (
+              <li key={`${t.chatId}-${t.at}-${i}`} className="flex items-baseline gap-2" data-recent-tool={t.name}>
+                <span className={`shrink-0 font-mono ${t.isError ? "text-danger" : "text-ink-dim"}`}>{t.name}</span>
+                {t.isError && <span className="shrink-0 text-[10px] uppercase tracking-wide text-danger">failed</span>}
+                <span className="min-w-0 flex-1 truncate text-ink-faint" title={t.chatTitle}>in {t.chatTitle}</span>
+                <span className="shrink-0 font-mono text-[11px] tabular-nums text-ink-faint">{t.ms} ms</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   );
 }

@@ -117,3 +117,15 @@ JARVIS speaking first, within limits you set. Every item here is opt-out, gentle
 - [x] 88. Compact chat list
 - [x] 89. Storage view — where the disk space goes
 - [x] 90. The biggest chats, with a way to trash them
+
+## K. Models and tools
+- [x] 91. About this chat — size, words, models, tools, ratings and how full the window is
+- [x] 92. Model speed table, from replies you already have
+- [x] 93. Notes on models, shown in the picker
+- [x] 94. Choose the model new chats start with
+- [x] 95. Turn individual tools off (and stop paying their tokens)
+- [x] 96. The latest tool calls, with the chat they ran in
+- [x] 97. Show a thinking model's reasoning open
+- [x] 98. Reply length — Brief, Normal, Detailed
+- [x] 99. Hide the model and speed under replies
+- [x] 100. Don't fall back to another provider

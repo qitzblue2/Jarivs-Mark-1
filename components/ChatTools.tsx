@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, FileCode2, ListTree, NotebookPen, Search } from "lucide-react";
+import { ChevronRight, FileCode2, Info, ListTree, NotebookPen, Search } from "lucide-react";
 import { outlineOf } from "@/lib/reading";
 import type { Message } from "@/lib/types";
 
@@ -14,6 +14,7 @@ interface Props {
   /** This chat has notes written in it. */
   hasNotes: boolean;
   onNotes: () => void;
+  onInfo: () => void;
 }
 
 /**
@@ -21,7 +22,7 @@ interface Props {
  * bar doesn't grow another icon for each: find a word, jump to one of your
  * questions, keep a copy as a web page.
  */
-export default function ChatTools({ chatId, messages, onFind, onJump, hasNotes, onNotes }: Props) {
+export default function ChatTools({ chatId, messages, onFind, onJump, hasNotes, onNotes, onInfo }: Props) {
   const [open, setOpen] = useState(false);
   const [outline, setOutline] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -128,6 +129,19 @@ export default function ChatTools({ chatId, messages, onFind, onJump, hasNotes, 
             <NotebookPen size={13} aria-hidden />
             <span className="flex-1">Notes about this chat</span>
             {hasNotes && <span className="text-[11px] text-arc">written</span>}
+          </button>
+
+          <button
+            type="button"
+            className={item}
+            data-tool="info"
+            onClick={() => {
+              setOpen(false);
+              onInfo();
+            }}
+          >
+            <Info size={13} aria-hidden />
+            <span className="flex-1">About this chat</span>
           </button>
 
           <a href={`/api/chats/${chatId}/export?format=html`} className={item} data-tool="html" download onClick={() => setOpen(false)}>

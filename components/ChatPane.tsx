@@ -11,7 +11,9 @@ import Composer from "./Composer";
 import InitiativeBar from "./InitiativeBar";
 import ChatTools from "./ChatTools";
 import FindBar from "./FindBar";
+import ChatInfo from "./ChatInfo";
 import { pickJump } from "@/lib/reading";
+import type { ReplyLength } from "@/lib/composing";
 import Suggestions from "./Suggestions";
 import ApprovalCard, { type PendingApproval } from "./ApprovalCard";
 import ModelPicker, { type ProviderState } from "./ModelPicker";
@@ -62,6 +64,9 @@ interface Props {
   context: ContextInfo | null;
   favorites: string[];
   onToggleFavorite: (provider: string, model: string) => void;
+  modelNotes: Record<string, string>;
+  replyLength: ReplyLength;
+  onReplyLength: (length: ReplyLength) => void;
   /** For the welcome screen: where you left off, and the quick actions. */
   recent: ChatMeta[];
   onOpenChat: (id: string) => void;
@@ -89,13 +94,14 @@ export default function ChatPane(props: Props) {
     onModelChange, onOpenSettings, onToggleSidebar, onToggleCanvas, canvasOpen,
     artifactCount, notice, onDismissNotice, onStartVoice,
     attachments, onAttach, onRemoveAttachment, onAttachError,
-    approvals, onApprovalSettled, context, favorites, onToggleFavorite, recent, onOpenChat, onQuickAction,
+    approvals, onApprovalSettled, context, favorites, onToggleFavorite, modelNotes, replyLength, onReplyLength, recent, onOpenChat, onQuickAction,
     onReact, onQuote, onRemember, onOpenNotes, onOpenInbox, temperature, onTemperature,
   } = props;
 
   const scroller = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState(true);
   const [findOpen, setFindOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
 
   const messages = chat?.messages ?? [];
   // What you've sent here, for the composer's up arrow. Memoised on the list
@@ -182,7 +188,7 @@ export default function ChatPane(props: Props) {
         <InitiativeBar onOpenInbox={onOpenInbox} />
 
         {chat && chat.messages.length > 0 && (
-          <ChatTools chatId={chat.id} messages={chat.messages} hasNotes={Boolean(chat.notes)} onFind={() => setFindOpen(true)} onJump={jumpTo} onNotes={onOpenNotes} />
+          <ChatTools chatId={chat.id} messages={chat.messages} hasNotes={Boolean(chat.notes)} onFind={() => setFindOpen(true)} onJump={jumpTo} onNotes={onOpenNotes} onInfo={() => setInfoOpen(true)} />
         )}
 
         {chat && (
@@ -204,6 +210,7 @@ export default function ChatPane(props: Props) {
           onOpenSettings={onOpenSettings}
           favorites={favorites}
           onToggleFavorite={onToggleFavorite}
+          notes={modelNotes}
         />
 
         {chat && chat.messages.length > 0 && (
@@ -388,6 +395,8 @@ export default function ChatPane(props: Props) {
         )}
       </div>
 
+      <ChatInfo open={infoOpen} chat={chat} context={context} onClose={() => setInfoOpen(false)} />
+
       <ReplyAnnouncer streaming={streaming} />
 
       <Composer
@@ -406,6 +415,8 @@ export default function ChatPane(props: Props) {
         onSlash={onSlash}
         temperature={temperature}
         onTemperature={onTemperature}
+        replyLength={replyLength}
+        onReplyLength={onReplyLength}
         disabled={!anyKey}
         placeholder={anyKey ? "Ask JARVIS anything…" : "Add an API key in Settings to start"}
       />

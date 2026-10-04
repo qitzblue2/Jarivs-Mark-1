@@ -19,6 +19,7 @@ import { computerAccessEnabled } from "@/lib/tools/fs/workspace";
 import { authConfigured, openNetwork, requiresAuth } from "@/lib/auth/session";
 import { isSandbox, sandboxPort, selfEditEnabled } from "@/lib/sandbox/paths";
 import { allTools } from "@/lib/tools/registry";
+import { cleanDisabledTools } from "@/lib/model-prefs";
 import { toWireTool } from "@/lib/tools/types";
 import { resolveImageKey } from "@/lib/tools/generate-image";
 import { environmentNote } from "@/lib/environment";
@@ -47,6 +48,11 @@ function jsonHeader(req: NextRequest, name: string): Record<string, string> {
   } catch {
     return {};
   }
+}
+
+/** Tools switched off in Settings, sent as a comma-separated header so the context meter can leave their schemas out. */
+function toolsOff(req: NextRequest): string[] {
+  return cleanDisabledTools((req.headers.get("x-jarvis-tools-off") ?? "").split(","));
 }
 
 export async function GET(req: NextRequest) {
@@ -150,7 +156,7 @@ export async function GET(req: NextRequest) {
       // What every request carries besides the conversation, for the context
       // meter: the tool list (when tools are on) and the machine note.
       overhead: {
-        toolTokens: estimateTokens(JSON.stringify(allTools({ imageKey: resolveImageKey(clientKeys.nanogpt) }).map(toWireTool))),
+        toolTokens: estimateTokens(JSON.stringify(allTools({ imageKey: resolveImageKey(clientKeys.nanogpt), disabledTools: toolsOff(req) }).map(toWireTool))),
         noteTokens: estimateTokens(environmentNote()),
       },
     },

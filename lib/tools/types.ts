@@ -33,6 +33,12 @@ export interface ToolContext {
   imageKey?: string;
   /** Pictures the user attached to this turn, as data URLs, for editing. */
   uploads?: string[];
+  /**
+   * Tools the user has switched off in Settings. They are neither offered to the
+   * model nor runnable if it asks for one anyway. This can only ever remove
+   * tools: nothing a request says can make an unavailable one appear.
+   */
+  disabledTools?: readonly string[];
 }
 
 /** One tool call requested by the model, once its streamed fragments are whole. */

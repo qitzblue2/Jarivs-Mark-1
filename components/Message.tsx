@@ -10,6 +10,7 @@ import ToolTrace from "./ToolTrace";
 import Attachments from "./Attachments";
 import ModelPicker from "./ModelPicker";
 import { useModels } from "./models-context";
+import { usePrefs } from "@/lib/prefs-store";
 import type { Message as MessageType } from "@/lib/types";
 
 interface Props {
@@ -66,6 +67,7 @@ function MessageBody({
   const [copied, setCopied] = useState(false);
   const [copiedText, setCopiedText] = useState(false);
   const models = useModels();
+  const prefs = usePrefs();
 
   // Bound to this message here rather than by the list, so the props coming
   // in stay reference-stable and the memo below can actually bail out.
@@ -167,11 +169,11 @@ function MessageBody({
         </div>
 
         <div className="min-w-0 flex-1">
-          {!isUser && (message.model || message.fellBackFrom || message.stats || message.reaction || message.starred || reading) && (
+          {!isUser && ((!prefs.hideMeta && (message.model || message.stats || reading)) || message.fellBackFrom || message.reaction || message.starred) && (
             <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[11px] text-ink-faint">
-              {message.model && <span className="font-mono">{message.model}</span>}
-              {reading && <span data-reading>{reading}</span>}
-              {message.stats && (
+              {!prefs.hideMeta && message.model && <span className="font-mono">{message.model}</span>}
+              {!prefs.hideMeta && reading && <span data-reading>{reading}</span>}
+              {!prefs.hideMeta && message.stats && (
                 <span data-stats title="Measured in your browser. Speed is estimated from the length of the reply.">
                   {describeStats(message.stats)}
                 </span>
@@ -332,7 +334,7 @@ function MessageBody({
                 <>
                   <button
                     onClick={() => onReact(message.id, "up")}
-                    className="flex items-center rounded px-1.5 py-1 text-[11px] text-ink-faint transition hover:bg-raised hover:text-ink"
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[11px] text-ink-faint transition hover:bg-raised hover:text-ink"
                     title="Good reply"
                     aria-label="Good reply"
                     aria-pressed={message.reaction === "up"}
@@ -342,7 +344,7 @@ function MessageBody({
                   </button>
                   <button
                     onClick={() => onReact(message.id, "down")}
-                    className="flex items-center rounded px-1.5 py-1 text-[11px] text-ink-faint transition hover:bg-raised hover:text-ink"
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[11px] text-ink-faint transition hover:bg-raised hover:text-ink"
                     title="Not helpful"
                     aria-label="Not helpful"
                     aria-pressed={message.reaction === "down"}
@@ -382,6 +384,7 @@ function MessageBody({
                   onChange={(provider, model) => models.onRegenerateWith(message.id, provider, model)}
                   onOpenSettings={models.onOpenSettings}
                   favorites={models.favorites}
+                  notes={models.notes}
                   onToggleFavorite={models.onToggleFavorite}
                   trigger={({ open, toggle }) => (
                     <button
@@ -431,7 +434,11 @@ export default memo(MessageBody);
  * default because it is usually longer than the answer.
  */
 function Reasoning({ text, pending }: { text: string; pending: boolean }) {
-  const [open, setOpen] = useState(false);
+  // Folded by default; Settings can have it open. Pressing the button on one reply overrides that for this reply only.
+  const prefs = usePrefs();
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const open = chosen ?? prefs.reasoningOpen;
+  const setOpen = (fn: (v: boolean) => boolean) => setChosen(fn(open));
 
   return (
     <div className="mb-2">

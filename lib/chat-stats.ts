@@ -19,7 +19,13 @@ export interface ChatStats {
   firstMessageAt: number | null;
   /** 👍 and 👎 you gave to replies. */
   reactions: { up: number; down: number };
+  /** How fast each model has answered here, fastest first. Tokens are estimated from length. */
+  speeds: { model: string; replies: number; tokensPerSecond: number; firstTokenMs: number }[];
+  /** The latest tool calls, newest first. */
+  recentTools: { name: string; isError: boolean; ms: number; at: number; chatId: string; chatTitle: string }[];
 }
+
+export const MAX_RECENT_TOOLS = 15;
 
 export const MAX_DAYS = 90;
 
@@ -49,7 +55,10 @@ export function computeChatStats(
     models: [],
     firstMessageAt: null,
     reactions: { up: 0, down: 0 },
+    speeds: [],
+    recentTools: [],
   };
+  const speed = new Map<string, { replies: number; tokens: number; ms: number; first: number }>();
   const tools = new Map<string, { calls: number; errors: number }>();
   const models = new Map<string, number>();
 
@@ -76,6 +85,16 @@ export function computeChatStats(
       if (message.model) models.set(message.model, (models.get(message.model) ?? 0) + 1);
       if (message.reaction === "up") stats.reactions.up++;
       else if (message.reaction === "down") stats.reactions.down++;
+      if (message.model && message.stats && message.stats.totalMs > 0 && message.stats.tokens > 0) {
+        const s = speed.get(message.model) ?? { replies: 0, tokens: 0, ms: 0, first: 0 };
+        // Speed is how fast words arrived once they started: the wait for the first one is a separate number.
+        const streaming = message.stats.totalMs - message.stats.firstTokenMs;
+        s.replies++;
+        s.tokens += message.stats.tokens;
+        s.ms += streaming >= 200 ? streaming : message.stats.totalMs;
+        s.first += message.stats.firstTokenMs;
+        speed.set(message.model, s);
+      }
       for (const round of message.toolRounds ?? []) {
         for (const call of round.calls) {
           const entry = tools.get(call.name) ?? { calls: 0, errors: 0 };
@@ -83,6 +102,7 @@ export function computeChatStats(
           tools.set(call.name, entry);
         }
         for (const result of round.results) {
+          stats.recentTools.push({ name: result.name, isError: result.isError, ms: result.ms, at: message.createdAt, chatId: chat.id, chatTitle: chat.title });
           if (!result.isError) continue;
           const entry = tools.get(result.name) ?? { calls: 0, errors: 0 };
           entry.errors++;
@@ -100,6 +120,10 @@ export function computeChatStats(
   stats.tools = [...tools.entries()]
     .map(([name, t]) => ({ name, ...t }))
     .sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name));
+  stats.recentTools = stats.recentTools.sort((a, b) => b.at - a.at).slice(0, MAX_RECENT_TOOLS);
+  stats.speeds = [...speed.entries()]
+    .map(([model, s]) => ({ model, replies: s.replies, tokensPerSecond: Math.round((s.tokens / (s.ms / 1000)) * 10) / 10, firstTokenMs: Math.round(s.first / s.replies) }))
+    .sort((a, b) => b.tokensPerSecond - a.tokensPerSecond || a.model.localeCompare(b.model));
   stats.models = [...models.entries()]
     .map(([model, replies]) => ({ model, replies }))
     .sort((a, b) => b.replies - a.replies || a.model.localeCompare(b.model))

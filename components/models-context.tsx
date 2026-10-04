@@ -15,6 +15,8 @@ import type { ProviderState } from "./ModelPicker";
 export interface ModelsContextValue {
   providers: ProviderState[];
   favorites: string[];
+  /** Your notes on models, "provider:model" → text. */
+  notes: Record<string, string>;
   onToggleFavorite: (provider: string, model: string) => void;
   /** Drop this reply and ask again with the chosen model. */
   onRegenerateWith: (messageId: string, provider: string, model: string) => void;

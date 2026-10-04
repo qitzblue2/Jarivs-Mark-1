@@ -25,6 +25,8 @@ import { resolveImageKey } from "@/lib/tools/generate-image";
 import { denyAll } from "@/lib/tools/fs/approval";
 import { DEFAULT_PERSONA } from "@/lib/persona";
 import { isTone, toneHint } from "@/lib/initiative/tone";
+import { cleanDisabledTools } from "@/lib/model-prefs";
+import { isReplyLength, lengthHint } from "@/lib/composing";
 import { environmentNote } from "@/lib/environment";
 import { forPrompt, getMemory } from "@/lib/memory";
 
@@ -68,6 +70,12 @@ interface ChatBody {
    * can put its own words into the system prompt this way.
    */
   tone?: string;
+  /** "brief", "normal" or "detailed" — the server turns it into one sentence of guidance (see lengthHint). */
+  length?: string;
+  /** Tools switched off in Settings. Only ever removes tools. */
+  disabledTools?: string[];
+  /** False: answer with the chosen model's provider or not at all, rather than trying the others. */
+  fallback?: boolean;
   /** Set false to disable tool use for this turn. */
   useTools?: boolean;
   /**
@@ -185,8 +193,10 @@ export async function POST(req: NextRequest) {
   // A custom persona gets the environment note too: it describes the machine,
   // not the character.
   const styleHint = isTone(body.tone) ? toneHint(body.tone) : null;
+  const sizeHint = isReplyLength(body.length) ? lengthHint(body.length) : null;
   const systemPrompt =
-    (persona?.trim() || DEFAULT_PERSONA) + environmentNote() + memoryBlock + (styleHint ? `\n\n${styleHint}` : "");
+    (persona?.trim() || DEFAULT_PERSONA) + environmentNote() + memoryBlock + (styleHint ? `\n\n${styleHint}` : "") + (sizeHint ? `\n\n${sizeHint}` : "");
+  const disabledTools = cleanDisabledTools(body.disabledTools);
   const hasImages = messages.some((m) => m.attachments?.some((a) => a.kind === "image"));
   // Pictures still carrying their bytes are the ones attached this turn —
   // older ones are lightened before they are stored. These are what "edit
@@ -203,7 +213,16 @@ export async function POST(req: NextRequest) {
   // being refused costs a request just like being answered. Skip it — unless
   // everything is cooling down, in which case trying is still better than
   // refusing outright.
-  const order = skipCoolingDown(fallbackOrder(primary, keys, endpoints));
+  // With "don't fall back" on, only the chosen provider is tried — even if it is cooling down
+  // from a rate limit, since being told that is better than being answered by something else.
+  const ready = fallbackOrder(primary, keys, endpoints);
+  const order = body.fallback === false ? ready.filter((id) => id === primary) : skipCoolingDown(ready);
+  if (body.fallback === false && order.length === 0) {
+    return errorStream(
+      `${getProvider(primary).label} isn't ready — it has no key or address — and “Don't fall back to another provider” is on in Settings.`,
+      401,
+    );
+  }
 
   // The self-hosted slot needs no key, so `order` is never empty and the
   // guidance below became unreachable — a fresh clone answered its first
@@ -282,6 +301,7 @@ export async function POST(req: NextRequest) {
           temperature,
           signal: req.signal,
           useTools,
+          disabledTools,
           endpoint: endpoints[providerId],
           budget: budgets[providerId],
           // Sized by whoever is actually answering — this may be a fallback

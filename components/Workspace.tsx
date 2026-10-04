@@ -40,6 +40,7 @@ import { normalizeTag, normalizeTags } from "@/lib/chat-ops";
 import { newId, type Attachment, type Chat, type ChatMeta, type Message, type ToolRound } from "@/lib/types";
 import { lighten } from "@/lib/attachments";
 import { getInitiative, moodEvent, noteTone, offerNow } from "@/lib/initiative/store";
+import { getPrefs } from "@/lib/prefs-store";
 import { readTone, type Tone } from "@/lib/initiative/tone";
 import { appendQuote, quoteText } from "@/lib/reading";
 import { applyTagCommand, findModel, fillVariables, promptVariables, undoLastExchange } from "@/lib/composing";
@@ -179,12 +180,15 @@ export default function Workspace() {
   const loadProviders = useCallback(async (
     keys: Record<string, string>,
     endpoints: Record<string, string>,
+    toolsOff: string[] = [],
   ) => {
     try {
       const res = await fetch("/api/models", {
         headers: {
           "x-jarvis-keys": JSON.stringify(keys),
           "x-jarvis-endpoints": JSON.stringify(endpoints),
+          // So the context meter doesn't count the schemas of tools that are switched off.
+          ...(toolsOff.length ? { "x-jarvis-tools-off": toolsOff.join(",") } : {}),
         },
       });
       const data = await res.json();
@@ -233,9 +237,10 @@ export default function Workspace() {
     }
   }, []);
 
+  const disabledToolsKey = (settings.disabledTools ?? []).join(",");
   useEffect(() => {
-    void loadProviders(settings.keys, settings.endpoints ?? {});
-  }, [loadProviders, settings.keys, settings.endpoints]);
+    void loadProviders(settings.keys, settings.endpoints ?? {}, disabledToolsKey ? disabledToolsKey.split(",") : []);
+  }, [loadProviders, settings.keys, settings.endpoints, disabledToolsKey]);
 
   const refreshChats = useCallback(async () => {
     try {
@@ -314,6 +319,10 @@ export default function Workspace() {
 
   function newChat() {
     moodEvent("new-chat");
+    // A model every new chat starts with, if one is chosen and can answer.
+    const fixed = getPrefs().newChatModel;
+    const wanted = fixed && providers.find((p) => p.id === fixed.provider);
+    if (fixed && wanted?.ready && wanted.models.includes(fixed.model)) changeModel(fixed.provider, fixed.model);
     setChat(null);
     setActiveArtifactId(null);
     setSidebarOpen(false);
@@ -553,6 +562,11 @@ export default function Workspace() {
             temperature: settings.temperature,
             // A chat's own instructions replace the Settings ones for it alone.
             persona: target.persona?.trim() ? target.persona : settings.persona,
+            // How long to make it: a name, which the server turns into a sentence.
+            length: settings.replyLength && settings.replyLength !== "normal" ? settings.replyLength : undefined,
+            disabledTools: settings.disabledTools?.length ? settings.disabledTools : undefined,
+            // "Don't fall back" is sent only when it is on, so a missing field keeps the old behaviour.
+            fallback: settings.noFallback ? false : undefined,
             // How the message being answered read — a name the server turns into
             // one sentence of guidance. Read here, in the browser, and not stored.
             tone: toneOf(history),
@@ -910,11 +924,12 @@ export default function Workspace() {
     () => ({
       providers,
       favorites: settings.favorites ?? [],
+      notes: settings.modelNotes ?? {},
       onToggleFavorite: toggleFavoriteModel,
       onRegenerateWith: regenerateWith,
       onOpenSettings: () => setSettingsOpen(true),
     }),
-    [providers, settings.favorites, toggleFavoriteModel, regenerateWith],
+    [providers, settings.favorites, settings.modelNotes, toggleFavoriteModel, regenerateWith],
   );
 
   /** How full the next request will be — the conversation, what you are typing, and what every request carries. */
@@ -1457,6 +1472,9 @@ export default function Workspace() {
             context={contextInfo}
             favorites={settings.favorites ?? []}
             onToggleFavorite={toggleFavoriteModel}
+            modelNotes={settings.modelNotes ?? {}}
+            replyLength={settings.replyLength ?? "normal"}
+            onReplyLength={(replyLength) => saveSettings({ ...settings, replyLength })}
             recent={recent}
             onOpenChat={selectChat}
             onQuickAction={quickAction}

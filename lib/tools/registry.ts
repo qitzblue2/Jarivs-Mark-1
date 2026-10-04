@@ -105,13 +105,15 @@ function imagesAvailable(ctx: Pick<ToolContext, "imageKey">): boolean {
   return Boolean(ctx.imageKey ?? resolveImageKey());
 }
 
-export function allTools(ctx: Pick<ToolContext, "imageKey"> = {}): Tool[] {
+export function allTools(ctx: Pick<ToolContext, "imageKey" | "disabledTools"> = {}): Tool[] {
   let tools = displayAvailable() ? [...ALL, ...DISPLAY, ...SCHEDULE] : ALL;
   if (imagesAvailable(ctx)) tools = [...tools, generateImageTool];
   if (selfEditEnabled()) tools = [...tools, ...SELF_EDIT];
-  return computerAccessEnabled() ? [...tools, ...COMPUTER] : tools;
+  if (computerAccessEnabled()) tools = [...tools, ...COMPUTER];
+  const off = ctx.disabledTools;
+  return off && off.length > 0 ? tools.filter((t) => !off.includes(t.name)) : tools;
 }
 
-export function getTool(name: string, ctx: Pick<ToolContext, "imageKey"> = {}): Tool | undefined {
+export function getTool(name: string, ctx: Pick<ToolContext, "imageKey" | "disabledTools"> = {}): Tool | undefined {
   return allTools(ctx).find((tool) => tool.name === name);
 }

@@ -266,7 +266,7 @@ try {
   check("the Chats tab shows the totals", (await stats.locator('[data-stat="Chats"]').innerText()).includes(String(after.chats.total)) && (await stats.locator('[data-stat="Messages"]').innerText()).includes(after.messages.total.toLocaleString()));
   check("a bar for each of thirty days", (await stats.locator("[data-day]").count()) === 30);
   check("today's bar is today's count", Number(await stats.locator("[data-day]").last().getAttribute("data-count")) === after.perDay.at(-1).messages);
-  check("the chart is described for a screen reader, with the numbers in a table", (await stats.locator('[data-day-chart]').getAttribute("aria-label"))?.includes("messages over the last 30 days") && (await stats.locator("table tbody tr").count()) === 30);
+  check("the chart is described for a screen reader, with the numbers in a table", (await stats.locator('[data-day-chart]').getAttribute("aria-label"))?.includes("messages over the last 30 days") && (await stats.locator("table.sr-only tbody tr").count()) === 30);
   check("tools used are listed with counts and failures", /calculate/.test(await stats.locator("[data-tool-stats]").innerText()) && /1 failed/.test(await stats.locator("[data-tool-stats]").innerText()));
   check("and the models that answered", (await stats.locator("[data-model-stats]").innerText()).includes("stats-model"));
   await page.screenshot({ path: `${OUT}/extras-stats.png` });

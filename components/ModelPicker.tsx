@@ -40,6 +40,8 @@ interface Props {
   /** Starred models, as "provider:model". With `onToggleFavorite`, each row gets a star. */
   favorites?: string[];
   onToggleFavorite?: (provider: string, model: string) => void;
+  /** Your own short notes on models, as "provider:model" → text, shown under the name. */
+  notes?: Record<string, string>;
   /**
    * Where the list opens. "below" hangs it from the button (the header's own).
    * "auto" is for a picker inside something that scrolls, like a message: it is
@@ -64,6 +66,7 @@ export default function ModelPicker({
   onOpenSettings,
   favorites,
   onToggleFavorite,
+  notes,
   placement = "below",
   trigger,
   label = "Choose a model",
@@ -286,7 +289,14 @@ export default function ModelPicker({
                         }`}
                       >
                         <Check size={11} className={selected ? "shrink-0 text-arc" : "shrink-0 opacity-0"} />
-                        <span className="truncate">{f.model}</span>
+                        <span className="min-w-0 flex-1 truncate">
+                          <span className="block truncate">{f.model}</span>
+                          {notes?.[favoriteKey(f.provider, f.model)] && (
+                            <span data-model-note className="block truncate font-sans text-[10px] text-ink-faint">
+                              {notes[favoriteKey(f.provider, f.model)]}
+                            </span>
+                          )}
+                        </span>
                         <span className="ml-auto shrink-0 pl-2 font-sans text-[10px] text-ink-faint">
                           {providers.find((p) => p.id === f.provider)?.label}
                         </span>
@@ -390,7 +400,14 @@ export default function ModelPicker({
                             size={11}
                             className={selected ? "shrink-0 text-arc" : "shrink-0 opacity-0"}
                           />
-                          <span className="truncate">{id}</span>
+                          <span className="min-w-0 flex-1 truncate">
+                            <span className="block truncate">{id}</span>
+                            {notes?.[favoriteKey(p.id, id)] && (
+                              <span data-model-note className="block truncate font-sans text-[10px] text-ink-faint">
+                                {notes[favoriteKey(p.id, id)]}
+                              </span>
+                            )}
+                          </span>
                         </button>
                         {onToggleFavorite && (
                           <button

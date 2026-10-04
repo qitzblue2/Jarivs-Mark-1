@@ -20,7 +20,7 @@ import { htmlToText } from "../lib/tools/html-text";
 import { tidy } from "../lib/tools/search/types";
 import { WakeGate, SilenceGate } from "../lib/voice/wake/types";
 import { SpeechSegmenter } from "../lib/voice/device/segment";
-import { allTools } from "../lib/tools/registry";
+import { allTools, getTool } from "../lib/tools/registry";
 import { toWireTool } from "../lib/tools/types";
 import { DEFAULT_PERSONA } from "../lib/persona";
 import { isNoise } from "../lib/voice/phrases";
@@ -106,6 +106,9 @@ import { sortChatList, nextSort, CHAT_SORTS } from "../lib/chat-list";
 import { categorize } from "../lib/storage-usage";
 import { formatBytes } from "../lib/format";
 import { chatMeta } from "../lib/types";
+import { cleanModelNotes, withModelNote, cleanDisabledTools, toggleTool } from "../lib/model-prefs";
+import { REPLY_LENGTHS, lengthHint, nextLength, isReplyLength } from "../lib/composing";
+import { chatInfo, spanLabel } from "../lib/chat-info";
 import { SentenceSplitter, splitSentences } from "../lib/voice/tts/sentences";
 import { Speaker } from "../lib/voice/tts/speaker";
 import { encodeWav, durationOf } from "../lib/voice/wav";
@@ -3381,7 +3384,7 @@ console.log("\n--- initiative: the live state ---");
   eq("style: a value is a preset to within a hair", [presetOf(0.7)?.id, presetOf(0.72)?.id, presetOf(0.9), presetOf(1.1)?.id], ["balanced", "balanced", null, "creative"]);
   eq("style: pressing cycles; from a custom value it lands on balanced", [nextPreset(0.2).id, nextPreset(0.7).id, nextPreset(1.1).id, nextPreset(0.95).id], ["balanced", "creative", "precise", "balanced"]);
 
-  eq("prefs: defaults", DEFAULT_PREFS, { sendKey: "enter", spellcheck: true, chatSort: "recent", compactList: false });
+  eq("prefs: defaults", DEFAULT_PREFS, { sendKey: "enter", spellcheck: true, chatSort: "recent", compactList: false, reasoningOpen: false, hideMeta: false, newChatModel: null });
   eq("prefs: junk becomes the defaults, field by field", [cleanPrefs(null), cleanPrefs({ sendKey: "tab", spellcheck: "no" }), cleanPrefs({ sendKey: "mod-enter", spellcheck: false })], [DEFAULT_PREFS, DEFAULT_PREFS, { ...DEFAULT_PREFS, sendKey: "mod-enter", spellcheck: false }]);
 
   eq("slash: the new commands are listed, and the ones that need words say so", [COMMAND_NAMES.includes("model"), COMMAND_NAMES.includes("title"), COMMAND_NAMES.includes("tag"), COMMAND_NAMES.includes("undo"), matchSlash("/mo").map((m) => m.takesArgs), matchSlash("/un").map((m) => m.takesArgs)], [true, true, true, true, [true], [undefined]]);
@@ -3468,6 +3471,58 @@ console.log("\n--- initiative: the live state ---");
 
   eq("storage: files are sorted into rows by where they sit", ["chats/a.json", "trash/b.json", "images/x.png", "backups/zip", "memory.json", "audit.jsonl", "schedule.json"].map(categorize), ["chats", "trash", "pictures", "backups", "memory", "other", "other"]);
   eq("storage: sizes in words", [0, -5, NaN, 850, 1536, 15 * 1024, 5 * 1024 * 1024, 3 * 1024 ** 3].map(formatBytes), ["0 B", "0 B", "0 B", "850 B", "1.5 KB", "15 KB", "5.0 MB", "3.0 GB"]);
+}
+
+// --- models and tools: notes, tools off, reply length, chat info, speeds ---
+{
+  console.log("\n--- models and tools ---");
+  eq("notes: keyed like favourites, tidied, cut to 80, junk dropped", cleanModelNotes({ "groq:mock-fast-8b": "  good   for\ncode ", "nocolon": "x", "groq:x": 5, "a:b": "   ", "groq:long": "y".repeat(200) }), { "groq:mock-fast-8b": "good for code", "groq:long": "y".repeat(80) });
+  eq("notes: not an object is none", [cleanModelNotes(null), cleanModelNotes([1]), cleanModelNotes("x")], [{}, {}, {}]);
+  eq("notes: at most 50", Object.keys(cleanModelNotes(Object.fromEntries(Array.from({ length: 80 }, (_, i) => [`p:m${i}`, "n"])))).length, 50);
+  eq("notes: set, change and clear one", [withModelNote({}, "a:b", "hello"), withModelNote({ "a:b": "old" }, "a:b", " new "), withModelNote({ "a:b": "old" }, "a:b", "  ")], [{ "a:b": "hello" }, { "a:b": "new" }, {}]);
+  eq("notes: a model id with a colon in it is fine (local servers)", cleanModelNotes({ "local:qwen2.5:7b": "slow" }), { "local:qwen2.5:7b": "slow" });
+
+  eq("tools off: tool names only, once each", cleanDisabledTools(["web_search", " calculate ", "web_search", "Bad Name", "../x", 5, "", "run_command"]), ["web_search", "calculate", "run_command"]);
+  eq("tools off: not a list is nothing", [cleanDisabledTools(null), cleanDisabledTools("web_search")], [[], []]);
+  eq("tools off: a ceiling", cleanDisabledTools(Array.from({ length: 80 }, (_, i) => `tool_${i}`)).length, 40);
+  eq("tools off: toggling", [toggleTool([], "a_b"), toggleTool(["a_b", "c"], "a_b")], [["a_b"], ["c"]]);
+  const everything = allTools().map((t) => t.name);
+  eq("tools off: the registry leaves out what is switched off, and only that", [allTools({ disabledTools: ["calculate", "web_search"] }).map((t) => t.name), everything.length - 2], [everything.filter((n) => n !== "calculate" && n !== "web_search"), allTools({ disabledTools: ["calculate", "web_search"] }).length]);
+  eq("tools off: it can't add anything — a name that isn't a tool changes nothing", allTools({ disabledTools: ["not_a_tool"] }).length, everything.length);
+  eq("tools off: a switched-off tool can't be run if asked for anyway", getTool("calculate", { disabledTools: ["calculate"] }), undefined);
+  eq("tools off: and its schema stops costing tokens", estimateTokens(JSON.stringify(allTools({ disabledTools: ["calculate"] }).map(toWireTool))) < estimateTokens(JSON.stringify(allTools().map(toWireTool))), true);
+
+  eq("length: three, in order, and cycling", [REPLY_LENGTHS.join(), nextLength("brief"), nextLength("normal"), nextLength("detailed")], ["brief,normal,detailed", "normal", "detailed", "brief"]);
+  eq("length: normal adds nothing; the others say one thing", [lengthHint("normal"), /short/.test(lengthHint("brief") ?? ""), /thorough/.test(lengthHint("detailed") ?? "")], [null, true, true]);
+  eq("length: the server accepts only the three names", [isReplyLength("brief"), isReplyLength("essay"), isReplyLength(undefined), isReplyLength({ toString: () => "brief" })], [true, false, false, false]);
+
+  const when = Date.UTC(2026, 9, 3, 12);
+  const msgs = [
+    { id: "1", role: "user", content: "hello there friend", createdAt: when, attachments: [{ name: "a" }, { name: "b" }] },
+    { id: "2", role: "assistant", content: "<think>hidden hidden hidden</think>Hi back to you", createdAt: when + 60_000, model: "m1", stats: { totalMs: 4000, firstTokenMs: 500, tokens: 20 }, reaction: "up", starred: true, toolRounds: [{ round: 1, calls: [{ id: "a", name: "calculate", arguments: "{}" }, { id: "b", name: "web_search", arguments: "{}" }], results: [{ toolCallId: "a", name: "calculate", content: "4", isError: false, ms: 3 }, { toolCallId: "b", name: "web_search", content: "no", isError: true, ms: 900 }] }] },
+    { id: "3", role: "user", content: "again", createdAt: when + 7_200_000 },
+    { id: "4", role: "assistant", content: "ok", createdAt: when + 7_260_000, model: "m2", stats: { totalMs: 9000, firstTokenMs: 100, tokens: 50 }, reaction: "down" },
+    { id: "5", role: "system", content: "ignored", createdAt: 1 },
+  ] as never[];
+  const info = chatInfo({ messages: msgs });
+  eq("info: messages and words, reasoning not counted", [info.messages, info.words], [{ user: 2, assistant: 2 }, { user: 4, assistant: 5 }]);
+  eq("info: models, tools, ratings, saves and files", [info.models, info.tools, info.reactions, info.starred, info.attachments], [[{ model: "m1", replies: 1 }, { model: "m2", replies: 1 }], { calls: 2, errors: 1 }, { up: 1, down: 1 }, 1, 2]);
+  eq("info: when it began and ended, how long between, the slowest reply", [info.firstAt, info.lastAt, info.spanMs, info.slowestMs], [when, when + 7_260_000, 7_260_000, 9000]);
+  eq("info: the size is the conversation's, without the system message", info.tokens > 20 && info.tokens < 200, true);
+  eq("info: an empty chat is zeros", [chatInfo({ messages: [] }).tokens, chatInfo({ messages: [] }).firstAt, chatInfo({ messages: [] }).spanMs], [0, null, 0]);
+  eq("info: spans in words", [30_000, 60_000, 25 * 60_000, 60 * 60_000, 125 * 60_000, 50 * 3_600_000].map(spanLabel), ["under a minute", "1 minute", "25 minutes", "1 hour", "2 hours 5 minutes", "2 days"]);
+
+  const stats = computeChatStats([{ id: "c1", title: "One", createdAt: 1, updatedAt: 1, messages: msgs.filter((m: { role: string }) => m.role !== "system") }, { id: "c2", title: "Two", createdAt: 1, updatedAt: 1, messages: [{ id: "x", role: "assistant", content: "q", createdAt: when + 99, model: "m1", stats: { totalMs: 2500, firstTokenMs: 500, tokens: 40 } }] }] as never[], { now: when + 10_000_000 });
+  eq("speeds: tokens per second once the words started, fastest first", stats.speeds, [{ model: "m1", replies: 2, tokensPerSecond: 10.9, firstTokenMs: 500 }, { model: "m2", replies: 1, tokensPerSecond: 5.6, firstTokenMs: 100 }]);
+  eq("speeds: a reply with no timing is left out", computeChatStats([{ id: "c", title: "C", createdAt: 1, updatedAt: 1, messages: [{ id: "a", role: "assistant", content: "x", createdAt: 1, model: "m" }] }] as never[]).speeds, []);
+  eq("recent tools: newest first, with the chat they ran in, failures marked", stats.recentTools.map((t) => [t.name, t.isError, t.chatTitle]), [["calculate", false, "One"], ["web_search", true, "One"]]);
+  eq("recent tools: only so many", computeChatStats([{ id: "c", title: "C", createdAt: 1, updatedAt: 1, messages: Array.from({ length: 30 }, (_, i) => ({ id: `m${i}`, role: "assistant", content: "x", createdAt: i, toolRounds: [{ round: 1, calls: [], results: [{ toolCallId: "t", name: "calculate", content: "", isError: false, ms: 1 }] }] })) }] as never[]).recentTools.length, 15);
+
+  const settingsIn = importSettings(JSON.stringify({ format: "jarvis-settings", version: 1, settings: { modelNotes: { "groq:m": "fast" , bad: "x" }, disabledTools: ["web_search", "../no"], noFallback: true, replyLength: "brief" } }), DEFAULT_SETTINGS);
+  eq("settings file: notes, tools off, no-fallback and length come in, cleaned", settingsIn.ok ? [settingsIn.settings.modelNotes, settingsIn.settings.disabledTools, settingsIn.settings.noFallback, settingsIn.settings.replyLength] : null, [{ "groq:m": "fast" }, ["web_search"], true, "brief"]);
+  const settingsBad = importSettings(JSON.stringify({ format: "jarvis-settings", version: 1, settings: { replyLength: "essay", noFallback: "yes", disabledTools: "all" } }), DEFAULT_SETTINGS);
+  eq("settings file: wrong-typed ones are ignored", settingsBad.ok ? [settingsBad.settings.replyLength, settingsBad.settings.noFallback, settingsBad.settings.disabledTools] : null, [undefined, undefined, undefined]);
+  eq("prefs: the new-chat model must be well-formed", [cleanPrefs({ newChatModel: { provider: "groq", model: "m" } }).newChatModel, cleanPrefs({ newChatModel: { provider: "../x", model: "m" } }).newChatModel, cleanPrefs({ newChatModel: { provider: "g" } }).newChatModel, cleanPrefs({ newChatModel: "groq:m" }).newChatModel], [{ provider: "groq", model: "m" }, null, null, null]);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

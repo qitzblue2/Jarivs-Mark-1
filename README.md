@@ -301,6 +301,40 @@ archived or empty ones — the four starter prompts, and quick actions for the
 things that are otherwise a button you have to know about: search, voice mode,
 pictures, saved messages and the shortcuts.
 
+### Choosing models and tools
+
+- **About this chat** (chat tools button): messages and words by who wrote them,
+  the chat's size in tokens, when it began and how long it ran, which models
+  answered, tool calls (and failures), ratings, and — with the selected model —
+  how much of its window the next request would use.
+- **Speed.** *Usage → Your chats* shows how fast each model has answered —
+  tokens a second once the words started, and the wait for the first one —
+  from replies you already have. It is measured in your browser, including the
+  network, and tokens are estimated from the length of each reply. Below it,
+  the latest tool calls with the chat each ran in.
+- **Notes on models.** Settings → *Choosing models*: a line per model ("good
+  for planning") shown under its name in the picker. Saved with Settings, so
+  they travel in a settings export.
+- **New chats start with** the model you used last (the default) or one you pick
+  in Settings → *Writing and the chat list*, when you press *New chat*.
+- **Individual tools.** Settings → *Individual tools* lists exactly what this
+  server would offer right now (not a catalogue of what might exist) with each
+  one's cost in tokens. A tool that is off is not offered to the model, can't run
+  if it asks anyway, and stops costing tokens — the context meter drops to match.
+  This can only *remove* tools: nothing a request says can add one.
+- **Reply length.** *Length: Normal* beside the style button cycles Brief,
+  Normal and Detailed. The page sends only the name; the server turns it into one
+  sentence for that reply, so nothing a page sends can put its own words in the
+  instructions.
+- **Don't fall back.** Normally a rate-limited or unreachable model hands over to
+  another provider, and the reply says so. With this on you are told it failed
+  instead — even if it is only cooling down — for when the model matters more
+  than getting *an* answer.
+- **A quieter page.** Settings can show a thinking model's reasoning open (live —
+  it changes on replies already on screen), and hide the model name, speed and
+  reading time under replies. A fallback notice, a saved star and your ratings
+  still show: hiding the tidy part must not hide a surprise.
+
 ### Models, personas and the context meter
 
 - **Persona presets.** *Start from* in Settings → Persona (and in a chat's own
@@ -1193,6 +1227,7 @@ npm run test:composer  # timestamps, saved messages, folding, drafts, up arrow, 
 npm run test:appearance  # theme, text size, shortcuts, resizing, focus, axe scan, print, manifest, offline
 npm run test:models  # persona presets, context meter, favourites, regenerate-with, memory search/export/import, units
 npm run test:extras  # templates, welcome screen, gallery families, usage CSV, daily backups, chat statistics
+npm run test:choosing  # chat info, speeds, model notes, new-chat model, tools off, reply length, no fallback, quieter page
 npm run test:organising  # remember from a message, expiring memory, add many, duplicates, notes, colours, order, storage
 npm run test:writing  # counter, send key, spellcheck, reply style, /model /title /tag /undo, prompt blanks, searching what you sent
 npm run test:reading  # find, outline, jump keys, quote, plain copy, reading time, bulk select, web-page export, import, Markdown zip

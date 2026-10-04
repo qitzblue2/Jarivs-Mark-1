@@ -249,3 +249,33 @@ export function nextPreset(temperature: number): TemperaturePreset {
   const at = TEMPERATURE_PRESETS.findIndex((p) => p === presetOf(temperature));
   return at === -1 ? TEMPERATURE_PRESETS[1] : TEMPERATURE_PRESETS[(at + 1) % TEMPERATURE_PRESETS.length];
 }
+
+// --- reply length -------------------------------------------------------------------------------------------
+
+export const REPLY_LENGTHS = ["brief", "normal", "detailed"] as const;
+export type ReplyLength = (typeof REPLY_LENGTHS)[number];
+
+export const LENGTH_LABEL: Record<ReplyLength, string> = { brief: "Brief", normal: "Normal", detailed: "Detailed" };
+export const LENGTH_HINT_TEXT: Record<ReplyLength, string> = {
+  brief: "Short answers: a few sentences",
+  normal: "The usual length",
+  detailed: "Thorough answers, with reasoning and examples",
+};
+
+export const isReplyLength = (value: unknown): value is ReplyLength => typeof value === "string" && (REPLY_LENGTHS as readonly string[]).includes(value);
+
+export function nextLength(length: ReplyLength): ReplyLength {
+  return REPLY_LENGTHS[(REPLY_LENGTHS.indexOf(length) + 1) % REPLY_LENGTHS.length];
+}
+
+/**
+ * The one sentence added to the instructions for a turn. The server holds the
+ * words: the page sends only a name, so it can't put its own text into the system
+ * prompt this way. "Normal" adds nothing — the instructions you have are the
+ * normal length.
+ */
+export function lengthHint(length: ReplyLength): string | null {
+  if (length === "brief") return "Keep the reply short: answer in a few sentences and leave out preamble, caveats and recaps unless they change the answer.";
+  if (length === "detailed") return "Give a thorough reply: explain the reasoning, cover the edge cases and include a concrete example where it helps.";
+  return null;
+}

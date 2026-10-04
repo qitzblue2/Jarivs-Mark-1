@@ -2,6 +2,8 @@ import type { Settings } from "@/components/SettingsDialog";
 import { QUALITY_OPTIONS } from "@/lib/voice/tts/kokoro";
 import { cleanPrompts } from "@/lib/prompts";
 import { cleanFavorites } from "@/lib/favorites";
+import { cleanDisabledTools, cleanModelNotes } from "@/lib/model-prefs";
+import { isReplyLength } from "@/lib/composing";
 
 /**
  * Moving your setup between browsers.
@@ -103,6 +105,11 @@ export function importSettings(raw: string, current: Settings): ImportResult {
   if (Array.isArray(incoming.prompts)) set("prompts", cleanPrompts(incoming.prompts));
   // Starred models are a preference, not a secret.
   if (Array.isArray(incoming.favorites)) set("favorites", cleanFavorites(incoming.favorites));
+  // Notes on models, tools turned off, and the fallback and length choices are preferences, not secrets.
+  if (incoming.modelNotes && typeof incoming.modelNotes === "object") set("modelNotes", cleanModelNotes(incoming.modelNotes));
+  if (Array.isArray(incoming.disabledTools)) set("disabledTools", cleanDisabledTools(incoming.disabledTools));
+  if (typeof incoming.noFallback === "boolean") set("noFallback", incoming.noFallback);
+  if (isReplyLength(incoming.replyLength)) set("replyLength", incoming.replyLength);
   set("endpoints", cleanEndpoints(incoming.endpoints));
   set("budgets", cleanBudgets(incoming.budgets));
 

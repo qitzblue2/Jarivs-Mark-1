@@ -20,6 +20,9 @@ import MemoryEditor from "./MemoryEditor";
 import DevicePanel from "./DevicePanel";
 import DisplayPanel from "./DisplayPanel";
 import SchedulePanel from "./SchedulePanel";
+import ToolSettings from "./ToolSettings";
+import ModelSettings from "./ModelSettings";
+import type { ReplyLength } from "@/lib/composing";
 
 export interface Settings {
   persona: string;
@@ -60,6 +63,14 @@ export interface Settings {
   prompts: SavedPrompt[];
   /** Models starred in the picker, as "provider:model". */
   favorites: string[];
+  /** A short note per model, as "provider:model" → text, shown in the picker. */
+  modelNotes?: Record<string, string>;
+  /** Tools switched off: not offered to the model, and not runnable. */
+  disabledTools?: string[];
+  /** Answer with the chosen provider or not at all, instead of trying the others. */
+  noFallback?: boolean;
+  /** How long replies should be. */
+  replyLength?: ReplyLength;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -315,9 +326,19 @@ export default function SettingsDialog({
             </label>
           </section>
 
+          <ToolSettings disabled={draft.disabledTools ?? []} onChange={(disabledTools) => setDraft((d) => ({ ...d, disabledTools }))} />
+
+          <ModelSettings
+            providers={providers}
+            notes={draft.modelNotes ?? {}}
+            onNotes={(modelNotes) => setDraft((d) => ({ ...d, modelNotes }))}
+            noFallback={Boolean(draft.noFallback)}
+            onNoFallback={(noFallback) => setDraft((d) => ({ ...d, noFallback }))}
+          />
+
           <AppearanceSettings />
 
-          <PrefsSettings />
+          <PrefsSettings providers={providers} />
 
           <InitiativeSettings />
 

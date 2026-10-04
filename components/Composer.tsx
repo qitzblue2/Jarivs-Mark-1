@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, ListChecks, Paperclip, Square } from "lucide-react";
-import { composerCounts, counterLabel, nextPreset, presetOf, searchHistory, shouldSend } from "@/lib/composing";
+import { composerCounts, counterLabel, LENGTH_HINT_TEXT, LENGTH_LABEL, nextLength, nextPreset, presetOf, searchHistory, shouldSend, type ReplyLength } from "@/lib/composing";
 import { usePrefs } from "@/lib/prefs-store";
 import Attachments from "./Attachments";
 import { fileToAttachment } from "@/lib/attach-client";
@@ -39,6 +39,9 @@ interface Props {
   /** How adventurous replies are, and how to change it from a preset. */
   temperature: number;
   onTemperature: (value: number) => void;
+  /** How long replies should be, and how to change it. */
+  replyLength: ReplyLength;
+  onReplyLength: (length: ReplyLength) => void;
 }
 
 export default function Composer({
@@ -59,6 +62,8 @@ export default function Composer({
   meter,
   temperature,
   onTemperature,
+  replyLength,
+  onReplyLength,
 }: Props) {
   const prefs = usePrefs();
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -442,6 +447,16 @@ export default function Composer({
               className="rounded px-1.5 py-0.5 transition hover:bg-raised hover:text-ink"
             >
               Style: {preset?.label ?? `Custom ${temperature.toFixed(1)}`}
+            </button>
+            <button
+              type="button"
+              onClick={() => onReplyLength(nextLength(replyLength))}
+              data-reply-length={replyLength}
+              aria-label={`Reply length: ${LENGTH_LABEL[replyLength]}. Press to change.`}
+              title={`${LENGTH_HINT_TEXT[replyLength]} — press to cycle Brief, Normal, Detailed`}
+              className="rounded px-1.5 py-0.5 transition hover:bg-raised hover:text-ink"
+            >
+              Length: {LENGTH_LABEL[replyLength]}
             </button>
             {meter}
           </span>
