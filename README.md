@@ -1,0 +1,1624 @@
+# JARVIS Mark 6
+
+A self-hosted AI workspace that runs on **free, fast inference**. Chat list on
+the left, conversation in the middle, live code canvas on the right — and it
+can now use tools mid-answer instead of only talking.
+
+- **Free to run.** No credit card, no trial clock, no hosting bill.
+- **Fast.** Groq and Cerebras are the two quickest inference providers going.
+- **Provider-agnostic.** Groq, Gemini, Cerebras, Mistral, OpenRouter, NanoGPT,
+  Featherless, Arli and Awan ship in the box, plus a slot for any
+  OpenAI-compatible URL of your own; adding another is one entry in a config
+  object.
+- **Tool-using.** Calls tools mid-answer and shows you exactly what it ran.
+- **Voice.** Say "Hey JARVIS" and talk to it. Wake word runs on your machine.
+- **Proactive.** Reminders, briefings and watchers it speaks aloud unasked.
+- **Pictures.** With a NanoGPT key it draws, and edits pictures you attach.
+- **Edits its own code** (opt-in) — in an always-running sandbox copy, applied
+  to the real thing only when you say so, with undo.
+- **Yours.** Chats are plain JSON files on your disk. Nothing to sign into.
+
+---
+
+## 1. Get a free API key (about 60 seconds)
+
+You need at least one. Getting two means the app can roll over to the second
+when the first hits a free-tier rate limit — it does that automatically.
+
+### Groq — recommended default
+1. Go to **https://console.groq.com/keys**
+2. Sign in with an email or Google account. **No credit card.**
+3. **Create API Key**, copy it.
+
+Free tier: ~30 requests/min, 14,400/day, large context. Very fast.
+
+### Cerebras — the speed record holder
+1. Go to **https://cloud.cerebras.ai**
+2. Sign up with an email. **No credit card.**
+3. **API Keys → Create**, copy it.
+
+Free tier: 1,000,000 tokens/day, resets 00:00 UTC. Fastest tokens/sec of any
+provider, but free-tier context is capped at 8K — the app trims long chats
+automatically so you never hit an error for it.
+
+### Gemini — the most headroom by far
+
+1. Go to **https://aistudio.google.com/apikey**
+2. **Create API key.** No credit card.
+
+Free tier: **250,000 tokens per minute**, 250 requests/day, 1M context. Groq
+allows 6,000 tokens a minute, so this is roughly forty times the room — if you
+keep running out mid-conversation, this is the fix.
+
+> Google's free tier may use your conversations to improve its products, and
+> JARVIS remembers things about you. Worth deciding deliberately.
+
+### A note on the voice
+
+JARVIS speaks with **Kokoro** — an 82M-parameter Apache-2.0 model that runs on
+your own machine. No key, no account, no cloud, nothing that can be revoked or
+start charging. `npm install` fetches it once (~86MB) into `public/models/`
+alongside the wake-word and speech-detection models, so it works offline
+afterwards.
+
+If it didn't download, JARVIS says so and stays quiet rather than switching to
+your browser's built-in voice — which on Chrome is a Google voice, and a cloud
+dependency has no business appearing by accident in the one feature chosen for
+not having one. Re-run `npm run setup:voice` to fix it.
+
+On the Pi, device mode uses **Piper** instead — also local, also free.
+
+### NanoGPT — the cheapest way off the free tiers
+
+**$8/month**, and the one to reach for first if the free tiers keep running
+out. It is cheaper than Arli below and carries far more: **200+ open models** —
+every DeepSeek, Qwen and Kimi K2 release, plus uncensored and roleplay
+fine-tunes — and **100 images a day** on top.
+
+1. Go to **https://nano-gpt.com/**, take the subscription, create a key.
+2. Put it in `.env.local` as `NANOGPT_API_KEY`.
+
+Its limits are **60 requests a minute** and **60 million input tokens a week**.
+Both are about how *often* you ask. That is the distinction that matters:
+Groq's 6,000 tokens a minute is spent by how *long* you have been talking, so
+it tightens as a conversation grows and fails you mid-thought. You cannot
+speak sixty times a minute, and at JARVIS' default budget the weekly cap is
+around 500 tool-using turns. If you somehow meet it, set
+`JARVIS_NANOGPT_REQUEST_TOKENS=12000` rather than paying for more.
+
+> JARVIS points this slot at `/api/subscription/v1`, not `/api/v1`. The second
+> one bills per token against deposited credit — same models, same API, but
+> you would be paying twice.
+
+### Featherless — when you want all 22,000
+
+**$25/month** for the entire Hugging Face open-weight catalogue behind one
+key: roughly 22,000 models, no size cap, 32K context, four concurrent. Also
+unlimited tokens and requests.
+
+Worth it for one reason only — the breadth. If NanoGPT already serves what you
+want, this is three times the price for models you will not use.
+
+1. Go to **https://featherless.ai/** and take the **$25 Chat** plan.
+
+> The **$50 "Developer"** plan is not a bigger version of this. It is $50 of
+> credits billed per token — the metered arrangement these slots exist to
+> escape. Several comparison sites also still list a $10 tier; it is gone.
+
+The picker lists 400 models, not 22,000 — past a few hundred rows it stops
+being something you can read. For anything else, type its full id into the
+picker's filter box and choose **"use it anyway"**.
+
+### Arli AI — the one that never runs out
+
+Not free, but the answer to "everything keeps hitting a limit".
+
+1. Go to **https://www.arliai.com/**, pick a plan, create a key.
+
+**$10/month buys unlimited tokens and unlimited requests** on models up to
+31B at 16K context. $15 raises that to 355B and 32K — set
+`JARVIS_ARLI_CONTEXT=32000` if you take that tier.
+
+All four paid slots sit **behind every free tier** and ahead of your own
+hardware. Among themselves the order is not by price — Awan is the cheapest
+and comes last, because its models are two years old and poor at tool
+calling, which is the thing JARVIS actually needs. That is deliberate: the free providers are faster and cost nothing,
+so they should answer normal use, and the providers that never rate-limit are
+what should catch whatever they cannot. You reach the thing you pay for only
+at the moment you would otherwise have been stuck.
+
+> Flat-rate "unlimited" plans are sold on the bet that most subscribers
+> under-use, and the big sellers have been drifting back toward metering.
+> Treat it as a good introductory price rather than a permanent arrangement —
+> which is the argument for leaving a free key configured behind it.
+
+### Awan LLM
+
+The cheapest of the four at about $5/month, also unlimited tokens — but see
+the catalogue warning below before choosing it over NanoGPT for $3 more.
+
+Its **limits are not the constraint** people expect: daily caps run 30,000 to
+80,000 requests, against maybe 200 a day for heavy use. You will not meet
+them. That is a different shape of limit from Groq's 6,000 tokens a minute,
+which is spent by how *long* you have been talking rather than how often you
+ask — which is why Groq tightens as a conversation grows and this doesn't.
+
+**The catalogue is what to weigh.** Llama 3.1 8B and 70B Instruct, Llama 3,
+and Awan's own 8B fine-tunes — 2024-era models. That matters for one reason:
+tool calling is what drives the projector, and Llama 3.1 8B is weak at it
+while 70B is acceptable. Use the picker's **"Can this model use tools?"**
+before relying on one, or the display will quietly never respond.
+
+### Mistral
+
+1. Go to **https://console.mistral.ai/api-keys**
+2. Create a key. No credit card.
+
+Free tier: roughly a billion tokens a month. Mistral no longer publishes exact
+rate limits, so JARVIS ships a conservative per-request budget for it.
+
+### On being under 18
+
+GitHub Models used to be the one mainstream free option open to 13+, which is
+why it was here. **GitHub retired it entirely on 30 July 2026** — API,
+catalog and all — so that option is gone rather than deprecated.
+
+Every remaining hosted provider above requires 18 in its terms of service.
+The path that has no age gate at all is running the model yourself: see
+[Running your own model](#running-your-own-model) below. It is slower, it is
+free forever, and nobody's terms apply to a machine you own.
+
+> **On privacy:** free tiers are generally funded by your prompts being used
+> for training. Don't put anything sensitive through them.
+
+## 2. Run it
+
+```bash
+npm install
+cp .env.example .env.local     # then paste your key(s) into .env.local
+npm run dev
+```
+
+Open **http://localhost:3000**.
+
+No `.env.local`? You can also paste a key into **Settings → API keys** and it
+will be kept in your browser instead. Handy for a deployed copy, but a key in
+a browser is visible to anything running in that browser — prefer `.env.local`
+on your own machine.
+
+## 3. Using it
+
+| Action | How |
+|---|---|
+| New chat | `Ctrl/Cmd + K`, or the **New chat** button |
+| Send | `Enter` (`Shift+Enter` for a newline) |
+| Stop generating | The stop button in the composer |
+| Rename a chat | Double-click it in the sidebar |
+| Tag, archive, copy, export a chat | The **…** on its row in the sidebar |
+| Branch from a message | **Branch** under any message — a new chat up to that point |
+| Instructions for one chat | The sliders icon in the chat header |
+| Get a deleted chat back | **Trash** at the bottom of the sidebar — kept 30 days |
+| Add what a backup has that you don't | **Restore** at the bottom of the sidebar |
+| Search every chat | `Ctrl/Cmd + /` — matches what was said, not just titles |
+| Pin a chat to the top | The pin on its row in the sidebar |
+| Export a chat | The download button in the header — a Markdown file |
+| See what's been spent | The gauge at the top of the sidebar |
+| Back up everything | **Back up** at the bottom of the sidebar — one zip |
+| Move your setup | Settings → **Export** / **Import** — a file without API keys |
+| Save a message | **Save** under it; **Saved** at the bottom of the sidebar lists every one |
+| Recall what you sent | `↑` in an empty box, `↓` to come back |
+| Commands | `/` in the box — `/new`, `/pin`, `/archive`, `/export`, `/instructions`, `/summarize` |
+| Your own shortcuts | Settings → **Saved prompts**, then `/name` |
+| Hear a reply | **Listen** under it |
+| Light, dark or system theme | Settings → **Appearance**, or `/theme` to cycle |
+| Bigger text, tighter spacing | Settings → **Appearance** |
+| Widen or narrow the chat list | Drag its right edge (double-click resets) |
+| See every shortcut | `?` (outside a text box), or `/help` |
+| Print a chat | `Ctrl/Cmd + P` — just the conversation |
+| Install it as an app | The install icon in Chrome's or Edge's address bar, or **Add to Home Screen** |
+| Switch model for one reply | The **▾** beside **Regenerate** under the last reply |
+| Star a model | The star beside it in the model picker — favourites are listed first |
+| Start from a persona | Settings → **Persona** → *Start from*; also in a chat's own instructions |
+| See how full the context is | The meter beside the message box |
+| Voice mode | `Ctrl/Cmd + J` |
+| Open code in the canvas | Automatic, or the **Canvas** button on any code block |
+| Close the canvas | `Esc` |
+| Resize the canvas | Drag its left edge |
+| Switch model | The model pill in the header |
+
+**Search** looks inside every message: each word you type must appear
+somewhere in the chat, in any order, and the matching line is shown under the
+title. A thinking model's hidden reasoning is not searched or exported — you
+are looking for what you saw.
+
+The **code canvas** takes any code JARVIS writes, gives it a tab, and lets you
+edit it. HTML, CSS, JS and SVG run live in a sandboxed iframe next to the
+editor; everything else gets syntax highlighting, copy and download.
+
+### Messages and the composer
+
+- **Time and speed.** Every message carries its time (the full date on hover).
+  A reply also shows how long it took, how long before the first word, and a
+  speed in tokens per second. The speed is estimated from the length of the
+  reply, not counted by the provider — the `~` in front of it says so.
+- **Saved messages.** **Save** keeps a message for later; **Saved** in the
+  sidebar lists them across every chat, and opening one jumps to it and
+  flashes it. Saving doesn't count as activity, so the chat doesn't jump to the
+  top of the sidebar.
+- **Long messages fold.** Something you paste past 20 lines or 1,500
+  characters is folded to a preview with **Show all (N lines)**. Replies are
+  never folded.
+- **Tables and code.** A table has a **Copy CSV** button that copies it as a
+  spreadsheet would want it — values that start with `=`, `+`, `-` or `@` are
+  neutralised so a pasted formula can't run, while real numbers stay numbers.
+  Code blocks scroll by default, can **Wrap**, and **Download** under the name
+  in their first-line comment (`// bounce.html`) if they have one.
+- **Drafts.** Half-written text is kept per chat in your browser, so switching
+  chats to look something up — or reloading — doesn't lose it. The last 50
+  edited drafts are kept; nothing leaves the browser.
+- **Up arrow.** In an empty box, `↑` walks back through what you've sent in
+  this chat and `↓` comes forward again, ending at whatever you had half-typed.
+  It only acts on the first or last line, so it never steals the cursor from
+  text you're editing.
+- **Slash commands.** Type `/` for a menu. Commands run (`/new`, `/pin`,
+  `/archive`, `/export`, `/instructions`) or fill the box for you to read before
+  sending (`/summarize`). Anything else beginning with a slash — a file path —
+  is sent as an ordinary message.
+- **Saved prompts.** Settings → **Saved prompts** holds up to 50 named prompts.
+  `/name` puts one in the box, and anything you type after it is added. A name
+  that is already a built-in command is flagged. They travel with Settings
+  export/import. Put `{{blanks}}` in one — *Translate this into {{language}}:
+  {{text}}* — and a small form asks for them first (a blank left empty stays as
+  written, so nothing vanishes); `{{date}}` and `{{time}}` fill themselves.
+- **Four more commands** that act on the chat: `/model fast` switches to the
+  best-matching model that is ready (and names the runners-up), `/title New
+  name` renames it, `/tag work -old` adds and removes tags, and `/undo` takes
+  back your last message and every reply after it, putting what you wrote back in
+  the box (attachments aren't kept). Choosing one that needs words from the menu
+  fills the box with `/model ` for you to finish rather than running it empty.
+  A saved prompt you had already called `tag`, `title`, `model` or `undo` is
+  renamed `tag-prompt` and so on the next time Settings are saved, not lost.
+- **Counter.** Words, characters and an estimate of tokens, under the box once
+  there is something in it.
+- **Reply style.** *Style: Balanced* beside the counter cycles Precise (0.2),
+  Balanced (0.7), Creative (1.1) — the same temperature as the slider in
+  Settings, which still sets any value; a custom one shows as *Custom 0.9*.
+- **Send key.** Settings → **Writing**: Enter sends (the default), or Enter is a
+  new line and `Ctrl/⌘+Enter` sends. Spellcheck underlines can be turned off
+  there too. Both are remembered on this device.
+- **Search what you've sent.** `Ctrl/⌘+R` in the box opens a search of this
+  chat's earlier messages, newest first; `Enter` puts one in the box,
+  `Esc` closes. (It takes `Ctrl+R` from the browser's reload while the box has
+  focus — a reload would cost you the draft.)
+- **Listen.** Reads a reply aloud with the browser's own voice — the words, not
+  the markdown or the code. Press again to stop.
+
+### The welcome screen
+
+An empty chat greets you for the hour (worked out in your browser, so it is your
+hour), offers the last few conversations to pick back up — newest first, never
+archived or empty ones — the four starter prompts, and quick actions for the
+things that are otherwise a button you have to know about: search, voice mode,
+pictures, saved messages and the shortcuts.
+
+### Choosing models and tools
+
+- **About this chat** (chat tools button): messages and words by who wrote them,
+  the chat's size in tokens, when it began and how long it ran, which models
+  answered, tool calls (and failures), ratings, and — with the selected model —
+  how much of its window the next request would use.
+- **Speed.** *Usage → Your chats* shows how fast each model has answered —
+  tokens a second once the words started, and the wait for the first one —
+  from replies you already have. It is measured in your browser, including the
+  network, and tokens are estimated from the length of each reply. Below it,
+  the latest tool calls with the chat each ran in.
+- **Notes on models.** Settings → *Choosing models*: a line per model ("good
+  for planning") shown under its name in the picker. Saved with Settings, so
+  they travel in a settings export.
+- **New chats start with** the model you used last (the default) or one you pick
+  in Settings → *Writing and the chat list*, when you press *New chat*.
+- **Individual tools.** Settings → *Individual tools* lists exactly what this
+  server would offer right now (not a catalogue of what might exist) with each
+  one's cost in tokens. A tool that is off is not offered to the model, can't run
+  if it asks anyway, and stops costing tokens — the context meter drops to match.
+  This can only *remove* tools: nothing a request says can add one.
+- **Reply length.** *Length: Normal* beside the style button cycles Brief,
+  Normal and Detailed. The page sends only the name; the server turns it into one
+  sentence for that reply, so nothing a page sends can put its own words in the
+  instructions.
+- **Don't fall back.** Normally a rate-limited or unreachable model hands over to
+  another provider, and the reply says so. With this on you are told it failed
+  instead — even if it is only cooling down — for when the model matters more
+  than getting *an* answer.
+- **A quieter page.** Settings can show a thinking model's reasoning open (live —
+  it changes on replies already on screen), and hide the model name, speed and
+  reading time under replies. A fallback notice, a saved star and your ratings
+  still show: hiding the tidy part must not hide a surprise.
+
+### Models, personas and the context meter
+
+- **Persona presets.** *Start from* in Settings → Persona (and in a chat's own
+  instructions) fills the box with JARVIS, Brief, Teacher, Code reviewer, Editor
+  or Brainstorm. Each is a short intro joined to the same operating rules as the
+  default, so a Teacher still fences code with a filename, still uses the
+  calculator and still stores memories. It only fills the box — nothing changes
+  until you save — and once you edit the text it reads *Custom*. The default
+  persona is byte-for-byte what it was before presets existed.
+- **Context meter.** Beside the message box: how full the next request is, as
+  `~1.4k / 3.5k`. It measures against what JARVIS will actually send — the
+  smaller of the model's window and the per-request budget, which on a free tier
+  is far smaller (Groq's is 3,500 tokens against a 96,000 window) — because past
+  that line the oldest messages are left out of the request and the model
+  answers as if they never happened. It counts the instructions, the tool list,
+  the conversation, attached files and pictures, and whatever you are typing.
+  Amber at 70%; red once older messages are being left out. It is an estimate
+  (four characters a token, as the server trims with), and memory notes the
+  server adds are not counted.
+- **Favourite models.** Star a model in the picker and it is listed first, under
+  *Favourites*. Stars live in Settings (so they travel with export/import); a
+  star for a model that has since been retired, or a provider that has lost its
+  key, is not offered.
+- **Regenerate with another model.** The **▾** beside *Regenerate* under the
+  last reply opens a list of the models that can answer (favourites first, no
+  prompts for missing keys) and asks again with the one you pick. The new reply
+  names the model that wrote it, and that model becomes the selected one, so the
+  next message doesn't go somewhere you just moved away from.
+
+### Look, feel and accessibility
+
+- **Theme.** System (follows your OS and changes with it, live), Dark or Light.
+  It is applied by a tiny script before the page first paints, so a light theme
+  doesn't start with a dark flash while the app loads. Code blocks stay dark in
+  both themes.
+- **Text size and density.** Four text sizes for messages and the message box
+  (the sidebar and controls keep theirs — use your browser's zoom to enlarge
+  everything), and a compact density that tightens messages and the chat list.
+- **Remembered per device**, in the browser's localStorage, not in Settings: a
+  phone and a desk monitor want different answers. So these are not part of
+  Settings export/import.
+- **Resizable chat list.** Drag its edge between 220 and 480 px. It is a real
+  separator too: focus it and use the arrow keys (Shift for bigger steps),
+  `Home`/`End`, or `Enter` to reset.
+- **Keyboard.** `?` lists every shortcut (the list is generated from the same
+  data the tests press). The first `Tab` stop is a *Skip to the message box*
+  link. Every control shows a focus ring. Dialogs take focus when they open,
+  keep `Tab` inside them, and give focus back to what opened them when they
+  close.
+- **Screen readers.** The page has landmarks (the chat list, the main area, the
+  conversation as a labelled log). Streaming text is not read out character by
+  character; a polite status line announces when a reply starts and when it
+  finishes. Message actions that appear on hover are always shown on touch
+  screens.
+- **Colour.** Every text colour is at least 4.5:1 against the surfaces it sits
+  on, in both themes — a unit test reads the palette out of `globals.css` and
+  checks it. (The old dimmest grey measured 3.1–3.5:1; it was brightened. White
+  text on the accent fill is 5.9:1; the fill is now a deeper blue than the
+  bright accent used for outlines and text.)
+- **Reduced motion.** Respected, including the smooth scroll-to-latest.
+- **Messages and colour** (Settings). A typeface for messages and the message box
+  — sans-serif, serif, monospace, or an *easy to read* face (Verdana-style, with
+  open spacing; code stays monospaced). A **highlight colour**: sky (the
+  default), violet, emerald, rose or orange. Each has a bright variant for dark
+  surfaces and a deeper one for light, and a unit test holds every one to 4.5:1
+  on every surface its text is drawn on, 4.5:1 for white text on its button fill,
+  and 3:1 for its borders — and checks that the stylesheet carries exactly the
+  values in `lib/accents.ts`. **Width** of the conversation (narrow, normal,
+  wide), the **buttons under messages** always showing instead of on hover,
+  and **folding long code** (over 20 or 40 lines, with a button that says how
+  many are hidden). All apply at once and are remembered per device; a small
+  script in the page head sets them before first paint, and a test runs it
+  against the real code for every value.
+- **Privacy blur.** *Blur messages until I point at them* is for working where
+  others can see your screen. Hovering a message — or tapping or tabbing to it,
+  since a phone has no hover — lifts the blur on that one only. (Copying still
+  works; exports aren't blurred.)
+
+### Command palette, search and housekeeping
+
+- **Command palette** — `Ctrl/⌘+Shift+P` (or `/palette`). One box for every
+  action (new chat, settings, usage, pictures, saved, trash, inbox, voice, focus
+  timer, theme, blur, exports, the sandbox if it is on), the things to do with
+  the chat you're in (find, about, notes, instructions, download as a page or
+  Markdown), every chat by title, and models (your favourites and the current
+  provider's). Words typed must all appear — as the start of a word if possible,
+  otherwise inside, otherwise as letters in order (`nwch` finds *New chat*) — and
+  the closest ranks first.
+- **Search settings.** The box at the top of Settings shows only the sections that
+  mention what you type, and says how many are left.
+- **About this install.** *Copy diagnostics* puts a summary on the clipboard for a
+  bug report: versions, counts, which gates (computer access, self-editing,
+  password, network) are open, which providers are ready, this browser, and a
+  few settings. It is built from a short fixed list of facts, so what can appear
+  is decided in `lib/diagnostics.ts`: **no API keys, no addresses, none of your
+  chats, notes, instructions or prompts**, and the data folder is shortened to its
+  last two parts. A test feeds it keys and personas deliberately and checks they
+  don't come out.
+- **Reset this browser.** Clears everything this app keeps in the browser — look,
+  layout and behaviour choices, unsent drafts, the last model — and reloads.
+  Only keys starting `jarvis.` are touched (nothing belonging to other sites), and
+  your **Settings** (API keys pasted there, instructions, saved prompts,
+  favourites) are kept unless you tick *Also forget my Settings*.
+- **Printing.** `Ctrl/Cmd + P` prints only the conversation: no chat list,
+  message box, buttons or canvas; black on white whatever the theme; long
+  messages are unfolded; a message isn't split across pages when avoidable.
+- **Installable.** A web app manifest and icons make Chrome and Edge offer
+  *Install*, and phones *Add to Home Screen*; it then opens in its own window.
+  The manifest and icons are served without a login (a browser fetches them
+  without your session cookie). There is deliberately **no service worker**: an
+  installed copy that cached the app would keep running an old build after you
+  update the server, and the app is useless without the server anyway.
+  Installing needs `localhost` or HTTPS. `npm run icons` redraws the icons.
+- **Offline banner.** A strip across the top when your browser is offline, or
+  when the JARVIS server has stopped answering (it restarted, or you left its
+  network) — the second is the common case for something self-hosted, and the
+  browser's own online flag can't see it, so a small request to `/api/health`
+  every 20 seconds (and when you return to the tab) does. Two failures in a row
+  are needed before it shows.
+
+Model lists are fetched live from each provider, so a deprecated model never
+leaves you stuck (Groq retired its Llama 3.x IDs in June 2026 — a hardcoded
+list would have broken silently).
+
+## 4. Tools
+
+JARVIS can call tools while answering, rather than guessing. Every call is
+shown in an expandable trace under the reply — the tool name, the exact
+arguments, the raw result and how long it took. Nothing runs invisibly.
+
+Shipped so far:
+
+| Tool | What it does |
+|---|---|
+| `web_search` | Searches the web for current information |
+| `fetch_url` | Reads a page in full, as text |
+| `calculate` | Arithmetic via a real parser — and unit conversion: `5 km to miles`, `72 F in C` |
+| `get_time` | The current date, which a model cannot know on its own |
+| `generate_image` | Draws a picture, or edits one — only offered with a NanoGPT key |
+| `code_read` / `code_edit` / `code_check` | Its own source, in the sandbox — only with `JARVIS_ALLOW_SELF_EDIT=1` |
+| `remember` / `recall` / `forget` | Durable memory across conversations; `recall` also searches past chats |
+| `list_files` / `read_file` / `write_file` | Files in the workspace — writes need your approval |
+| `run_command` | Shell commands in the workspace — needs your approval |
+
+### Search backends
+
+Tried best-first, so search works with **no configuration at all** and gets
+better if you add a key:
+
+| Backend | Setup | Notes |
+|---|---|---|
+| **Tavily** | `TAVILY_API_KEY` — 1,000/mo free, no card | Best quality: returns extracted content, not raw links |
+| **SearXNG** | `SEARXNG_URL` — no key | Private, self-hostable. See the caveat below. |
+| **DuckDuckGo** | Nothing | Works immediately. Unofficial scrape, so it can break. |
+
+> **SearXNG caveat:** most *public* instances disable the JSON API, so you will
+> usually get a 403 unless you run your own:
+> `docker run -d -p 8080:8080 searxng/searxng`, then enable `json` under
+> `search.formats` in its `settings.yml`.
+
+How the loop works: the model may request tools, they run **server-side**,
+their results go back into the conversation, and the model answers with them.
+That repeats up to **5 rounds**, then tools are withheld so it has to conclude.
+
+Two things worth knowing:
+- **Each round is another API request.** A 3-round answer costs 3 requests
+  against your free-tier limit. The cap exists so a loop cannot drain a quota.
+- **Not every free model supports tools.** If one rejects them, the answer is
+  automatically retried without tools and the UI tells you.
+
+Turn the whole thing off in **Settings → Tool use**.
+
+Adding a tool is one file in `lib/tools/` plus a line in its registry — the
+same pattern as adding a model provider.
+
+### Why the network tools are locked down
+
+`fetch_url` lets a *language model* choose a URL that *your server* then
+requests — with your API keys sitting in the same environment. Unguarded, that
+is a confused-deputy hole: `http://169.254.169.254/` would hand over cloud
+credentials, and `http://localhost:3000/api/chats` would read your own private
+conversations back to the model.
+
+So `lib/tools/net-guard.ts` resolves DNS and rejects loopback, private ranges,
+link-local (which is where cloud metadata lives), CGNAT and multicast; allows
+only http and https; follows redirects **manually, re-checking every hop**
+(a public host answering `302 Location: http://169.254.169.254/` is the
+standard bypass); and caps body size, timeout and redirect count.
+
+`calculate` gets the same treatment for the same reason: it uses a hand-written
+shunting-yard parser, never `eval`, because the expression comes from a model.
+
+## 5. Memory
+
+JARVIS keeps facts between conversations — your name, your preferences, what
+you're working on. It decides what's worth storing, and you can see and edit
+all of it in **Settings → Memory**.
+
+Everything lives in `data/memory.json`, one readable file. Memory you can't
+inspect is memory you can't trust, so hand-editing and deleting are
+first-class rather than hidden.
+
+Relevant entries are injected into the system prompt each turn, scored by
+keyword overlap and recency inside a token budget. Tag an entry `always` and
+it's present in every conversation regardless of topic — that's how something
+like your name stays available. No embeddings: for a few hundred personal
+facts, keyword matching is accurate enough, costs nothing, and you can see
+exactly why something was recalled.
+
+### Searching, tagging and moving memory
+
+In **Settings → Memory**:
+
+- **Search** looks in the text and the tags; every word you type must appear
+  somewhere in the entry, in any order. **Tag chips** filter to one tag (with
+  how many entries carry it); choosing a chip again clears it.
+- **Tags** are shown on each entry and edited beside its text, separated by
+  commas. (Editing an entry's words used to wipe its tags — including `always` —
+  because the editor didn't send them back; fixed, and the API now leaves tags
+  alone unless a request carries some.)
+- **Export** downloads one JSON file (`jarvis-memory-YYYY-MM-DD.json`) with every
+  entry's text, tags and dates — and nothing about this install (no ids, no chat
+  ids).
+- **Import** adds the entries from such a file, or from a plain list of strings.
+  It never edits or removes what is already remembered; an entry that says the
+  same thing as one you have (ignoring capitals and spacing) is skipped; new ids
+  are always generated, so a file can't overwrite an entry by guessing its id;
+  text and tags are cleaned and bounded; a file may hold up to 2,000 entries and
+  memory up to 5,000. The result says what was added, what was skipped and why,
+  and **how many of the new entries are tagged `always`** — that tag puts an
+  entry in every chat's prompt, so it is worth a look after importing a file
+  from someone else. (What `always` entries may cost per request is capped, as
+  before.)
+
+### Tidying memory
+
+- **Remember from a message.** *Remember* under any message opens a small form
+  offering the words you had **selected** in it — or else the start of the
+  message as one plain line — to shorten or reword before it is kept (a memory is
+  read into every chat it is relevant to, so short ones cost less). *Always keep
+  in mind* tags it `always`. Saving the same words twice is noted as already
+  known, not added again.
+- **Facts that run out.** Give an entry a *Forget after* date (editing it, or
+  when adding): from then on it is **left out of the prompt** — pinned or not —
+  and the list shows *(expired)* or *(expires in 5 days)*. Nothing is deleted
+  for it; clear the date to make it last again. Expiry travels in exports.
+- **Add many.** Paste lines — bullets and numbers are fine, `#tags` at the end of a
+  line become its tags — up to 100 at a time. Lines already remembered, or
+  repeated in the paste, are skipped, and the result says how many and why.
+- **Duplicates.** *Duplicates* finds entries that say the same thing — identical
+  ignoring capitals and spacing, or sharing nearly all their words (three at
+  least) — and offers to merge each group: the newest wording is kept, everyone's
+  tags are joined, the rest go. Nothing merges until you press it.
+
+## 6. Attachments
+
+Drag a file onto the composer, paste a screenshot, or use the clip button.
+
+| Type | What happens |
+|---|---|
+| **Images** | Sent to a vision model. Groq's is `qwen/qwen3.6-27b`. |
+| **PDFs** | Text extracted server-side via `unpdf`. Scans need OCR and will say so. |
+| **Text & code** | Read inline, truncated to fit the context window. |
+
+Two limits worth knowing, both from Groq's free tier: **max 3 images per
+message**, and **1,000 vision requests/day** — the tightest quota in the app.
+Attaching an image while on a non-vision model doesn't fail; the image is
+described in text instead, and you're offered a one-click switch.
+
+Images are dropped from a conversation after the turn they arrive in. Keeping
+base64 payloads in every subsequent request would exhaust both the context
+window and that daily quota.
+
+## 7. Voice
+
+Press the waveform button (or **Ctrl/Cmd+J**), say **"Hey JARVIS"**, and it
+answers *"Hey sir, how can I help you today?"* — then listens for your question,
+answers it out loud, and shows the full reply on screen.
+
+The mic button next to it skips the wake word and just records, for when you
+don't feel like talking to your computer in front of people.
+
+### The voice
+
+**Kokoro** is the default — an 82M-parameter Apache-2.0 model that runs
+entirely in your browser, on WebGPU where available. It sounds close to a
+cloud service and costs nothing, forever: open weights, no account, no key,
+nothing that phones home, and it keeps working offline.
+
+The trade is a one-time model download, cached by the browser afterwards. Pick
+the size in **Settings → Voice**:
+
+| Quality | Download | Notes |
+|---|---|---|
+| Compact | ~50MB | Fastest to get going, slightly rougher |
+| **Balanced** (default) | ~86MB | Recommended |
+| Best | ~326MB | Only worth it if the smaller builds disappoint |
+
+Bigger is not automatically faster. If your GPU offloads part of the model to
+the CPU — ONNX Runtime says so in the console when it happens — the smaller
+build can be quicker in practice.
+
+Eleven voices, American and British, plus a speaking-rate slider (Kokoro's own
+default pace is unhurried; 1.1× sounds more like conversation). There's a Test
+button for both.
+
+If the model fails to load, speech falls back to the browser voice and tells
+you why — losing the nicer voice is annoying, losing voice entirely is broken.
+
+### It speaks while it thinks
+
+Replies are spoken sentence by sentence as they are generated, so JARVIS
+starts talking about a second in rather than after the whole answer is
+written. Each sentence is generated **while the previous one is still
+playing**, so there's no synthesis pause between them — without that overlap
+every sentence carries its own generation delay, and a long reply crawls.
+
+Voice mode shows time-to-first-audio and per-sentence synthesis time, so if it
+ever does feel slow you can see where the time is going.
+
+That also fixed a real bug: **long replies used to go unspoken entirely.**
+Three things caused it — the text was clipped at 1,200 characters, a watchdog
+gave up after 60 seconds, and Chrome silently drops oversized utterances. All
+three are gone now that speech is chunked per sentence, and there's a
+regression test asserting a 40-sentence reply is spoken in full.
+
+### It knows when you've stopped talking
+
+Turn-taking uses **Silero VAD**, a neural speech detector (MIT, ~2MB, local),
+rather than a loudness threshold. A threshold can't tell a voice from a fan,
+so a noisy room kept it listening and a pause mid-sentence read as "done".
+
+It also means **barge-in only triggers on actual speech** — talk over JARVIS
+and it stops immediately, but a door slam no longer interrupts it.
+
+### The pipeline
+
+```
+mic → local ONNX wake word → greeting → Silero VAD hears you finish
+    → Groq Whisper → the normal chat path → reply streams
+    → spoken sentence by sentence as it arrives, locally by Kokoro
+```
+
+Spoken questions go through the *same* path as typed ones, so they save into
+the same chats and can use tools — ask it to search the web out loud and it
+will.
+
+### Why the wake word runs locally
+
+An always-on wake word means an always-on microphone. Chrome implements the
+Web Speech API by **streaming your microphone to Google's servers**, so an
+assistant built on it would upload your room continuously.
+
+Instead the detection runs in your browser with openWakeWord's pretrained
+`hey_jarvis` model (~200k training clips) on the ONNX runtime. Your audio
+never leaves your machine until the wake word fires — only the question after
+it is sent, and only to Groq for transcription.
+
+It also dodges a compatibility trap: Web Speech *recognition* is disabled in
+Firefox, but `speechSynthesis` is not. Doing detection with ONNX and
+transcription with Whisper means voice works in Firefox too.
+
+### What it costs
+
+| Piece | Where it runs | Cost |
+|---|---|---|
+| Wake word | Your browser | Free, forever, offline |
+| Speech to text | Groq Whisper | Free — 2,000/day |
+| **Speech out (default)** | **Kokoro, your browser** | **Free forever, offline** |
+| Speech out (instant) | Your browser | Free, no download, robotic |
+| Speech out (optional) | Groq | Free tier |
+
+### Controls
+
+| | |
+|---|---|
+| Enter voice mode | `Ctrl/Cmd+J`, or the waveform button |
+| End the conversation | Say "stop" or "goodbye", or press `Esc` |
+| Interrupt it talking | Start talking, or press `Space` |
+| Continuous vs single | Toggle at the top-left of voice mode |
+
+Continuous keeps listening after each answer; single-question goes back to
+waiting for the wake word. **Settings → Voice** changes the greeting, the
+speech engine and voice, and the wake-word sensitivity — raise it if JARVIS
+wakes up on its own, lower it if it does not hear you.
+
+### When it can't hear you
+
+Open voice mode and look at the two bars under the orb — they separate the two
+possible faults in one glance:
+
+| What you see | What it means |
+|---|---|
+| **Input bar flat while you talk** | Audio isn't reaching the page. Wrong input device, muted mic, or permission denied. |
+| **Input bar moves, score stays 0.00** | The mic is fine; the wake word isn't matching your voice. Hit **Calibrate**. |
+| **Neither bar, an error message** | It will name the cause — permission, no device, or an insecure page. |
+
+**Calibrate** listens for six seconds while you say "Hey JARVIS", reports the
+best score it saw, and sets the sensitivity just under it. That is almost
+always the fix when the model can hear you but never triggers — the 0.5
+default is strict for some voices and microphones.
+
+Say it as **two clear words**, close to the mic. And if you just want to skip
+the wake word entirely, the microphone button records immediately.
+
+The readout also shows `N frames · N scored`. If `scored` lags far behind
+`frames`, this machine can't run inference fast enough to keep up — audio is
+still buffered continuously so detection keeps working, just less often.
+
+### Using it from another device
+
+`localhost` counts as a secure context, so the microphone works there with no
+certificate. Any other address does not — browsers silently withhold mic
+access over plain `http://`, which is why voice appears to do nothing when you
+open the app by its IP.
+
+```bash
+npm run dev:https      # self-signed cert, good for this machine
+```
+
+For a phone or another computer, a self-signed certificate won't be trusted.
+A free tunnel gives you a real HTTPS URL:
+
+```bash
+cloudflared tunnel --url http://localhost:3000
+```
+
+### First-run setup
+
+Voice needs ~20MB of runtime assets (the ONNX runtime wasm, the wake-word
+models and the speech detector). `npm install` fetches them automatically via
+`scripts/setup-voice.mjs`. Kokoro's ~86MB of weights download separately on
+first use and are cached by the browser.
+If that was offline, run `npm run setup:voice`. They are deliberately not in
+git. Everything except voice works without them.
+
+## 8. Things JARVIS does without being asked
+
+Everything above is a reply. A box in your room that only ever answers is
+half an assistant — the other half is it speaking first.
+
+Ask for it in words: *"remind me to take the bins out at seven"*, *"every
+morning at eight, check the weather and tell me if I need a coat"*, *"check
+that page every half hour and tell me if it changes"*. Each becomes a stored
+task, and when it comes due JARVIS is asked its own prompt, then **says the
+answer aloud and puts it on the room display**.
+
+Three shapes, deliberately not cron:
+
+| | |
+|---|---|
+| **once** | a single time — a reminder |
+| **every N minutes** | a watcher |
+| **daily at HH:MM** | a briefing |
+
+Cron is a parser, a grammar and a class of bugs, and it buys nothing here.
+Anything genuinely cron-shaped is better as two tasks.
+
+**Settings → Scheduled** lists them with what each one last said, and lets you
+pause or cancel. That panel always works, even when asking JARVIS to stop
+doesn't — which is exactly when you need it.
+
+**Start from a template** under the list: *Morning briefing* (the date, then the
+headlines — about a topic if you give one), *Evening review*, *Bedtime nudge*,
+*Daily reminder* (say what), *Drink water* and *Keep an eye on a topic*. Pick
+one, set the time or how often, fill in anything it asks, and it is scheduled —
+the same stored task you'd get by asking in words, written as an instruction to
+JARVIS and short enough to be read aloud. The ones that repeat say that each run
+spends one request.
+
+The schedule is a plain file at `data/schedule.json`, readable and
+hand-editable, like `data/memory.json`.
+
+> **A scheduled task needs a key in `.env.local`.** It runs with no browser
+> open, so a key pasted into Settings — which lives in that browser's
+> localStorage — cannot be reached. JARVIS says so plainly rather than failing
+> with a puzzling 401 at three in the morning.
+
+> The voice tools for this appear only where an announcement can land: the
+> appliance, or an install with the kiosk page connected. They cost 262 tokens
+> of schema on every request, and a laptop with no speaker shouldn't pay for a
+> reminder it can't deliver. The panel and the API work everywhere regardless.
+
+### Suggestions, interruptions and mood
+
+Scheduled tasks speak when *you* told them to. This is JARVIS noticing things
+on its own — that a chat has got too long to keep everything, that the model
+you're using has failed twice in a row, that it is two in the morning — and
+saying so, in a way you can turn down, silence, or switch off entirely.
+
+**What it can bring up** — each one a small card, bottom right, that never
+takes keyboard focus, waits while you are typing or a reply is arriving or a
+dialog is open, and goes away by itself if you ignore it:
+
+| | |
+|---|---|
+| **A chat is getting long** | the context meter is past 85% — offers *Summarise it* (fills the message box) or *Start fresh* |
+| **A provider keeps failing** | two replies in a row failed or fell back — offers a model that is ready, one you starred first |
+| **Time for a break** | about an hour and a half of steady work |
+| **It's late** | after 23:00, once a night, if you are still going — offers a summary for tomorrow |
+| **Waiting for your OK** | an approval has gone unanswered for 45 seconds |
+| **Welcome back** | after four hours away — offers a recap of the last chat |
+| **Remember that?** | you said something lasting about yourself ("my name is Dana", "I'm allergic to peanuts") — offers to save it, *only if you press the button* |
+
+**Nothing happens on a card's own.** Its buttons put words in the message box
+(you read them and press Enter), take you to a chat, pick a model, or save a
+note — each is something you could do yourself. Nothing is ever sent for you.
+And noticing costs nothing: these are plain checks in your browser, with no
+model call and no quota.
+
+**Making it stop** is most of the design, so there are several ways:
+
+- **Settings → Initiative → How often**: *Quiet* (nothing pops up; cards wait in
+  the inbox behind a badge), *Balanced* (the default — at most three an hour) or
+  *Chatty* (eight). The master switch turns it all off.
+- **Every card has *Stop suggesting this***, and each kind has its own switch.
+- **Wave one away and it takes the hint**: that kind stays quiet for an hour, and
+  the third wave-away in a week switches it off — it tells you when it does, and
+  *Forget what it learned* brings them back. *Using* a card forgives.
+- **Focus timer** (the stopwatch in the title bar): 15, 25, 45, 60 minutes or
+  until you stop it. Nothing pops up; what would have waits in the inbox, and a
+  card tells you when the time is up.
+- **After a hard message** (below) cards stay away for hours.
+
+**The inbox** (the bell) is where everything that wasn't shown ends up: cards
+held back by focus or by *Quiet*, and what the server has to say — **the answer
+a scheduled task came back with at eight this morning**, or **"Daily backup
+failed"**, which used to go nowhere. A badge counts what's unread, and a card
+announces a result when you open JARVIS (and again every thirty seconds while it
+is open). Only the server can put something there; a page can mark items read or
+clear them, but cannot make JARVIS say something. It is a file, `data/inbox.json`.
+
+**Louder, only if you ask**: a desktop notification when the tab is in the
+background (the browser asks permission), and reading cards aloud with the
+browser's voice. Quiet hours (22:30–07:00 by default) silence both. The tab title
+also shows a count while you are in another tab.
+
+**How it seems to be doing.** A dot and a word beside the title — *calm*,
+*focused*, *pleased*, *delighted*, *concerned*, *sorry*. To be plain about what
+that is: **a summary, not a feeling.** Two numbers move when you 👍 or 👎 a
+reply, thank it, send a reply back for another try, or a request fails, and
+drift back to calm with a ten-minute half-life. It colours the wording of a
+card ("Hey — that's 95 minutes without a break" instead of "You've been at it…")
+and nothing else. Hide it under Settings → Initiative.
+
+**Matching your tone.** If a message sounds frustrated ("this is broken again"),
+rushed ("ASAP"), or low ("I feel so hopeless"), the reply is told — in one
+sentence, for that reply only — to be more direct, shorter, or gentler. The
+reading is a handful of phrase patterns run in your browser; it is not stored or
+logged, and the server is sent only the *name* of the tone and looks the sentence
+up itself. It will be wrong sometimes, in English only, and the cost of being
+wrong is a slightly shorter or warmer reply. A message about self-harm gets a
+gentle reply that points toward someone to talk to, and **silences cards for six
+hours**. **This is not a safety system** — it doesn't detect danger and it
+doesn't replace a person. Turn it off under *Match my tone*.
+
+**Follow-ups and ratings.** Under the last reply, up to three buttons offer a next
+question ("Explain how it works", "Add error handling", "Shorter, please") — shapes found in the
+reply, filling the message box, never sent. Replies ending in a question of their
+own get none. 👍/👎 on any reply feed the mood and the counts under Usage → Chats.
+
+**What it can't do.** Cards live in the page, so JARVIS can only interrupt while
+JARVIS is open in a browser tab; with the browser closed, a scheduled result
+waits in the inbox for your next visit. (Pushing to a closed browser would need a
+service worker and a push service, and this doesn't pretend to.) The settings,
+mood, focus timer and the last fifty cards (including the text of a "Remember
+that?" offer) are kept in this browser's localStorage, so a phone and a desktop
+differ — *Clear suggestion history* wipes the cards — while the inbox is per
+server.
+
+### Finding your way around a chat
+
+A long conversation is only useful if you can get back into it. Under the
+**chat tools** button in the title bar (and on the keyboard):
+
+- **Find in this chat** — `Ctrl/Cmd+Shift+F`. Every match is marked, with "3 of
+  12", `Enter` / `Shift+Enter` to move between them. It reads the page as
+  rendered, so code and tables are searched too, but not the buttons under a
+  message. (Chat *search* in the sidebar is the one across every chat.)
+- **Jump to a question** — your questions in order, one line each; click one to
+  go there. `Alt+↑` / `Alt+↓` step between your messages from anywhere except a
+  message box with something typed in it.
+- Under each message: **Quote** starts your next message with that one quoted
+  (below whatever you'd already typed), **Copy text** copies a reply as plain
+  words — no asterisks or hashes, links as "text (address)", code kept exactly —
+  and a long reply says how long it takes to read.
+- **Download as a web page** — one self-contained `.html` file with its own
+  styles, light or dark to match the reader. Everything in a conversation is
+  escaped, so opening it can't run anything, and it is sent with a policy that
+  forbids scripts anyway.
+
+**Several chats at once**: the tick-box button beside *New chat* lets you pick
+chats and archive, tag or trash them together (trashed ones can still be
+restored for 30 days).
+
+**In and out** (Settings → *Your chats, in and out*): every chat as its own
+dated `.md` file in one zip, and **import** a chat from a JSON export. An import
+is always a *new* chat with a new id — it can't replace or merge into one you
+have — and the file is checked field by field, so a hand-edited one can add a
+conversation and nothing else. Picture bytes are never in exports, so they are
+not in imports either.
+
+## 9. Letting JARVIS use your computer
+
+Off by default. Turn it on with `JARVIS_ALLOW_COMPUTER=1` — an environment
+variable, not a setting, so nothing with a browser session can enable it.
+
+When on, JARVIS can list, read and write files in `./workspace` and run
+commands there. Three layers stand between the model and your machine:
+
+**Containment.** Every path is resolved with `realpath` and re-checked for
+containment *afterwards*. That catches `../` traversal and the subtler case a
+string-prefix check misses: a symlink inside the workspace pointing out of it.
+Tested against both, plus absolute paths, null bytes, and a sibling directory
+sharing the root's name prefix.
+
+**Approval.** Writes and commands don't execute. You get a card showing the
+exact command or the full file content, and nothing happens until you approve.
+No answer within five minutes counts as a denial — failing open would mean a
+forgotten tab quietly approving things.
+
+**A scrubbed environment.** Commands run with every API key removed. Without
+that, `env` hands out your Groq, Cerebras and Tavily keys, which is worse than
+anything it could do to a file. Verified: `env | grep -c API_KEY` returns 0.
+
+### Task runs — "Work on this"
+
+An ordinary turn gets **four tool steps**. That is enough to answer a question
+and not nearly enough to do a job: read a file, edit it, run the test, read the
+output, and you are out, mid-task.
+
+Pressing **Work on this** instead of Send starts a *task run*, which raises the
+ceiling and pins your instruction so a long run cannot forget it. Two things
+are deliberate about it:
+
+**It is opt-in per message, never inferred.** A longer run spends more of your
+quota and writes more to your workspace. That is a decision, so it is a button,
+not a heuristic that fires when the model asks for a sixth round.
+
+**The ceiling depends on who is answering.** A tool round is a whole upstream
+request, so what it costs varies enormously — nothing on a flat-rate
+subscription, most of a minute on Groq's 6,000 tokens. NanoGPT, Arli and
+Featherless get 25 rounds; Gemini and Mistral 12; Groq stays at 5, because a
+long run there would spend the minute before it got anywhere.
+
+During a run the tool trace reads **"step 7 of 25"**, so a run going nowhere is
+visible rather than merely felt, and Stop ends the whole thing.
+
+Approvals change shape too. Twenty steps meant twenty cards, and a card denies
+on timeout — so one missed click derailed the run. The first card now also
+offers **"Allow writes for this run"**. It covers writes only, expires when the
+turn ends however it ends, and **never covers commands**: a write cannot leave
+the workspace, and a shell command's reach is bounded by nothing this process
+controls.
+
+> Small models drift badly over twenty rounds in a way they don't over four.
+> Use the picker's **"Can this model use tools?"** probe before handing one a
+> long run.
+
+Reads are unattended. A handful of catastrophic commands (`rm -rf /`, `mkfs`,
+fork bombs) are refused outright even with approval.
+
+### Letting JARVIS edit its own code
+
+```bash
+JARVIS_ALLOW_SELF_EDIT=1   # in .env.local, then restart
+```
+
+JARVIS can then read and change its own source: any page, component, tool,
+provider, the voice pipeline, anything in `app/`, `components/`, `lib/`,
+`test/`, `scripts/` or `public/`. Ask it — "add a tool that tells jokes",
+"make the sidebar wider" — and it uses `code_read`, `code_edit` and
+`code_check`. You can do the same by hand from the **Sandbox** button (the
+flask) in the sidebar: every file, an editor, and `+ New` for new files.
+
+**Every change lands in the sandbox first, never in the JARVIS you're using.**
+
+- **The sandbox is a second JARVIS, always running** — a copy of the source in
+  `.sandbox/app`, served by `next dev` on port 3100. It starts with JARVIS,
+  is restarted by itself if it ever stops, and reloads a change within a
+  second or two of it being saved. **Open sandbox** in the panel opens it; a
+  yellow banner marks it, and its chats, memory and schedule are its own.
+  It uses the same installed packages, so nothing is installed twice.
+- **JARVIS asks before each edit**, showing the change as a diff. A change
+  lands only in the sandbox.
+- **Apply** copies the sandbox's changes into JARVIS — after running the type
+  checker and the unit tests on the copy. If they fail it stops; you can
+  apply anyway once you've seen why. JARVIS' current version of every file is
+  saved first, and **Undo** puts it back. **View the changes** under any past
+  apply shows exactly what it changed, file by file, as a diff — also after
+  it has been undone. (The written copy is kept from now on; an older apply is
+  shown from the live file while that is still what it left, and says so when
+  it isn't.)
+- A file you changed in JARVIS since the sandbox was made (a `git pull`, say)
+  is flagged, and Apply refuses rather than overwrite it. **Revert** that file
+  in the sandbox, or **reset** the sandbox to a fresh copy.
+- `package.json` can't be edited here — a dependency change needs `npm
+  install`, which is yours to run. Nor can `.env` files, `data/` or
+  `node_modules/`.
+
+After Apply, `npm run dev` picks the change up immediately. A production
+server (`npm start`) needs `npm run build && npm start` to load it — the panel
+says which.
+
+> The sandbox protects JARVIS from broken code, not your machine from bad
+> code: it's a process on this computer, holding your API keys. That's why
+> self-editing is opt-in and every model edit needs your approval.
+
+## 10. Reaching it from your phone
+
+`npm run dev` listens on **localhost only**. That is deliberate, and it is the
+actual security boundary — `Host` and `X-Forwarded-For` are both set by the
+client and pass straight through, so any "is this request local?" check built
+on headers can be spoofed by anything on your network. Binding to loopback
+can't be.
+
+To reach JARVIS from elsewhere, tunnel it:
+
+```bash
+npm run dev                                    # terminal 1
+cloudflared tunnel --url http://localhost:3000 # terminal 2
+```
+
+You get a real HTTPS URL, which also makes voice work — the microphone needs
+a secure context, and `localhost` only counts as one on the machine itself.
+
+A tunnel rewrites the Host header, so JARVIS then **requires
+`JARVIS_PASSWORD`**. With none set it refuses to serve rather than defaulting
+to open. If you deliberately widen the bind with `npm run dev:lan`, a password
+is mandatory for every request, loopback-looking or not.
+
+**Why not just deploy it?** Vercel's free tier kills a function after 10
+seconds, and a five-round tool conversation blows straight past that. The
+filesystem tools also only make sense on the machine that has your files. One
+local instance behind a tunnel has no timeout, needs no cloud database, and
+keeps your chats in the JSON files they already live in.
+
+## 11. Where your data lives
+
+Chats are JSON files in `./data/chats/`, one per conversation. Pictures JARVIS
+made are in `./data/images/`, each beside a small JSON file with its prompt.
+Memory, scheduled tasks, the usage count and the audit log sit beside them, and
+deleted chats wait in `./data/trash/`. `data/` is gitignored. `JARVIS_DATA_DIR`
+moves all of it.
+
+### Organising chats
+
+The sidebar groups chats by **Today, Yesterday, Previous 7 days, Previous 30
+days** and **Older**, measured from local midnight, with pinned chats on top.
+
+- **Tags** are added from a row's **…** menu — lowercase, hyphenated, up to
+  eight a chat. Click a tag chip under the search box to see only those chats.
+- **Search operators** work in the same box: `tag:work`, `is:pinned`,
+  `is:archived`, combined with each other and with words (`tag:work budget`).
+- **Archive** hides a chat from the list without deleting it. Archived chats
+  stay out of search unless you ask with `is:archived`, and wait under
+  **Archived** at the bottom of the list.
+- **Duplicate** copies a whole chat; **Branch** (under any message) copies it
+  up to that message, so you can ask something different from there. Neither
+  touches the original.
+- **Chat instructions** (the sliders icon in the header) replace your Settings
+  instructions for that one chat — "answer in French", "you're reviewing my
+  essay" — and travel with it into copies and branches.
+- **Export** a chat as Markdown (to read) or JSON (the chat exactly as stored).
+- **Delete moves a chat to the trash**, where it can be restored for 30 days.
+  Only **Delete for good** and **Empty trash**, both asking first, destroy one.
+
+### Notes, colours, order and space
+
+- **Notes.** *Notes about this chat* (the chat tools button) is a private
+  scratchpad kept with the chat: "what I decided", "still to check". It is
+  **never sent to a model** and left out of Markdown and web-page exports; it is
+  in the chat's JSON and in backups.
+- **Colour labels.** The chat's **…** menu has six colours; a dot shows in the
+  list (with a name for screen readers, so colour isn't the only signal). A
+  copy keeps the colour.
+- **Order.** The arrows button above the list cycles *most recent* (grouped by
+  day), *oldest*, *by title* and *longest*; the last three are one flat list,
+  pinned chats first. Also in Settings, along with **compact** — titles only.
+  Remembered on this device.
+- **Storage.** Settings → *Your chats, in and out* shows what each kind of thing
+  takes — chats, pictures, trash, daily backups, memory, the rest — the disk's free
+  space, and the chats that take the most, each with a *move to the trash* button
+  (it asks first, and the trash keeps it for 30 days).
+
+### Backing up and restoring
+
+**Back up** at the bottom of the sidebar downloads all of `data/` as one zip,
+laid out exactly as on disk. API keys are never in it.
+
+**Restore** reads such a zip and **adds what's missing**: a chat, memory or
+picture that already exists is left exactly as it is, so restoring over a
+working install can't lose today's work and restoring twice changes nothing.
+It says what it added and what was already there. The schedule is deliberately
+not restored — tasks that start firing the moment a file lands aren't something
+a restore should do by surprise.
+
+The zip is checked before anything is written: every file's checksum is
+verified (one corrupt file fails the whole restore, leaving nothing half-done),
+only files with the expected names and shapes are used (a zip containing
+`../../.env.local` has that entry ignored), pictures must really be images, and
+an archive that would expand past 500MB, or any file past 50MB, is refused.
+You can also still unzip a backup by hand next to `package.json`.
+
+**Daily backups.** Once a day JARVIS writes the same zip itself, to
+`data/backups/jarvis-auto-YYYY-MM-DD.zip`, and keeps the last seven (the first
+check is a minute after the server starts, then hourly, so a machine that was off
+at the usual time makes today's the first hour it is up). **Settings → Backups**
+lists them with a download link and a **Back up now** button, and **Restore**
+takes any of them. Things worth knowing:
+
+- They leave out pictures by default — seven copies of a gallery is a lot of
+  disk, and chats and memory are the part you can't get back. `JARVIS_AUTO_BACKUP_IMAGES=1`
+  includes them.
+- A backup beside the data doesn't survive losing the disk.
+  `JARVIS_BACKUP_DIR=/mnt/other-drive/jarvis` keeps them somewhere else.
+- `JARVIS_BACKUP_KEEP=14` (1–60) keeps more; `JARVIS_AUTO_BACKUP=0` turns it off.
+- A backup never contains the backups folder (wherever it is), so it can't grow
+  with each run. Only files named exactly like ours are ever deleted when old
+  ones are trimmed, and only names of exactly that shape can be downloaded.
+- Each is written under a temporary name and renamed, so an interrupted one is
+  never mistaken for a good copy; a failure (a full disk) is reported, not a crash.
+
+### What it has spent
+
+The gauge at the top of the sidebar opens **Usage**: for each provider today
+(UTC, when free tiers reset), how many requests went out, roughly how many
+tokens they carried, how many were refused, and whether the provider is being
+skipped for a rate limit right now. Picture requests are counted apart, since
+NanoGPT's 100 a day is its own allowance. The last fourteen days are kept in
+`data/usage.json`.
+
+These are JARVIS' own counts of what this server sent. A provider's dashboard
+can show more if the same key is used elsewhere.
+
+**CSV** in the Usage header downloads that tally as a spreadsheet — one row per
+provider per day (`date_utc, provider, requests, ok, rate_limited, failed,
+tokens_sent_estimated, last_request_utc, last_error`), the fourteen days kept.
+Cells that could be read as a formula are neutralised, as for table copies.
+
+The **Your chats** tab counts the conversations themselves: chats (pinned,
+archived), messages and words by who wrote them, a bar per day for the last
+thirty (on your clock, not the server's), the tools used with how many calls
+failed, and the models that answered. It is computed from the chats on request
+and stores nothing — a thinking model's hidden reasoning isn't counted as words.
+
+### It remembers what was said, not only what was saved
+
+Ask "what was that recipe you gave me last week?" and `recall` searches your
+earlier chats as well as stored memories. It returns the chat's title, date
+and the line that matched. It ranks by how many of the question's meaningful
+words a chat holds, so it works on questions rather than exact keywords.
+
+## 12. Deploying
+
+It runs on Vercel's free tier as-is, with one caveat: **serverless filesystems
+are read-only**, so the file store can't persist there. The app detects this
+and falls back to in-memory storage, meaning chats vanish when the instance
+recycles. For a real deployment, add a cloud driver — `lib/storage/types.ts`
+is a four-method interface and `fs-store.ts` is the reference implementation.
+
+Set your keys as environment variables in the host's dashboard, not in a file.
+
+### Docker
+
+```bash
+docker compose up --build
+```
+
+Runs JARVIS on `http://localhost:3000`, published on the host's loopback only.
+Chats, memory and pictures live in `./data` on the host, so rebuilding never
+touches them; API keys come from `.env.local`, never from the image. The
+container runs as a non-root user and reports its health at `/api/health`.
+
+> The Dockerfile has not been built by its author — the machine it was written
+> on had no Docker daemon — though the compose file is syntax-checked. If a step
+> fails, the error will say which; the file is short.
+>
+> Leave `JARVIS_ALLOW_SELF_EDIT` off in a container: what it applies would
+> vanish with the container.
+
+### Health check
+
+`GET /api/health` returns `{"ok":true,"uptimeSeconds":…}` and nothing else, for
+uptime monitors and container health checks.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs the type check, the unit and provider tests and
+a production build on every push and pull request. It skips the voice-model
+download and the browser suites, which need a real browser and the mock
+provider — run those by hand, as described under Testing.
+
+## 13. Layout
+
+```
+app/
+  api/chat/         streaming proxy — SSE, provider fallback, persona injection
+  api/models/       live model lists per provider
+  api/chats/        chat CRUD
+lib/
+  agent.ts          the tool loop — call, run tools, feed back, repeat
+  auth/             password session, signed cookie
+  memory/           durable facts, relevance scoring, prompt injection
+  tools/fs/         workspace containment, approval gate, file and shell tools
+  sandbox/          self-editing: the sandbox copy, its server, checks, apply/undo
+  initiative/       suggestions and interruptions: rules, the gate, mood, tone, follow-ups
+  voice/            wake word (local ONNX), speech to text, speech out
+  providers/        registry + one OpenAI-compatible adapter for all of them
+  tools/            tool definitions, registry and runner
+  storage/          ChatStore interface, filesystem and memory drivers
+  codeblocks.ts     fenced blocks -> canvas artifacts -> preview documents
+  tokens.ts         context-window trimming
+components/         Workspace (state) + Sidebar / ChatPane / CodeCanvas
+test/               mock provider, unit tests, browser e2e
+```
+
+## Testing
+
+```bash
+npm test                # unit + containment/auth suites
+npm run test:providers  # keyless providers, fallback order, request budgets
+npm run test:device     # on-device voice, against the real ONNX models
+
+./test/start-mock.sh                       # fake provider on :8899
+GROQ_API_KEY=test JARVIS_GROQ_BASE_URL=http://localhost:8899/v1 npm run dev
+npm run test:e2e    # drives a real browser against the mock
+npm run test:voice  # voice mode, with a WAV standing in for a microphone
+npm run test:chats  # search, pinning and export
+npm run test:settings  # settings export/import, activity list
+npm run test:organize  # tags, archive, branch, trash, restore-from-backup
+npm run test:composer  # timestamps, saved messages, folding, drafts, up arrow, slash commands
+npm run test:appearance  # theme, text size, shortcuts, resizing, focus, axe scan, print, manifest, offline
+npm run test:models  # persona presets, context meter, favourites, regenerate-with, memory search/export/import, units
+npm run test:extras  # templates, welcome screen, gallery families, usage CSV, daily backups, chat statistics
+npm run test:polish  # command palette, settings search, diagnostics, reset, typeface, accents, width, blur, folding
+npm run test:choosing  # chat info, speeds, model notes, new-chat model, tools off, reply length, no fallback, quieter page
+npm run test:organising  # remember from a message, expiring memory, add many, duplicates, notes, colours, order, storage
+npm run test:writing  # counter, send key, spellcheck, reply style, /model /title /tag /undo, prompt blanks, searching what you sent
+npm run test:reading  # find, outline, jump keys, quote, plain copy, reading time, bulk select, web-page export, import, Markdown zip
+npm run test:initiative  # mood, cards, controls, focus timer, inbox, tone, follow-ups, ratings — takes a minute and a half (it waits for the real scheduler)
+npm run test:security  # login lockout, headers — needs its own server, see the file
+npm run test:sandbox  # self-editing: start with JARVIS_ALLOW_SELF_EDIT=1, see the file
+
+# Pictures, against a production build (next dev would hide the bug it guards):
+npm run build
+GROQ_API_KEY=test JARVIS_GROQ_BASE_URL=http://localhost:8899/v1 \
+  NANOGPT_API_KEY=test JARVIS_NANOGPT_IMAGES_URL=http://localhost:8899/v1/images/generations \
+  npm start
+npm run test:images
+```
+
+`MOCK_NO_AUTH=1` makes the mock reject any request carrying an `Authorization`
+header, standing in for a local Ollama — which is how the keyless path is
+tested without a key existing anywhere.
+
+The mock streams tool calls the way real providers do — `arguments` split
+mid-JSON across chunks — so the reassembly logic is genuinely exercised
+without spending any free-tier quota.
+
+### Adding a provider
+
+Add an entry to `PROVIDERS` in `lib/providers/registry.ts` with its base URL,
+env var name and free-tier limits. If it speaks the OpenAI wire format (most
+do), that's the whole job. Set `requiresKey: false` for a server that
+authenticates nobody.
+
+<a id="running-your-own-model"></a>
+### Running your own model
+
+Free tiers are fast but metered; your own hardware is slow but never runs out.
+That makes a local model the right **backstop** rather than the right default,
+which is how JARVIS treats it: the cloud answers first, and a rate limit rolls
+over to `local` automatically instead of failing.
+
+On the machine doing the work:
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull qwen3:4b
+OLLAMA_HOST=0.0.0.0 OLLAMA_KEEP_ALIVE=-1 ollama serve
+```
+
+`OLLAMA_HOST=0.0.0.0` lets another machine — a Pi running JARVIS — reach it.
+`OLLAMA_KEEP_ALIVE=-1` stops the model being unloaded after five idle minutes,
+which otherwise costs 10-20 seconds on the first question after a gap.
+
+Then point JARVIS at it. Either **Settings → API keys → Self-hosted**, which
+takes any OpenAI-compatible URL and has a Test button that tells you
+immediately whether the machine is reachable — or, to pin it so the browser
+cannot change it:
+
+```bash
+JARVIS_LOCAL_BASE_URL=http://192.168.1.50:11434/v1
+JARVIS_LOCAL_MODEL=qwen3:4b
+```
+
+The key field beside it is optional: a server on your own network
+authenticates nobody, while a host you rent usually issues a key.
+
+Two rules govern that field, both enforced server-side:
+
+- **Only this slot can be repointed from the browser.** The cloud providers
+  cannot, or anyone with a session could aim the Groq slot at a server they
+  control and read the key out of the forwarded request.
+- **A browser-chosen URL never receives the server's key** — only a key typed
+  alongside it. Same reason.
+
+`JARVIS_LOCAL_BASE_URL` always outranks the Settings field, so on a JARVIS
+exposed through a tunnel the endpoint can be nailed down.
+
+**Context and Max reply** sit beside the URL for the same reason. They default
+to 3,500 and 1,024 — sized for a Raspberry Pi — and a hosted endpoint pasted
+into that box deserves to be told it can use more.
+
+#### Serving a specific model from Hugging Face
+
+Ollama only serves what it has packaged. To run an arbitrary repo — a
+community fine-tune, say — use **vLLM**, which exposes an OpenAI-compatible
+server of its own, so JARVIS needs nothing beyond the URL:
+
+```bash
+pip install vllm
+vllm serve <org>/<model> --host 0.0.0.0 --port 8000 --max-model-len 8192
+```
+
+That serves at `http://<host>:8000/v1`, which goes straight into the
+Self-hosted field. Raise Context and Max reply to match `--max-model-len`.
+
+If the repo ships **GGUF** files instead, Ollama can take it directly and you
+skip vLLM:
+
+```bash
+ollama pull hf.co/<org>/<model>:<quant-tag>
+```
+
+**Check it fits before you start.** vLLM wants the weights in VRAM: roughly
+2 GB per billion parameters at fp16, or half that at Q4/AWQ. A 27B model is
+~17 GB quantised, so it needs a 24 GB card — a rented RTX 3090 or 4090, not
+anything with 16 GB of system RAM and an old GPU. The sizing table under
+[Running your own model](#running-your-own-model) is the one that decides
+this, and it does not care how good the model is.
+
+#### Letting the machine sleep
+
+A desktop running all night to answer the occasional question is a waste. Put
+its MAC address in the field under the URL and JARVIS sends a Wake-on-LAN
+packet when it finds the machine asleep.
+
+It never makes you wait. If anything else can answer — a cloud key, any
+provider — the packet goes out and your question is answered immediately by
+something that is already awake; the server is up by the time you ask again.
+Only when the self-hosted slot is your *sole* provider does it pause, and then
+for 25 seconds, which covers a resume from sleep but not a cold boot. If it
+isn't up by then it says so rather than hanging.
+
+**Wake-on-LAN must be enabled in two places on the server**, and neither is on
+by default:
+
+```bash
+# Linux — and make it stick across reboots via systemd or NetworkManager
+sudo ethtool -s eth0 wol g
+ethtool eth0 | grep Wake-on        # should show "Wake-on: g"
+
+# Windows — Device Manager → adapter → Power Management →
+# "Allow this device to wake the computer"
+powercfg /devicequery wake_armed
+```
+
+...plus the BIOS/UEFI setting, usually called **Wake on PCI-E**, **Power On by
+PCI-E** or **Resume by LAN** depending on the vendor.
+
+**It has to be wired.** Wake-on-WLAN exists on paper but needs adapter and
+driver support most desktops do not have, so the server wants an Ethernet
+cable to the router.
+
+The **Test** button in Settings sends a packet when the URL is unreachable and
+a MAC is set — which is the quickest way to find out whether all of the above
+is configured. It reports that the packet *left*, not that the machine woke:
+Wake-on-LAN has no acknowledgement, because a sleeping machine cannot reply.
+
+#### A specific model that only one provider serves
+
+Community fine-tunes usually are not on the big per-token hosts, but they are
+often reachable through **Hugging Face Inference Providers**, which routes to
+whoever does serve them behind one OpenAI-compatible URL:
+
+```
+URL:   https://router.huggingface.co/v1
+Key:   your Hugging Face token
+Model: <org>/<model>:<provider>        e.g. …:featherless-ai
+```
+
+The `:provider` suffix is required — it tells the router where to send the
+request. `:cheapest` picks the lowest price per output token instead.
+
+**Featherless AI** can also be used directly at `https://api.featherless.ai/v1`.
+It bills a flat monthly subscription with unlimited tokens rather than per
+token, which is the shape you want if you keep meeting rate limits.
+
+**Thinking models** — Qwen3, DeepSeek-R1 distills, GLM — open a `<think>`
+block by default, and some providers pass it through inline. JARVIS folds that
+into a collapsed "Thought for N words" section and never reads it aloud, so
+they work in voice mode without narrating their own working-out.
+
+#### Other endpoints worth putting in that field
+
+**Cloudflare Workers AI** — 10,000 neurons/day free, ~80 models, no card. Its
+URL embeds your account id, which is why it is a recipe rather than a
+built-in slot:
+
+```
+https://api.cloudflare.com/client/v4/accounts/<account_id>/ai/v1
+```
+
+with an API token from **AI → Workers AI → Use REST API**.
+
+**DeepInfra** — not free, but `$0.06/M` tokens for an 8B means €20 lasts a
+very long time, with no idle cost and no rate limit worth planning around:
+
+```
+https://api.deepinfra.com/v1/openai
+```
+
+Raise Context and Max reply when you use either; the defaults assume a Pi.
+
+**Sizing it.** Generation speed is bound by memory bandwidth, not cores: every
+token reads the whole weight file out of RAM. So the useful number is
+`bandwidth / model size`, and roughly 60% of theoretical is achievable.
+
+A desktop with dual-channel DDR4 (~42 GB/s) runs a 3B at ~12 tok/s, a 4B at
+~10, an 8B at ~5, and a 14B at ~3. Speech is about 4 tok/s, so **a 4B keeps
+ahead of your own voice and an 8B roughly keeps pace** — that is the ceiling
+for a voice assistant. A Raspberry Pi has around a quarter of that bandwidth
+and is 20x slower again; the Pi should run the voice loop and let a real
+machine run the model.
+
+A discrete GPU only helps if the whole model fits in VRAM. Anything under 6 GB
+holds nothing useful, and CUDA has dropped support for Maxwell-era cards, so an
+old GPU is not worth wiring in — the CPU path is the one that works.
+
+### Free-tier limits, and why requests are small
+
+Providers publish two different numbers and it matters which one binds. Groq's
+*context window* is 96K tokens, but its free tier allows 6,000 tokens a
+**minute** — and the agent loop makes up to five requests per turn, each
+re-sending the whole conversation plus the tool schemas.
+
+So `maxRequestTokens` caps what a single request may cost, separately from
+`maxContextTokens`. Trimming to the window instead would spend sixteen minutes
+of quota on one question, which is what "Groq keeps running out" actually is.
+Raise it with `JARVIS_GROQ_REQUEST_TOKENS` if your account has a higher limit;
+the cost of a smaller budget is that JARVIS forgets earlier turns sooner.
+
+## Will this model actually work?
+
+Open the model picker and hit **"Can this model use tools?"**. It sends one
+request that can only be answered by calling a tool, and reports whether the
+model did, plus how fast it replied.
+
+That question is the one that matters, because tool calling is what moves the
+projector, searches the web and stores a memory. Everything else degrades
+gracefully; tool calling either happens or JARVIS silently does nothing and
+looks broken.
+
+Nothing else catches the important failure. A model that *rejects* the `tools`
+parameter is detected and retried without them. A model that **accepts it and
+then never calls one** — the usual behaviour of a roleplay-tuned fine-tune —
+passes every check there is and just ignores your projector. Check before you
+rely on it, especially with a small model or an unusual fine-tune.
+
+## Images
+
+Drop an image into the chat and JARVIS sends it to the model — if that model
+can see. Vision is per **model**, not per provider, so it is matched against
+the live model id: anything named `-VL`, `vision`, `llava`, `pixtral`,
+`internvl`, `minicpm-v`, `moondream`, `scout` or `maverick`, plus every Gemini
+model, which are all multimodal.
+
+When the chosen model can't see, the image isn't dropped — it arrives as
+`[Attached image: photo.jpg]`, so the model knows one was sent and can say it
+can't see it rather than answering as though nothing was attached.
+
+The matching is deliberately narrow, because the two mistakes are not equal:
+claiming vision a model lacks **fails the request outright**, while claiming
+none still gets you an answer. If a model you know sees isn't being given the
+image, its name is the thing to check.
+
+### Making pictures
+
+With a NanoGPT key — in `.env.local` or pasted into Settings — JARVIS can draw.
+"Draw a lighthouse in a storm" makes one; "make it night-time" edits the last
+one; attach a photo and say "put a hat on him" to edit yours. Ask for a
+portrait or landscape picture and it will be one — if a model refuses that
+size, you get a square one and are told why, rather than an error.
+
+- Pictures are saved to `data/images/` and served from `/api/images/<id>`,
+  behind the same login as your chats. Only a short path goes back to the
+  model — never the image itself, which would be a megabyte of text.
+- Click one in the chat to enlarge it, or use its download button. The
+  **Pictures** button at the top of the sidebar lists every one, to view,
+  download, copy its prompt, send to the room display, or delete.
+- An edit remembers the picture it started from. In the gallery an edit says
+  *Edited from an earlier picture*, an original says *1 edit* (or *3 edits*),
+  and either opens the whole family — the original and everything made from it,
+  oldest first. If the original has since been deleted the edit says so.
+- The model is picked by the server, not the chat model: `JARVIS_IMAGE_MODEL`
+  (default `hidream`), and `JARVIS_IMAGE_EDIT_MODEL` for edits. The oldest
+  pictures are removed past `JARVIS_IMAGE_KEEP` (default 200; 0 keeps all).
+- With no key the tool isn't offered at all, so it costs nothing on the free
+  tiers' per-minute token limits.
+- In voice mode a picture is announced as "picture shown on screen" rather
+  than read out as a URL, and if a room display is connected JARVIS can put
+  it there.
+
+## The room display
+
+JARVIS can put things on a screen — an answer easier to read than to hear,
+code it just wrote, an image — and with a projector on HDMI it can switch the
+projector itself on and off.
+
+The display is just a browser page. On the Pi:
+
+```bash
+chromium --kiosk http://localhost:3000/display
+```
+
+It holds one SSE connection and renders whatever arrives; when there is
+nothing, it shows a clock rather than black, because a black rectangle looks
+exactly like a broken display and someone will go and check the cable.
+
+For projector power:
+
+```bash
+sudo apt install cec-utils
+```
+
+**Then turn HDMI-CEC on in the projector's own menu.** It is off by default on
+most of them and is the single most likely reason power control appears
+broken. Manufacturers each brand it differently — Anynet+, Bravia Sync,
+SimpLink, Viera Link — but it is all CEC. Without it JARVIS falls back to
+blanking the signal with `wlr-randr` or `vcgencmd`, which leaves the projector
+itself running.
+
+Three tools come with it: `show_on_display`, `clear_display` and
+`display_power`. They are registered only when a screen might exist — device
+mode, or a display currently connected — because their schemas cost 287
+tokens on every request and a laptop with no projector should not pay that.
+
+Two rules apply to everything that reaches the wall, since the content is
+model-authored and the display is a browser in your room:
+
+- **Markdown is escaped, never rendered as HTML.** A `<script>` tag from a
+  model arrives as text.
+- **Images must be on this server or a `data:` URI.** An arbitrary URL would
+  make the wall display fetch anywhere, and unlike a tool fetch there is no
+  `net-guard` on the page to stop it.
+
+`display_power` spawns a process, so the model chooses `on` or `off` and the
+command is built from that boolean here — no model-supplied string ever
+reaches a shell, which is why it needs no approval gate.
+
+## Security notes
+
+- Server-side keys never reach the browser; the client only learns *whether* a
+  key exists.
+- The preview iframe runs with `allow-scripts` but deliberately **without**
+  `allow-same-origin`, so model-written code gets an opaque origin and cannot
+  touch this app's DOM, storage, or API routes. Don't add that flag.
+- Chat ids are validated against a strict pattern before touching the filesystem.
+- **Wrong passwords are throttled.** Five wrong guesses from one client lock it
+  out for 15 minutes — even the right password is refused meanwhile — and a
+  higher limit across all clients catches an attacker who rotates the
+  forwarding header. A determined attacker can therefore lock *you* out for a
+  window; that is the price of not letting them guess forever.
+- **Responses carry `nosniff`, frame protection, a same-origin referrer policy
+  and a permissions policy** (microphone for this site only). There is
+  deliberately no Content-Security-Policy: Next's inline scripts and the
+  voice runtime's WebAssembly mean one loose enough to work protects little.
+- **An audit log** (`data/audit.jsonl`, shown under Usage → Recent activity)
+  records sign-ins and failures, every approval or denial, each self-edit apply
+  and undo, and backup downloads. It holds what was decided, never file
+  contents, passwords or keys, and rotates at 2MB.
+
+## License
+
+GPL-3.0
