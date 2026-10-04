@@ -16,6 +16,8 @@ export interface SlashCommand {
   kind: "action" | "text";
   /** For text commands: what goes into the composer. */
   text?: string;
+  /** Needs words after it ("/model fast"): choosing it from the menu fills the box instead of running it. */
+  takesArgs?: boolean;
 }
 
 export const COMMANDS: SlashCommand[] = [
@@ -25,6 +27,10 @@ export const COMMANDS: SlashCommand[] = [
   { name: "export", summary: "Download this chat as Markdown", kind: "action" },
   { name: "instructions", summary: "Edit this chat's own instructions", kind: "action" },
   { name: "theme", summary: "Switch between system, dark and light", kind: "action" },
+  { name: "model", summary: "Switch model — /model fast", kind: "action", takesArgs: true },
+  { name: "title", summary: "Rename this chat — /title New name", kind: "action", takesArgs: true },
+  { name: "tag", summary: "Add or remove tags — /tag work -old", kind: "action", takesArgs: true },
+  { name: "undo", summary: "Take back your last message and its reply", kind: "action" },
   { name: "help", summary: "Show keyboard shortcuts", kind: "action" },
   {
     name: "summarize",
@@ -41,6 +47,7 @@ export interface SlashMatch {
   summary: string;
   kind: "action" | "text" | "prompt";
   text?: string;
+  takesArgs?: boolean;
   /** Whatever followed the command: `/review focus on security` → "focus on security". */
   args: string;
 }

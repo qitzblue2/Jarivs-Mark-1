@@ -17,7 +17,14 @@ export const MAX_PROMPTS = 50;
 export const MAX_PROMPT_TEXT = 8000;
 export const MAX_PROMPT_NAME = 24;
 
-export function normalizePromptName(raw: unknown): string | null {
+/**
+ * Commands added after saved prompts existed. A prompt someone already called
+ * "tag" would otherwise vanish the next time prompts are saved, so on the way in
+ * it is renamed ("tag-prompt") instead of dropped.
+ */
+const ADDED_LATER = ["model", "title", "tag", "undo"];
+
+function slug(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const name = raw
     .trim()
@@ -27,6 +34,11 @@ export function normalizePromptName(raw: unknown): string | null {
     .replace(/[^a-z0-9-]/g, "")
     .replace(/^-+|-+$/g, "")
     .slice(0, MAX_PROMPT_NAME);
+  return name || null;
+}
+
+export function normalizePromptName(raw: unknown): string | null {
+  const name = slug(raw);
   if (!name || COMMAND_NAMES.includes(name)) return null;
   return name;
 }
@@ -38,7 +50,9 @@ export function cleanPrompts(raw: unknown): SavedPrompt[] {
   const out: SavedPrompt[] = [];
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
-    const name = normalizePromptName((item as SavedPrompt).name);
+    let name = normalizePromptName((item as SavedPrompt).name);
+    const wanted = slug((item as SavedPrompt).name);
+    if (!name && wanted && ADDED_LATER.includes(wanted)) name = `${wanted}-prompt`;
     const text = typeof (item as SavedPrompt).text === "string" ? (item as SavedPrompt).text.slice(0, MAX_PROMPT_TEXT) : "";
     if (!name || !text.trim() || seen.has(name)) continue;
     seen.add(name);

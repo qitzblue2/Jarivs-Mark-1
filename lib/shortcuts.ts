@@ -21,6 +21,9 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     items: [
       { keys: ["Mod", "K"], action: "New chat" },
       { keys: ["Mod", "/"], action: "Search every chat" },
+      { keys: ["Mod", "Shift", "F"], action: "Find in this chat" },
+      { keys: ["Alt", "↑"], action: "Jump to your previous message" },
+      { keys: ["Alt", "↓"], action: "Jump to your next message" },
     ],
   },
   {
@@ -28,6 +31,8 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     items: [
       { keys: ["Enter"], action: "Send" },
       { keys: ["Shift", "Enter"], action: "New line" },
+      { keys: ["Mod", "Enter"], action: "Send, whichever way Settings sends" },
+      { keys: ["Mod", "R"], action: "Search what you've sent before" },
       { keys: ["↑"], action: "Recall what you last sent (in an empty box)" },
       { keys: ["↓"], action: "Come back forward" },
       { keys: ["/"], action: "Commands and saved prompts" },
@@ -56,8 +61,8 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   },
 ];
 
-const MAC_LABELS: Record<string, string> = { Mod: "⌘", Shift: "⇧", Enter: "↵", Esc: "Esc" };
-const OTHER_LABELS: Record<string, string> = { Mod: "Ctrl", Shift: "Shift", Enter: "Enter", Esc: "Esc" };
+const MAC_LABELS: Record<string, string> = { Mod: "⌘", Shift: "⇧", Alt: "⌥", Enter: "↵", Esc: "Esc" };
+const OTHER_LABELS: Record<string, string> = { Mod: "Ctrl", Shift: "Shift", Alt: "Alt", Enter: "Enter", Esc: "Esc" };
 
 export function keyLabel(key: string, mac: boolean): string {
   return (mac ? MAC_LABELS : OTHER_LABELS)[key] ?? key;

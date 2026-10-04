@@ -46,7 +46,7 @@ export default function ShortcutsDialog({ open, onClose }: Props) {
           </button>
         </header>
 
-        <div className="max-h-[70vh] space-y-4 overflow-y-auto px-4 py-4">
+        <div tabIndex={0} role="region" aria-label="Shortcuts" className="max-h-[70vh] space-y-4 overflow-y-auto px-4 py-4">
           {SHORTCUT_GROUPS.map((group) => (
             <section key={group.title}>
               <h3 className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-ink-dim">{group.title}</h3>

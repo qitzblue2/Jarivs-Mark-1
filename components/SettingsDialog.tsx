@@ -10,6 +10,7 @@ import PromptsEditor from "./PromptsEditor";
 import AppearanceSettings from "./AppearanceSettings";
 import InitiativeSettings from "./InitiativeSettings";
 import DataSettings from "./DataSettings";
+import PrefsSettings from "./PrefsSettings";
 import PersonaPicker from "./PersonaPicker";
 import AutoBackups from "./AutoBackups";
 import { DEFAULT_GREETING } from "@/lib/voice/session";
@@ -315,6 +316,8 @@ export default function SettingsDialog({
           </section>
 
           <AppearanceSettings />
+
+          <PrefsSettings />
 
           <InitiativeSettings />
 

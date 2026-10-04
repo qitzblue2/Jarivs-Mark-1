@@ -99,6 +99,8 @@ import { findSpans, findLabel, stepMatch, outlineOf, pickJump, quoteText, append
 import { chatToHtml, bodyToHtml, htmlFilename } from "../lib/chat-html";
 import { importChat, MAX_IMPORT_MESSAGES } from "../lib/chat-import";
 import { markdownEntryName, markdownArchiveName } from "../lib/chat-archive";
+import { composerCounts, counterLabel, shouldSend, findModel, applyTagCommand, undoLastExchange, promptVariables, fillVariables, searchHistory, TEMPERATURE_PRESETS, presetOf, nextPreset } from "../lib/composing";
+import { cleanPrefs, DEFAULT_PREFS } from "../lib/prefs";
 import { SentenceSplitter, splitSentences } from "../lib/voice/tts/sentences";
 import { Speaker } from "../lib/voice/tts/speaker";
 import { encodeWav, durationOf } from "../lib/voice/wav";
@@ -3312,6 +3314,74 @@ console.log("\n--- initiative: the live state ---");
   eq("archive: dated, slugged names, never twice the same", [1, 2, 3].map(() => markdownEntryName({ title: "Plan: the trip", createdAt: Date.UTC(2026, 9, 3) }, used)), ["chats/2026-10-03-plan-the-trip.md", "chats/2026-10-03-plan-the-trip-2.md", "chats/2026-10-03-plan-the-trip-3.md"]);
   eq("archive: an untitled one still has a name", markdownEntryName({ title: "!!!", createdAt: 0 }, new Set()), "chats/1970-01-01-chat.md");
   eq("archive: the zip's name carries the date", markdownArchiveName(new Date(Date.UTC(2026, 9, 3))), "jarvis-chats-2026-10-03.zip");
+}
+
+// --- composing: counter, send key, /model, /tag, /undo, blanks, history, style ---
+{
+  console.log("\n--- composing ---");
+  eq("counter: nothing, nothing", [composerCounts(""), composerCounts("  \n ")], [null, null]);
+  eq("counter: words, characters, an estimate of tokens", composerCounts("Hello there, world"), { words: 3, chars: 18, tokens: 5 });
+  eq("counter: wording is singular for one", counterLabel({ words: 1, chars: 1, tokens: 1 }), "1 word · 1 character · ~1 tokens");
+  eq("counter: big numbers get commas", counterLabel({ words: 1200, chars: 7000, tokens: 1750 }), "1,200 words · 7,000 characters · ~1,750 tokens");
+
+  const k = (key: string, mods: Partial<{ shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }> = {}) => ({ key, shiftKey: false, ctrlKey: false, metaKey: false, ...mods });
+  eq("send key: by default Enter sends, Shift+Enter doesn't, and Ctrl/Cmd+Enter does too", [shouldSend(k("Enter"), "enter"), shouldSend(k("Enter", { shiftKey: true }), "enter"), shouldSend(k("Enter", { ctrlKey: true }), "enter"), shouldSend(k("Enter", { metaKey: true }), "enter")], [true, false, true, true]);
+  eq("send key: with Ctrl+Enter chosen, a bare Enter is a new line", [shouldSend(k("Enter"), "mod-enter"), shouldSend(k("Enter", { ctrlKey: true }), "mod-enter"), shouldSend(k("Enter", { metaKey: true }), "mod-enter"), shouldSend(k("Enter", { ctrlKey: true, shiftKey: true }), "mod-enter")], [false, true, true, false]);
+  eq("send key: other keys never send", [shouldSend(k("a", { ctrlKey: true }), "enter"), shouldSend(k("Tab"), "mod-enter")], [false, false]);
+
+  const providers = [
+    { id: "groq", label: "Groq", ready: true, models: ["llama-3.3-70b-versatile", "mock-fast-8b", "mock-smart-120b"] },
+    { id: "other", label: "Other", ready: true, models: ["fast", "tiny-fast-1b"] },
+    { id: "off", label: "Offline", ready: false, models: ["fast-offline"] },
+  ];
+  eq("model: a word finds it", findModel("smart", providers)?.choice, { provider: "groq", model: "mock-smart-120b", label: "mock-smart-120b · Groq" });
+  eq("model: an exact id beats a longer one that contains it", findModel("fast", providers)?.choice.model, "fast");
+  eq("model: a prefix beats a match in the middle", findModel("tiny", providers)?.choice.model, "tiny-fast-1b");
+  eq("model: the runners-up are named", findModel("fast", providers)?.others.map((o) => o.model), ["mock-fast-8b", "tiny-fast-1b"]);
+  eq("model: several words must all match, provider included", findModel("groq fast", providers)?.choice.model, "mock-fast-8b");
+  eq("model: a provider that isn't ready is never chosen", findModel("offline", providers), null);
+  eq("model: case doesn't matter, nonsense is nothing", [findModel("LLAMA", providers)?.choice.model, findModel("zzz", providers), findModel("   ", providers)], ["llama-3.3-70b-versatile", null, null]);
+
+  eq("tag: words are added, tidied, once each", applyTagCommand(["work"], "Urgent #Home work"), { tags: ["work", "urgent", "home"], added: ["urgent", "home"], removed: [], invalid: [] });
+  eq("tag: a leading minus removes", applyTagCommand(["work", "old"], "-old"), { tags: ["work"], added: [], removed: ["old"], invalid: [] });
+  eq("tag: both at once, commas allowed", applyTagCommand(["a"], "b, -a").tags, ["b"]);
+  eq("tag: removing what isn't there is not a change", applyTagCommand(["a"], "-zzz"), { tags: ["a"], added: [], removed: [], invalid: [] });
+  eq("tag: what can't be a tag is reported", applyTagCommand([], "ok !!! -").invalid, ["!!!", "-"]);
+
+  const convo = [
+    { id: "1", role: "user", content: "first" }, { id: "2", role: "assistant", content: "a" },
+    { id: "3", role: "user", content: "second", attachments: [{}] }, { id: "4", role: "assistant", content: "b" }, { id: "5", role: "assistant", content: "c" },
+  ];
+  const undone = undoLastExchange(convo)!;
+  eq("undo: your last message and everything after it go", [undone.messages.map((m) => m.id), undone.text, undone.removed, undone.hadAttachments], [["1", "2"], "second", 3, true]);
+  eq("undo: the original isn't changed", convo.length, 5);
+  eq("undo: nothing sent is nothing to undo", [undoLastExchange([]), undoLastExchange([{ id: "x", role: "assistant", content: "hi" }])], [null, null]);
+  eq("undo: a single message leaves an empty chat", undoLastExchange([{ id: "1", role: "user", content: "only" }])!.messages, []);
+
+  eq("blanks: in order, once each, any case", promptVariables("Translate {{text}} to {{ Language }}, then {{text}} and {{language}} again"), ["text", "Language"]);
+  eq("blanks: date and time fill themselves, so aren't asked", promptVariables("Today is {{date}} at {{time}}. {{Date}}"), []);
+  eq("blanks: no blanks, none", promptVariables("plain {text} and {{ }} and {{1}}"), []);
+  const when = new Date(2026, 9, 3, 7, 5);
+  eq("blanks: filled by what was typed, case-insensitively, and by the built-ins", fillVariables("Hi {{Name}}, it is {{date}} {{time}}", { name: "Dana" }, when), "Hi Dana, it is 2026-10-03 07:05");
+  eq("blanks: one left empty stays as written, so nothing vanishes", fillVariables("To {{language}}", { language: "" }, when), "To {{language}}");
+  eq("blanks: the same blank everywhere", fillVariables("{{x}} and {{x}}", { x: "1" }, when), "1 and 1");
+
+  const sent = ["deploy the app", "write a test", "deploy the app", "Deploy to staging\nthen prod", "  ", "explain closures"];
+  eq("history: newest first, each once — a repeat sits where it was last sent", searchHistory(sent, "").map((h) => h.text), ["explain closures", "Deploy to staging\nthen prod", "deploy the app", "write a test"]);
+  eq("history: the words narrow it, ignoring case", searchHistory(sent, "DEPLOY").map((h) => h.preview), ["Deploy to staging", "deploy the app"]);
+  eq("history: a long message is shortened to one line", searchHistory(["x".repeat(300)], "")[0].preview.length, 100);
+  eq("history: a limit, and no matches is nothing", [searchHistory(sent, "", 2).length, searchHistory(sent, "zzz")], [2, []]);
+
+  eq("style: three presets, in order", TEMPERATURE_PRESETS.map((p) => [p.id, p.value]), [["precise", 0.2], ["balanced", 0.7], ["creative", 1.1]]);
+  eq("style: a value is a preset to within a hair", [presetOf(0.7)?.id, presetOf(0.72)?.id, presetOf(0.9), presetOf(1.1)?.id], ["balanced", "balanced", null, "creative"]);
+  eq("style: pressing cycles; from a custom value it lands on balanced", [nextPreset(0.2).id, nextPreset(0.7).id, nextPreset(1.1).id, nextPreset(0.95).id], ["balanced", "creative", "precise", "balanced"]);
+
+  eq("prefs: defaults", DEFAULT_PREFS, { sendKey: "enter", spellcheck: true });
+  eq("prefs: junk becomes the defaults, field by field", [cleanPrefs(null), cleanPrefs({ sendKey: "tab", spellcheck: "no" }), cleanPrefs({ sendKey: "mod-enter", spellcheck: false })], [DEFAULT_PREFS, DEFAULT_PREFS, { sendKey: "mod-enter", spellcheck: false }]);
+
+  eq("slash: the new commands are listed, and the ones that need words say so", [COMMAND_NAMES.includes("model"), COMMAND_NAMES.includes("title"), COMMAND_NAMES.includes("tag"), COMMAND_NAMES.includes("undo"), matchSlash("/mo").map((m) => m.takesArgs), matchSlash("/un").map((m) => m.takesArgs)], [true, true, true, true, [true], [undefined]]);
+  eq("slash: /title keeps its words", [parseSlash("/title My new name")?.name, parseSlash("/title My new name")?.args], ["title", "My new name"]);
+  eq("prompts: one saved before a command existed is renamed, not lost", cleanPrompts([{ name: "tag", text: "my tag prompt" }, { name: "undo", text: "u" }, { name: "new", text: "still reserved" }, { name: "tag-prompt", text: "taken" }]).map((p) => p.name), ["tag-prompt", "undo-prompt"]);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

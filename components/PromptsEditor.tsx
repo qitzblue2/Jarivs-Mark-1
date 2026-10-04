@@ -43,7 +43,8 @@ export default function PromptsEditor({ prompts, onChange }: Props) {
       </div>
       <p className="mb-2 text-[11px] leading-relaxed text-ink-faint">
         Text you reuse. Type <code className="font-mono">/name</code> in the message box and it appears there, ready to
-        edit and send.
+        edit and send. Put <code className="font-mono">{"{{blanks}}"}</code> in it — <em>Translate this into {"{{language}}"}</em> —
+        and you are asked for them first; <code className="font-mono">{"{{date}}"}</code> and <code className="font-mono">{"{{time}}"}</code> fill themselves.
       </p>
       {prompts.length === 0 ? (
         <p className="rounded-md border border-dashed border-line px-3 py-3 text-center text-[12px] text-ink-faint">

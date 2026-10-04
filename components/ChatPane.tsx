@@ -69,6 +69,8 @@ interface Props {
   onReact: (messageId: string, reaction: "up" | "down") => void;
   onQuote: (messageId: string) => void;
   onOpenInbox: () => void;
+  temperature: number;
+  onTemperature: (value: number) => void;
 }
 
 const STARTERS = [
@@ -86,7 +88,7 @@ export default function ChatPane(props: Props) {
     artifactCount, notice, onDismissNotice, onStartVoice,
     attachments, onAttach, onRemoveAttachment, onAttachError,
     approvals, onApprovalSettled, context, favorites, onToggleFavorite, recent, onOpenChat, onQuickAction,
-    onReact, onQuote, onOpenInbox,
+    onReact, onQuote, onOpenInbox, temperature, onTemperature,
   } = props;
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -399,6 +401,8 @@ export default function ChatPane(props: Props) {
         meter={<ContextMeter info={context} />}
         prompts={prompts}
         onSlash={onSlash}
+        temperature={temperature}
+        onTemperature={onTemperature}
         disabled={!anyKey}
         placeholder={anyKey ? "Ask JARVIS anything…" : "Add an API key in Settings to start"}
       />

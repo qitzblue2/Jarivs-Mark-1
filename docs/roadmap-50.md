@@ -93,3 +93,15 @@ JARVIS speaking first, within limits you set. Every item here is opt-out, gentle
 - [x] 68. Download a chat as a self-contained web page
 - [x] 69. Import a chat from a JSON export
 - [x] 70. Export every chat as a zip of Markdown files
+
+## I. Composing
+- [x] 71. Word, character and token count in the message box
+- [x] 72. `/model` — switch model by name
+- [x] 73. `/title` — rename the chat
+- [x] 74. `/tag` — add and remove tags
+- [x] 75. `/undo` — take back your last message and its replies
+- [x] 76. Send with Enter or Ctrl/⌘+Enter
+- [x] 77. Spellcheck on or off
+- [x] 78. Saved prompts with `{{blanks}}` that ask before they fill
+- [x] 79. Search what you've sent (Ctrl/⌘+R)
+- [x] 80. Reply-style presets — Precise, Balanced, Creative

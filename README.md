@@ -267,7 +267,29 @@ editor; everything else gets syntax highlighting, copy and download.
 - **Saved prompts.** Settings → **Saved prompts** holds up to 50 named prompts.
   `/name` puts one in the box, and anything you type after it is added. A name
   that is already a built-in command is flagged. They travel with Settings
-  export/import.
+  export/import. Put `{{blanks}}` in one — *Translate this into {{language}}:
+  {{text}}* — and a small form asks for them first (a blank left empty stays as
+  written, so nothing vanishes); `{{date}}` and `{{time}}` fill themselves.
+- **Four more commands** that act on the chat: `/model fast` switches to the
+  best-matching model that is ready (and names the runners-up), `/title New
+  name` renames it, `/tag work -old` adds and removes tags, and `/undo` takes
+  back your last message and every reply after it, putting what you wrote back in
+  the box (attachments aren't kept). Choosing one that needs words from the menu
+  fills the box with `/model ` for you to finish rather than running it empty.
+  A saved prompt you had already called `tag`, `title`, `model` or `undo` is
+  renamed `tag-prompt` and so on the next time Settings are saved, not lost.
+- **Counter.** Words, characters and an estimate of tokens, under the box once
+  there is something in it.
+- **Reply style.** *Style: Balanced* beside the counter cycles Precise (0.2),
+  Balanced (0.7), Creative (1.1) — the same temperature as the slider in
+  Settings, which still sets any value; a custom one shows as *Custom 0.9*.
+- **Send key.** Settings → **Writing**: Enter sends (the default), or Enter is a
+  new line and `Ctrl/⌘+Enter` sends. Spellcheck underlines can be turned off
+  there too. Both are remembered on this device.
+- **Search what you've sent.** `Ctrl/⌘+R` in the box opens a search of this
+  chat's earlier messages, newest first; `Enter` puts one in the box,
+  `Esc` closes. (It takes `Ctrl+R` from the browser's reload while the box has
+  focus — a reload would cost you the draft.)
 - **Listen.** Reads a reply aloud with the browser's own voice — the words, not
   the markdown or the code. Press again to stop.
 
@@ -1133,6 +1155,7 @@ npm run test:composer  # timestamps, saved messages, folding, drafts, up arrow, 
 npm run test:appearance  # theme, text size, shortcuts, resizing, focus, axe scan, print, manifest, offline
 npm run test:models  # persona presets, context meter, favourites, regenerate-with, memory search/export/import, units
 npm run test:extras  # templates, welcome screen, gallery families, usage CSV, daily backups, chat statistics
+npm run test:writing  # counter, send key, spellcheck, reply style, /model /title /tag /undo, prompt blanks, searching what you sent
 npm run test:reading  # find, outline, jump keys, quote, plain copy, reading time, bulk select, web-page export, import, Markdown zip
 npm run test:initiative  # mood, cards, controls, focus timer, inbox, tone, follow-ups, ratings — takes a minute and a half (it waits for the real scheduler)
 npm run test:security  # login lockout, headers — needs its own server, see the file

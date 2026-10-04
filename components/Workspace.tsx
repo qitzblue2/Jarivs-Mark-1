@@ -42,6 +42,8 @@ import { lighten } from "@/lib/attachments";
 import { getInitiative, moodEvent, noteTone, offerNow } from "@/lib/initiative/store";
 import { readTone, type Tone } from "@/lib/initiative/tone";
 import { appendQuote, quoteText } from "@/lib/reading";
+import { applyTagCommand, findModel, fillVariables, promptVariables, undoLastExchange } from "@/lib/composing";
+import PromptVariables from "./PromptVariables";
 import { CHATS_CHANGED } from "./DataSettings";
 import { detectFact } from "@/lib/initiative/suggest";
 import { rememberNudge, type Nudge, type NudgeAction } from "@/lib/initiative/rules";
@@ -118,6 +120,8 @@ export default function Workspace() {
   const [instructionsFor, setInstructionsFor] = useState<{ id: string; title: string; persona?: string } | null>(null);
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [inboxOpen, setInboxOpen] = useState(false);
+  /** A saved prompt with blanks, waiting for them to be filled. */
+  const [fillingPrompt, setFillingPrompt] = useState<{ name: string; text: string; args: string } | null>(null);
   const [selfEdit, setSelfEdit] = useState<{ enabled: boolean; isSandbox: boolean; port: number } | null>(null);
   /** What each request carries besides the conversation, for the context meter. */
   const [overhead, setOverhead] = useState({ toolTokens: 0, noteTokens: 0 });
@@ -682,11 +686,17 @@ export default function Workspace() {
     // Text commands and saved prompts fill the box; you read it, then send it.
     if (match.kind !== "action") {
       const text = match.text ?? "";
-      updateInput(match.args ? `${text}\n\n${match.args}` : text);
+      // A prompt with {{blanks}} asks for them first; {{date}} and {{time}} fill themselves.
+      if (promptVariables(text).length > 0) {
+        updateInput("");
+        return setFillingPrompt({ name: match.name, text, args: match.args });
+      }
+      const filled = fillVariables(text, {});
+      updateInput(match.args ? `${filled}\n\n${match.args}` : filled);
       return;
     }
     updateInput("");
-    const needsChat = ["pin", "archive", "export", "instructions"];
+    const needsChat = ["pin", "archive", "export", "instructions", "title", "tag", "undo"];
     if (needsChat.includes(match.name) && !chat) return setNotice("Open a chat first.");
 
     switch (match.name) {
@@ -706,6 +716,47 @@ export default function Workspace() {
         return void editInstructions(chat!.id);
       case "help":
         return setShortcutsOpen(true);
+      case "model": {
+        const wanted = match.args.trim();
+        const current = providers.find((p) => p.id === provider);
+        if (!wanted) return setNotice(`You're using ${model || "no model"}${current ? ` · ${current.label}` : ""}. To switch, type /model and part of a name.`);
+        const found = findModel(wanted, providers);
+        if (!found) return setNotice(`No ready model matches “${wanted}”. The model picker lists what is available.`);
+        changeModel(found.choice.provider, found.choice.model);
+        return setNotice(`Switched to ${found.choice.label}.${found.others.length ? ` Also matched: ${found.others.map((o) => o.model).join(", ")}.` : ""}`);
+      }
+      case "title": {
+        const title = match.args.trim().slice(0, 120);
+        if (!title) return setNotice("Say what to call it: /title Planning the trip");
+        void renameChat(chat!.id, title);
+        return setNotice(`Renamed to “${title}”.`);
+      }
+      case "tag": {
+        const existing = chats.find((c) => c.id === chat!.id)?.tags ?? chat!.tags ?? [];
+        if (!match.args.trim()) return setNotice(existing.length ? `Tagged ${existing.map((t) => `#${t}`).join(" ")}. Add with /tag name, remove with /tag -name.` : "No tags yet. Add one with /tag name.");
+        const result = applyTagCommand(existing, match.args);
+        const parts = [
+          result.added.length ? `Added ${result.added.map((t) => `#${t}`).join(" ")}` : "",
+          result.removed.length ? `removed ${result.removed.map((t) => `#${t}`).join(" ")}` : "",
+          result.invalid.length ? `couldn't use ${result.invalid.join(" ")}` : "",
+        ].filter(Boolean);
+        if (result.added.length || result.removed.length) void setChatTags(chat!.id, result.tags);
+        const sentence = parts.length ? parts.join("; ") : "Nothing to change";
+        return setNotice(`${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`);
+      }
+      case "undo": {
+        if (streaming) return setNotice("Wait for the reply to finish, or stop it first.");
+        const undone = undoLastExchange(chat!.messages);
+        if (!undone) return setNotice("You haven't sent anything in this chat.");
+        const next = { ...chat!, messages: undone.messages, updatedAt: Date.now() };
+        setChat(next);
+        void persist(next);
+        // A slash command is the whole message, so the box held nothing else to keep.
+        fillComposer(undone.text);
+        return setNotice(
+          `Took back your last message${undone.removed > 1 ? ` and ${undone.removed - 1} repl${undone.removed - 1 === 1 ? "y" : "ies"}` : ""}. It is in the message box${undone.hadAttachments ? " — its attachments aren't kept, so add them again" : ""}.`,
+        );
+      }
       case "theme": {
         const { theme } = getAppearance();
         return setAppearance({ theme: THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length] });
@@ -1375,6 +1426,8 @@ export default function Workspace() {
             onOpenChat={selectChat}
             onQuickAction={quickAction}
             onReact={reactTo}
+            temperature={settings.temperature}
+            onTemperature={(temperature) => saveSettings({ ...settings, temperature })}
             onQuote={quote}
             onOpenInbox={() => setInboxOpen(true)}
           />
@@ -1451,6 +1504,16 @@ export default function Workspace() {
       />
 
       <SandboxPanel open={sandboxOpen} onClose={() => setSandboxOpen(false)} />
+
+      <PromptVariables
+        prompt={fillingPrompt}
+        onClose={() => setFillingPrompt(null)}
+        onSubmit={(filled) => {
+          const args = fillingPrompt?.args ?? "";
+          setFillingPrompt(null);
+          fillComposer(args ? `${filled}\n\n${args}` : filled);
+        }}
+      />
 
       <InboxPanel
         open={inboxOpen}

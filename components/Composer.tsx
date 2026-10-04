@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, ListChecks, Paperclip, Square } from "lucide-react";
+import { composerCounts, counterLabel, nextPreset, presetOf, searchHistory, shouldSend } from "@/lib/composing";
+import { usePrefs } from "@/lib/prefs-store";
 import Attachments from "./Attachments";
 import { fileToAttachment } from "@/lib/attach-client";
 import { PromptHistory } from "@/lib/history";
@@ -34,6 +36,9 @@ interface Props {
   onSlash: (match: SlashMatch) => void;
   /** Shown at the right of the hint line — the context meter. */
   meter?: React.ReactNode;
+  /** How adventurous replies are, and how to change it from a preset. */
+  temperature: number;
+  onTemperature: (value: number) => void;
 }
 
 export default function Composer({
@@ -52,7 +57,10 @@ export default function Composer({
   prompts,
   onSlash,
   meter,
+  temperature,
+  onTemperature,
 }: Props) {
+  const prefs = usePrefs();
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -80,8 +88,41 @@ export default function Composer({
 
   function choose(match: SlashMatch) {
     setDismissedFor(null);
+    // "/model" with nothing after it can't do anything: leave the box ready for the rest.
+    if (match.takesArgs) {
+      onChange(`/${match.name} `);
+      caretToEnd();
+      return;
+    }
     onSlash({ ...match, args: "" });
   }
+
+  // --- searching what you've sent (Ctrl/Cmd+R) ---
+  const [histOpen, setHistOpen] = useState(false);
+  const [histQuery, setHistQuery] = useState("");
+  const [histAt, setHistAt] = useState(0);
+  const histInput = useRef<HTMLInputElement>(null);
+  const hits = useMemo(() => (histOpen ? searchHistory(history, histQuery) : []), [histOpen, history, histQuery]);
+  useEffect(() => setHistAt(0), [histQuery, histOpen]);
+  // The box takes the cursor the moment the search appears.
+  useEffect(() => {
+    if (histOpen) histInput.current?.focus();
+  }, [histOpen]);
+
+  function closeHistory() {
+    setHistOpen(false);
+    setHistQuery("");
+    ref.current?.focus();
+  }
+  function pickHistory(text: string) {
+    recall.current.reset();
+    onChange(text);
+    closeHistory();
+    caretToEnd();
+  }
+
+  const counts = useMemo(() => composerCounts(value), [value]);
+  const preset = presetOf(temperature);
 
   const ingest = useCallback(
     async (files: FileList | File[]) => {
@@ -112,6 +153,20 @@ export default function Composer({
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.nativeEvent.isComposing) return;
+
+    // The search takes a frame to receive focus; Escape pressed in that moment still closes it.
+    if (histOpen && e.key === "Escape") {
+      e.preventDefault();
+      closeHistory();
+      return;
+    }
+
+    // Ctrl/Cmd+R would reload the page — and a draft with it — so it is taken here.
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "r") {
+      e.preventDefault();
+      setHistOpen(true);
+      return;
+    }
 
     if (menuOpen) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -157,7 +212,7 @@ export default function Composer({
       return;
     }
 
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (shouldSend(e, prefs.sendKey)) {
       e.preventDefault();
       if (!streaming) onSend(false);
     }
@@ -219,6 +274,69 @@ export default function Composer({
             ))}
           </ul>
         )}
+        {histOpen && (
+          <div data-history-search className="absolute inset-x-0 bottom-full z-20 mb-2 rounded-lg border border-line bg-panel p-1.5 shadow-2xl">
+            <input
+              ref={histInput}
+              value={histQuery}
+              onChange={(e) => setHistQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  if (hits.length) setHistAt((h) => (h + (e.key === "ArrowDown" ? 1 : -1) + hits.length) % hits.length);
+                } else if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (hits[histAt]) pickHistory(hits[histAt].text);
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  closeHistory();
+                } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r") {
+                  // Pressing it again steps to the next older match, as in a shell.
+                  e.preventDefault();
+                  if (hits.length) setHistAt((h) => (h + 1) % hits.length);
+                }
+              }}
+              onBlur={(e) => {
+                // Clicking elsewhere closes it; clicking one of its own results doesn't.
+                if (!e.currentTarget.parentElement?.contains(e.relatedTarget as Node | null)) setHistOpen(false);
+              }}
+              role="combobox"
+              aria-expanded={hits.length > 0}
+              aria-controls={hits.length > 0 ? "history-list" : undefined}
+              aria-activedescendant={hits.length > 0 ? `history-option-${Math.min(histAt, hits.length - 1)}` : undefined}
+              aria-label="Search what you've sent"
+              placeholder="Search what you've sent…"
+              data-history-input
+              className="w-full rounded-md border border-line bg-base px-2.5 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-faint focus:border-arc-dim"
+            />
+            {hits.length > 0 ? (
+              <ul id="history-list" role="listbox" aria-label="Messages you've sent" className="mt-1 max-h-56 overflow-y-auto">
+                {hits.map((h, i) => (
+                  <li
+                    key={h.text}
+                    id={`history-option-${i}`}
+                    role="option"
+                    aria-selected={i === histAt}
+                    data-history-hit
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      pickHistory(h.text);
+                    }}
+                    onMouseEnter={() => setHistAt(i)}
+                    className={`cursor-pointer truncate rounded-md px-2.5 py-1.5 text-[13px] ${i === histAt ? "bg-raised text-ink" : "text-ink-dim"}`}
+                  >
+                    {h.preview}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="px-2.5 py-2 text-[12px] text-ink-faint" data-history-empty>
+                {history.length === 0 ? "Nothing sent in this chat yet." : "Nothing you've sent matches."}
+              </p>
+            )}
+          </div>
+        )}
         <Attachments attachments={attachments} onRemove={onRemoveAttachment} />
 
         <div
@@ -261,6 +379,7 @@ export default function Composer({
             aria-controls={menuOpen ? "slash-menu" : undefined}
             aria-activedescendant={menuOpen ? `slash-option-${Math.min(highlight, matches.length - 1)}` : undefined}
             aria-label="Message"
+            spellCheck={prefs.spellcheck}
             onPaste={onPaste}
             rows={1}
             disabled={disabled}
@@ -304,9 +423,28 @@ export default function Composer({
           <span>
             {dragging
               ? "Drop to attach"
-              : "Enter to send · Shift+Enter for a new line · / for commands · ↑ for your last message"}
+              : prefs.sendKey === "mod-enter"
+                ? "Ctrl+Enter to send · Enter for a new line · / for commands · Ctrl+R to search what you've sent"
+                : "Enter to send · Shift+Enter for a new line · / for commands · ↑ for your last message"}
           </span>
-          {meter}
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {counts && (
+              <span data-counter aria-label={counterLabel(counts)} title="Words, characters and an estimate of tokens (about four characters each)">
+                {counterLabel(counts)}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => onTemperature(nextPreset(temperature).value)}
+              data-temp-preset={preset?.id ?? "custom"}
+              aria-label={`Reply style: ${preset?.label ?? `custom, ${temperature.toFixed(2)}`}. Press to change.`}
+              title={`${preset?.hint ?? "Set by hand in Settings"} — press to cycle Precise, Balanced, Creative`}
+              className="rounded px-1.5 py-0.5 transition hover:bg-raised hover:text-ink"
+            >
+              Style: {preset?.label ?? `Custom ${temperature.toFixed(1)}`}
+            </button>
+            {meter}
+          </span>
         </div>
       </div>
     </div>
