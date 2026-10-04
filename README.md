@@ -786,6 +786,38 @@ that?" offer) are kept in this browser's localStorage, so a phone and a desktop
 differ — *Clear suggestion history* wipes the cards — while the inbox is per
 server.
 
+### Finding your way around a chat
+
+A long conversation is only useful if you can get back into it. Under the
+**chat tools** button in the title bar (and on the keyboard):
+
+- **Find in this chat** — `Ctrl/Cmd+Shift+F`. Every match is marked, with "3 of
+  12", `Enter` / `Shift+Enter` to move between them. It reads the page as
+  rendered, so code and tables are searched too, but not the buttons under a
+  message. (Chat *search* in the sidebar is the one across every chat.)
+- **Jump to a question** — your questions in order, one line each; click one to
+  go there. `Alt+↑` / `Alt+↓` step between your messages from anywhere except a
+  message box with something typed in it.
+- Under each message: **Quote** starts your next message with that one quoted
+  (below whatever you'd already typed), **Copy text** copies a reply as plain
+  words — no asterisks or hashes, links as "text (address)", code kept exactly —
+  and a long reply says how long it takes to read.
+- **Download as a web page** — one self-contained `.html` file with its own
+  styles, light or dark to match the reader. Everything in a conversation is
+  escaped, so opening it can't run anything, and it is sent with a policy that
+  forbids scripts anyway.
+
+**Several chats at once**: the tick-box button beside *New chat* lets you pick
+chats and archive, tag or trash them together (trashed ones can still be
+restored for 30 days).
+
+**In and out** (Settings → *Your chats, in and out*): every chat as its own
+dated `.md` file in one zip, and **import** a chat from a JSON export. An import
+is always a *new* chat with a new id — it can't replace or merge into one you
+have — and the file is checked field by field, so a hand-edited one can add a
+conversation and nothing else. Picture bytes are never in exports, so they are
+not in imports either.
+
 ## 9. Letting JARVIS use your computer
 
 Off by default. Turn it on with `JARVIS_ALLOW_COMPUTER=1` — an environment
@@ -1101,6 +1133,7 @@ npm run test:composer  # timestamps, saved messages, folding, drafts, up arrow, 
 npm run test:appearance  # theme, text size, shortcuts, resizing, focus, axe scan, print, manifest, offline
 npm run test:models  # persona presets, context meter, favourites, regenerate-with, memory search/export/import, units
 npm run test:extras  # templates, welcome screen, gallery families, usage CSV, daily backups, chat statistics
+npm run test:reading  # find, outline, jump keys, quote, plain copy, reading time, bulk select, web-page export, import, Markdown zip
 npm run test:initiative  # mood, cards, controls, focus timer, inbox, tone, follow-ups, ratings — takes a minute and a half (it waits for the real scheduler)
 npm run test:security  # login lockout, headers — needs its own server, see the file
 npm run test:sandbox  # self-editing: start with JARVIS_ALLOW_SELF_EDIT=1, see the file

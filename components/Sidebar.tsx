@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   Check,
+  CheckSquare,
   ChevronRight,
+  Square,
   FlaskConical,
   Gauge,
   ImageIcon,
@@ -37,6 +39,8 @@ interface Props {
   onTogglePin: (id: string, pinned: boolean) => void;
   onArchive: (id: string, archived: boolean) => void;
   onTags: (id: string, tags: string[]) => void;
+  /** Archive, trash or tag several chats at once. */
+  onBulk: (ids: string[], action: { type: "archive" } | { type: "trash" } | { type: "tag"; tag: string }) => void;
   onDuplicate: (id: string) => void;
   onEditInstructions: (id: string) => void;
   onOpenTrash: () => void;
@@ -64,6 +68,7 @@ export default function Sidebar({
   onTogglePin,
   onArchive,
   onTags,
+  onBulk,
   onDuplicate,
   onEditInstructions,
   onOpenTrash,
@@ -83,6 +88,31 @@ export default function Sidebar({
   const [menu, setMenu] = useState<{ id: string; anchor: DOMRect } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const restoreInput = useRef<HTMLInputElement>(null);
+  /** Choosing several chats to act on together. */
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [tagging, setTagging] = useState(false);
+  const [tagDraft, setTagDraft] = useState("");
+
+  function endSelecting() {
+    setSelecting(false);
+    setPicked(new Set());
+    setTagging(false);
+    setTagDraft("");
+  }
+  function toggle(id: string) {
+    setPicked((p) => {
+      const next = new Set(p);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function bulk(action: Parameters<Props["onBulk"]>[1]) {
+    if (picked.size === 0) return;
+    onBulk([...picked], action);
+    endSelecting();
+  }
 
   /**
    * Titles filter instantly as you type; the server's search of what was
@@ -156,11 +186,24 @@ export default function Sidebar({
           <div
             data-chat-row={chat.id}
             className={`group flex items-center gap-1 rounded-lg px-2.5 py-2 transition ${
-              active ? "bg-raised text-ink" : "text-ink-dim hover:bg-raised/60 hover:text-ink"
+              active && !selecting ? "bg-raised text-ink" : "text-ink-dim hover:bg-raised/60 hover:text-ink"
             }`}
           >
+            {selecting && (
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={picked.has(chat.id)}
+                aria-label={`Select ${chat.title}`}
+                data-select-chat={chat.id}
+                onClick={() => toggle(chat.id)}
+                className="shrink-0 rounded p-0.5 text-ink-faint hover:text-arc"
+              >
+                {picked.has(chat.id) ? <CheckSquare size={15} className="text-arc" aria-hidden /> : <Square size={15} aria-hidden />}
+              </button>
+            )}
             <button
-              onClick={() => onSelect(chat.id)}
+              onClick={() => (selecting ? toggle(chat.id) : onSelect(chat.id))}
               onDoubleClick={() => {
                 setDraft(chat.title);
                 setRenamingId(chat.id);
@@ -185,7 +228,7 @@ export default function Sidebar({
               </span>
             </button>
 
-            {confirmId === chat.id ? (
+            {selecting ? null : confirmId === chat.id ? (
               <span className="flex shrink-0 items-center gap-0.5">
                 <button
                   onClick={() => {
@@ -282,13 +325,24 @@ export default function Sidebar({
         </div>
       </div>
 
-      <div className="px-3 pb-2">
+      <div className="flex gap-1.5 px-3 pb-2">
         <button
           onClick={onNew}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-line bg-raised px-3 py-2 text-sm font-medium text-ink transition hover:border-arc-dim/50 hover:text-arc"
+          className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-lg border border-line bg-raised px-3 py-2 text-sm font-medium text-ink transition hover:border-arc-dim/50 hover:text-arc"
         >
           <Plus size={15} />
           New chat
+        </button>
+        <button
+          type="button"
+          onClick={() => (selecting ? endSelecting() : setSelecting(true))}
+          aria-pressed={selecting}
+          title={selecting ? "Stop selecting" : "Select several chats to archive, tag or trash together"}
+          aria-label={selecting ? "Stop selecting chats" : "Select several chats"}
+          data-select-mode
+          className={`shrink-0 rounded-lg border px-2.5 transition ${selecting ? "border-arc-dim bg-arc-dim/15 text-arc" : "border-line bg-raised text-ink-faint hover:border-arc-dim/50 hover:text-arc"}`}
+        >
+          <CheckSquare size={15} aria-hidden />
         </button>
       </div>
 
@@ -367,6 +421,54 @@ export default function Sidebar({
           </>
         )}
       </nav>
+
+      {selecting && (
+        <div className="space-y-2 border-t border-line-soft px-3 py-2" data-bulk-bar>
+          <div className="flex items-center justify-between text-[11px] text-ink-dim" role="status" aria-live="polite">
+            <span data-bulk-count>{picked.size === 0 ? "Pick the chats to act on" : `${picked.size} selected`}</span>
+            <button type="button" onClick={() => setPicked(new Set((searching ? searchResults : live).map((c) => c.id)))} className="text-ink-faint underline-offset-2 hover:text-ink hover:underline">
+              Select all shown
+            </button>
+          </div>
+          {tagging ? (
+            <form
+              className="flex gap-1.5"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (tagDraft.trim()) bulk({ type: "tag", tag: tagDraft });
+              }}
+            >
+              <input
+                value={tagDraft}
+                onChange={(e) => setTagDraft(e.target.value)}
+                placeholder="tag"
+                aria-label="Tag to add"
+                autoFocus
+                data-bulk-tag-input
+                className="min-w-0 flex-1 rounded border border-line bg-base px-2 py-1 text-[12px] text-ink outline-none focus:border-arc-dim"
+              />
+              <button type="submit" className="rounded bg-arc-solid px-2.5 py-1 text-[12px] font-medium text-white hover:bg-arc-solid-hover">
+                Add
+              </button>
+            </form>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              <button type="button" disabled={picked.size === 0} onClick={() => bulk({ type: "archive" })} data-bulk="archive" className="flex items-center gap-1 rounded border border-line px-2 py-1 text-[12px] text-ink-dim transition hover:text-ink disabled:opacity-40">
+                <Archive size={12} aria-hidden /> Archive
+              </button>
+              <button type="button" disabled={picked.size === 0} onClick={() => setTagging(true)} data-bulk="tag" className="rounded border border-line px-2 py-1 text-[12px] text-ink-dim transition hover:text-ink disabled:opacity-40">
+                Tag…
+              </button>
+              <button type="button" disabled={picked.size === 0} onClick={() => bulk({ type: "trash" })} data-bulk="trash" className="flex items-center gap-1 rounded border border-line px-2 py-1 text-[12px] text-ink-dim transition hover:text-danger disabled:opacity-40">
+                <Trash2 size={12} aria-hidden /> Trash
+              </button>
+              <button type="button" onClick={endSelecting} className="ml-auto rounded px-2 py-1 text-[12px] text-ink-faint transition hover:text-ink">
+                Done
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="space-y-1 border-t border-line-soft px-3 py-2 text-[10px] text-ink-faint">
         {storageDriver === "fs" ? (

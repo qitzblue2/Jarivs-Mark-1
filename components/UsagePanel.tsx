@@ -50,6 +50,8 @@ const AUDIT_LABEL: Record<string, string> = {
   "backup.auto.download": "Downloaded a daily backup",
   "chat.trash": "Moved a chat to trash",
   "chat.restore": "Restored a chat",
+  "chat.import": "Imported a chat",
+  "export.markdown": "Exported every chat as Markdown",
 };
 
 function compact(n: number): string {

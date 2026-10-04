@@ -36,10 +36,13 @@ import { estimateReplyTokens } from "@/lib/format";
 import type { ProviderState } from "./ModelPicker";
 import { consumeJarvisStream } from "@/lib/stream";
 import { artifactsFromMessage, artifactsFromMessages } from "@/lib/codeblocks";
+import { normalizeTag, normalizeTags } from "@/lib/chat-ops";
 import { newId, type Attachment, type Chat, type ChatMeta, type Message, type ToolRound } from "@/lib/types";
 import { lighten } from "@/lib/attachments";
 import { getInitiative, moodEvent, noteTone, offerNow } from "@/lib/initiative/store";
 import { readTone, type Tone } from "@/lib/initiative/tone";
+import { appendQuote, quoteText } from "@/lib/reading";
+import { CHATS_CHANGED } from "./DataSettings";
 import { detectFact } from "@/lib/initiative/suggest";
 import { rememberNudge, type Nudge, type NudgeAction } from "@/lib/initiative/rules";
 import { RULE_INFO, type RuleId } from "@/lib/initiative/config";
@@ -326,6 +329,47 @@ export default function Workspace() {
     });
     if (!res.ok) setNotice((await res.json().catch(() => ({})))?.error ?? "That change didn't save.");
     await refreshChats();
+  }
+
+  // A chat was added from outside the list — imported from a file.
+  useEffect(() => {
+    const onChanged = () => void refreshChats();
+    window.addEventListener(CHATS_CHANGED, onChanged);
+    return () => window.removeEventListener(CHATS_CHANGED, onChanged);
+  }, [refreshChats]);
+
+  /** Archive, tag or trash several chats at once, one request each. */
+  async function bulkChats(ids: string[], action: { type: "archive" } | { type: "trash" } | { type: "tag"; tag: string }) {
+    let done = 0;
+    for (const id of ids) {
+      try {
+        if (action.type === "trash") {
+          await fetch(`/api/chats/${id}`, { method: "DELETE" });
+        } else if (action.type === "archive") {
+          await fetch(`/api/chats/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived: true, quiet: true }) });
+        } else {
+          const tags = normalizeTags([...(chats.find((c) => c.id === id)?.tags ?? []), action.tag]);
+          await fetch(`/api/chats/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tags }) });
+        }
+        done++;
+      } catch {
+        /* the rest still go; the count at the end says how many did */
+      }
+    }
+    const list = await refreshChats();
+    const noun = `${done} chat${done === 1 ? "" : "s"}`;
+    setNotice(
+      action.type === "trash"
+        ? `Moved ${noun} to the trash. Open Trash at the bottom of the chat list to get them back.`
+        : action.type === "archive"
+          ? `Archived ${noun}.`
+          : `Tagged ${noun} #${normalizeTag(action.tag)}.`,
+    );
+    if (chat && ids.includes(chat.id) && action.type !== "tag") {
+      const latest = mostRecent(list.filter((c) => !c.archived));
+      if (latest) void selectChat(latest.id);
+      else setChat(null);
+    }
   }
 
   async function archiveChat(id: string, archived: boolean) {
@@ -895,6 +939,28 @@ export default function Workspace() {
     [chat, streaming],
   );
 
+  /** What is in the box now, for handlers that must not be remade on every keystroke. */
+  const inputRef = useRef(input);
+  inputRef.current = input;
+
+  /** Start your next message with this one quoted. */
+  const quote = useCallback(
+    (messageId: string) => {
+      const message = chat?.messages.find((m) => m.id === messageId);
+      if (!message) return;
+      const text = appendQuote(inputRef.current, quoteText(message.content));
+      if (!text) return;
+      updateInput(text);
+      setTimeout(() => {
+        const box = document.getElementById("message-input") as HTMLTextAreaElement | null;
+        if (!box) return;
+        box.focus();
+        box.setSelectionRange(box.value.length, box.value.length);
+      }, 0);
+    },
+    [chat, updateInput],
+  );
+
   /** A saved message to scroll to once its chat has loaded. */
   const pendingScroll = useRef<string | null>(null);
 
@@ -1190,6 +1256,7 @@ export default function Workspace() {
           onTogglePin={togglePin}
           onArchive={archiveChat}
           onTags={setChatTags}
+          onBulk={bulkChats}
           onDuplicate={(id) => void copyChat(id)}
           onEditInstructions={editInstructions}
           onOpenTrash={() => setTrashOpen(true)}
@@ -1217,6 +1284,7 @@ export default function Workspace() {
               onTogglePin={togglePin}
               onArchive={archiveChat}
               onTags={setChatTags}
+              onBulk={bulkChats}
               onDuplicate={(id) => void copyChat(id)}
               onEditInstructions={editInstructions}
               onOpenTrash={() => {
@@ -1307,6 +1375,7 @@ export default function Workspace() {
             onOpenChat={selectChat}
             onQuickAction={quickAction}
             onReact={reactTo}
+            onQuote={quote}
             onOpenInbox={() => setInboxOpen(true)}
           />
           </ModelsContext.Provider>

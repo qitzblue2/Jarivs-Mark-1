@@ -95,6 +95,10 @@ import {
   KEY as INITIATIVE_KEY, QUEUE_PATIENCE_MS, clearHistory, closeToast, endFocus, flushQueue, focusActive, focusUntilOf, getInitiative,
   markHistoryRead, moodEvent, moodLabel, noteTone, offer, resetInitiative, setConfig, setRule, setServerInbox, startFocus, unreadCount,
 } from "../lib/initiative/store";
+import { findSpans, findLabel, stepMatch, outlineOf, pickJump, quoteText, appendQuote, toPlainText, readingLabel, readingMinutes, countWords } from "../lib/reading";
+import { chatToHtml, bodyToHtml, htmlFilename } from "../lib/chat-html";
+import { importChat, MAX_IMPORT_MESSAGES } from "../lib/chat-import";
+import { markdownEntryName, markdownArchiveName } from "../lib/chat-archive";
 import { SentenceSplitter, splitSentences } from "../lib/voice/tts/sentences";
 import { Speaker } from "../lib/voice/tts/speaker";
 import { encodeWav, durationOf } from "../lib/voice/wav";
@@ -3217,6 +3221,97 @@ console.log("\n--- initiative: the live state ---");
   eq("every tone the reader can produce is one the server accepts", TONES.every(isTone), true);
   eq("a made-up tone is refused", [isTone("furious"), isTone(""), isTone(undefined), isTone(7), isTone({ toString: () => "sad" })], [false, false, false, false, false]);
   eq("only the tones that call for it have guidance, and the server looks the sentence up itself", TONES.map((t) => toneHint(t) !== null), [false, true, true, false, false, true, true]);
+}
+
+// --- reading: find, outline, jump, quote, plain text, reading time ---
+{
+  console.log("\n--- reading and navigating ---");
+  eq("find: every place, in order, ignoring case", findSpans(["Hello hello", "no", "HELLO"], "hello"), [{ node: 0, start: 0, end: 5 }, { node: 0, start: 6, end: 11 }, { node: 2, start: 0, end: 5 }]);
+  eq("find: a match can't overlap itself", findSpans(["aaa"], "aa").length, 1);
+  eq("find: nothing typed, nothing found — and spaces alone are nothing", [findSpans(["abc"], "").length, findSpans(["a b"], "   ").length], [0, 0]);
+  eq("find: the query is trimmed", findSpans(["a cat sat"], "  cat ").length, 1);
+  eq("find: stops at the limit", findSpans(["a ".repeat(50)], "a", 10).length, 10);
+  eq("find: special characters are just characters", findSpans(["cost (a+b) [x]"], "(a+b)").length, 1);
+  eq("find: the label", [findLabel("", 0, 0), findLabel("x", 0, 0), findLabel("x", 2, 12), findLabel("x", 0, 500)], ["", "No matches", "3 of 12", "1 of 500+"]);
+  eq("find: stepping wraps both ways", [stepMatch(2, 3, 1), stepMatch(0, 3, -1), stepMatch(1, 3, 1), stepMatch(0, 0, 1)], [0, 2, 2, 0]);
+
+  const msgs = [
+    { id: "1", role: "user", content: "  \n First question here\nmore" },
+    { id: "2", role: "assistant", content: "answer" },
+    { id: "3", role: "user", content: "x".repeat(200) },
+    { id: "4", role: "user", content: "", attachments: [{ name: "notes.txt" }] },
+    { id: "5", role: "user", content: "" },
+  ];
+  const outline = outlineOf(msgs);
+  eq("outline: only your messages, numbered", outline.map((o) => [o.id, o.number]), [["1", 1], ["3", 2], ["4", 3], ["5", 4]]);
+  eq("outline: the first non-empty line, trimmed", outline[0].preview, "First question here");
+  eq("outline: long ones are cut with an ellipsis", [outline[1].preview.length, outline[1].preview.endsWith("…")], [80, true]);
+  eq("outline: an attachment-only message is named by the file; an empty one says so", [outline[2].preview, outline[3].preview], ["📎 notes.txt", "(empty message)"]);
+
+  eq("jump up: the nearest above the top edge", pickJump([-300, -120, 40, 400], "up"), 1);
+  eq("jump down: the nearest below it", pickJump([-300, -120, 40, 400], "down"), 2);
+  eq("jump: one already at the top edge is passed over, either way", [pickJump([-300, 2, 400], "up"), pickJump([-300, 2, 400], "down")], [0, 2]);
+  eq("jump: nowhere to go is null", [pickJump([10, 20], "up"), pickJump([-10, -20], "down"), pickJump([], "up")], [null, null, null]);
+
+  eq("quote: every line prefixed, ending on a fresh line", quoteText("one\n\ntwo"), "> one\n>\n> two\n\n");
+  eq("quote: a thinking model's reasoning is left out", quoteText("<think>hmm</think>The answer."), "> The answer.\n\n");
+  eq("quote: long ones are cut", quoteText("w".repeat(50), 20), `> ${"w".repeat(20)}…\n\n`);
+  eq("quote: nothing to quote is nothing", quoteText("   "), "");
+  eq("quote: added after what you've typed, with a gap", [appendQuote("", "> q\n\n"), appendQuote("my note  ", "> q\n\n"), appendQuote("keep", "")], ["> q\n\n", "my note\n\n> q\n\n", "keep"]);
+
+  eq("plain: formatting marks go, words stay", toPlainText("# Title\n\nSome **bold** and *slanted* and `code` and ~~gone~~."), "Title\n\nSome bold and slanted and code and gone.");
+  eq("plain: links keep their address; a bare link isn't doubled", toPlainText("See [the docs](https://x.dev/a) or [https://y.dev](https://y.dev)."), "See the docs (https://x.dev/a) or https://y.dev.");
+  eq("plain: lists get bullets, quotes lose the arrow", toPlainText("- one\n* two\n> quoted"), "• one\n• two\nquoted");
+  eq("plain: code blocks are kept exactly, markers off", toPlainText("Run:\n```bash\nls *.txt  # **all**\n```\nDone."), "Run:\nls *.txt  # **all**\nDone.");
+  eq("plain: snake_case and 2*3*4 are not italics", toPlainText("use snake_case_name and 2*3*4"), "use snake_case_name and 2*3*4");
+  eq("plain: images become their description", toPlainText("![a cat](/api/images/x.png) here"), "a cat here");
+
+  const para = (n: number) => Array.from({ length: n }, () => "word").join(" ");
+  eq("reading: short replies get no label", readingLabel(para(100)), null);
+  eq("reading: a long one gets minutes and words", readingLabel(para(440)), "~2 min read · 440 words");
+  eq("reading: code isn't counted, nor a thinking model's reasoning", [readingLabel(`\`\`\`js\n${para(900)}\n\`\`\`\n${para(10)}`), readingLabel(`<think>${para(900)}</think>${para(10)}`)], [null, null]);
+  eq("reading: never less than a minute; counting words", [readingMinutes(130), countWords("  a  b\nc ")], [1, 3]);
+}
+
+// --- exporting and importing chats ---
+{
+  console.log("\n--- exporting and importing chats ---");
+  const chat = { id: "c1", title: "Plan <b>the</b> trip", createdAt: Date.UTC(2026, 9, 3), updatedAt: 1, messages: [
+    { id: "a", role: "user", content: "hello <script>alert(1)</script> & \"quotes\"", createdAt: 1, attachments: [{ id: "x", kind: "text", name: "n<1>.txt", mime: "text/plain", size: 1 }] },
+    { id: "b", role: "assistant", content: "<think>private</think>Here:\n```js\nif (a < b && c) { x(); }\n```\nDone.", createdAt: 2, model: "m<1>", toolRounds: [{ round: 1, calls: [{ id: "t", name: "calculate", arguments: "{}" }], results: [] }] },
+    { id: "c", role: "tool", content: "ignored", createdAt: 3 },
+  ] } as never;
+  const html = chatToHtml(chat);
+  eq("html: a complete page with no scripts and no external links", [html.startsWith("<!doctype html>"), /<script/i.test(html.replace(/&lt;script&gt;[\s\S]*?&lt;\/script&gt;/, "")), /(src|href)=/i.test(html)], [true, false, false]);
+  eq("html: the title and every message's text are escaped — nothing in a chat is markup", [html.includes("<title>Plan &lt;b&gt;the&lt;/b&gt; trip</title>"), html.includes("&lt;script&gt;alert(1)&lt;/script&gt; &amp; &quot;quotes&quot;"), html.includes("m&lt;1&gt;"), html.includes("n&lt;1&gt;.txt")], [true, true, true, true]);
+  eq("html: code is a block, escaped, and reasoning is left out", [html.includes("<pre data-lang=\"js\"><code>if (a &lt; b &amp;&amp; c) { x(); }</code></pre>"), html.includes("private")], [true, false]);
+  eq("html: tool messages are skipped; tools used are named", [html.includes("ignored"), html.includes("Used calculate"), (html.match(/class="msg /g) ?? []).length], [false, true, 2]);
+  eq("html: a language tag can't carry an attribute", bodyToHtml("```js\" onload=\"x\nok\n```").includes("onload=\"x"), false);
+  eq("html: filename", htmlFilename({ title: "Plan: the trip!" } as never), "plan-the-trip.html");
+
+  const ok = importChat({ format: "jarvis-chat", version: 1, chat: { id: "old", title: "  Kept  ", createdAt: 5, messages: [
+    { id: "m1", role: "user", content: "hi", createdAt: 10, attachments: [{ id: "i", kind: "image", name: "p.png", mime: "image/png", size: 9, dataUrl: "data:image/png;base64,AAAA" }], evil: "x", __proto__: { polluted: true } },
+    { id: "m2", role: "assistant", content: "hello", model: "m", stats: { totalMs: 5, firstTokenMs: 1, tokens: 2 }, reaction: "up", starred: true },
+    { role: "system", content: "dropped" }, { role: "user" }, null, "junk",
+  ], tags: ["Work", "work", "!!"], persona: "  be brief ", provider: "groq" } }, 1000);
+  if (!ok.ok) throw new Error("import failed");
+  eq("import: the chat gets a fresh id and keeps its title and date", [ok.chat.id !== "old", ok.chat.title, ok.chat.createdAt, ok.chat.updatedAt], [true, "Kept", 5, 1000]);
+  eq("import: only user and assistant messages with text come across, and the rest are counted", [ok.chat.messages.length, ok.skipped], [2, 4]);
+  eq("import: messages get new ids", ok.chat.messages.every((m) => !["m1", "m2"].includes(m.id)), true);
+  eq("import: unknown fields don't ride along, and picture bytes are dropped", [("evil" in ok.chat.messages[0]), (ok.chat.messages[0].attachments?.[0] as { dataUrl?: string }).dataUrl], [false, undefined]);
+  eq("import: known extras survive", [ok.chat.messages[1].model, ok.chat.messages[1].reaction, ok.chat.messages[1].starred, ok.chat.messages[1].stats?.tokens], ["m", "up", true, 2]);
+  eq("import: tags are cleaned, instructions kept as written (they are trimmed when used)", [ok.chat.tags, ok.chat.persona, ok.chat.provider], [["work"], "  be brief ", "groq"]);
+  eq("import: a bare chat works too", importChat({ title: "Bare", messages: [{ role: "user", content: "x" }] }).ok, true);
+  eq("import: missing times are made up in order", (() => { const r = importChat({ messages: [{ role: "user", content: "a" }, { role: "assistant", content: "b" }] }, 500); return r.ok ? r.chat.messages.map((m) => m.createdAt) : []; })(), [500, 501]);
+  eq("import: nonsense is refused with a reason", [importChat(null).ok, importChat("x").ok, importChat({}).ok, importChat({ messages: [] }).ok, importChat({ messages: [{ role: "system", content: "x" }] }).ok], [false, false, false, false, false]);
+  eq("import: too many messages is refused", importChat({ messages: Array.from({ length: MAX_IMPORT_MESSAGES + 1 }, () => ({ role: "user", content: "x" })) }).ok, false);
+  eq("import: an export of an export is the same chat", (() => { const a = importChat({ chat: ok.chat }, 2000); return a.ok && a.chat.messages.map((m) => m.content).join("|") === "hi|hello"; })(), true);
+  eq("import: a wrong-typed field is skipped, not trusted", (() => { const r = importChat({ messages: [{ role: "user", content: "x", model: 5, createdAt: "soon", starred: "yes" }] }, 7); return r.ok ? [r.chat.messages[0].model, r.chat.messages[0].createdAt, r.chat.messages[0].starred] : null; })(), [undefined, 7, undefined]);
+
+  const used = new Set<string>();
+  eq("archive: dated, slugged names, never twice the same", [1, 2, 3].map(() => markdownEntryName({ title: "Plan: the trip", createdAt: Date.UTC(2026, 9, 3) }, used)), ["chats/2026-10-03-plan-the-trip.md", "chats/2026-10-03-plan-the-trip-2.md", "chats/2026-10-03-plan-the-trip-3.md"]);
+  eq("archive: an untitled one still has a name", markdownEntryName({ title: "!!!", createdAt: 0 }, new Set()), "chats/1970-01-01-chat.md");
+  eq("archive: the zip's name carries the date", markdownArchiveName(new Date(Date.UTC(2026, 9, 3))), "jarvis-chats-2026-10-03.zip");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

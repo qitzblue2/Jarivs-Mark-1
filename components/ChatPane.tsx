@@ -9,6 +9,9 @@ import type { ChatMeta } from "@/lib/types";
 import type { ContextInfo } from "@/lib/context-meter";
 import Composer from "./Composer";
 import InitiativeBar from "./InitiativeBar";
+import ChatTools from "./ChatTools";
+import FindBar from "./FindBar";
+import { pickJump } from "@/lib/reading";
 import Suggestions from "./Suggestions";
 import ApprovalCard, { type PendingApproval } from "./ApprovalCard";
 import ModelPicker, { type ProviderState } from "./ModelPicker";
@@ -64,6 +67,7 @@ interface Props {
   onOpenChat: (id: string) => void;
   onQuickAction: (id: QuickActionId) => void;
   onReact: (messageId: string, reaction: "up" | "down") => void;
+  onQuote: (messageId: string) => void;
   onOpenInbox: () => void;
 }
 
@@ -82,11 +86,12 @@ export default function ChatPane(props: Props) {
     artifactCount, notice, onDismissNotice, onStartVoice,
     attachments, onAttach, onRemoveAttachment, onAttachError,
     approvals, onApprovalSettled, context, favorites, onToggleFavorite, recent, onOpenChat, onQuickAction,
-    onReact, onOpenInbox,
+    onReact, onQuote, onOpenInbox,
   } = props;
 
   const scroller = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState(true);
+  const [findOpen, setFindOpen] = useState(false);
 
   const messages = chat?.messages ?? [];
   // What you've sent here, for the composer's up arrow. Memoised on the list
@@ -104,6 +109,39 @@ export default function ChatPane(props: Props) {
     if (!pinned) return;
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
   }, [lastId, tail, pinned]);
+
+  // Ctrl/Cmd+Shift+F finds in this chat; Alt+Up/Down moves between your messages.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setFindOpen(true);
+        return;
+      }
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+      // In a box with something typed in it, Alt+arrows belong to the text.
+      const target = e.target as HTMLInputElement | HTMLTextAreaElement | null;
+      if ((target?.tagName === "TEXTAREA" || target?.tagName === "INPUT") && target.value) return;
+      const box = scroller.current;
+      if (!box) return;
+      const mine = [...box.querySelectorAll<HTMLElement>('[data-msg][data-role="user"]')];
+      const top = box.getBoundingClientRect().top;
+      const at = pickJump(mine.map((el) => el.getBoundingClientRect().top - top), e.key === "ArrowUp" ? "up" : "down");
+      if (at === null) return;
+      e.preventDefault();
+      mine[at].scrollIntoView({ block: "start" });
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  function jumpTo(id: string) {
+    const el = document.getElementById(`msg-${id}`);
+    if (!el) return;
+    el.scrollIntoView({ block: "start" });
+    el.classList.add("flash");
+    setTimeout(() => el.classList.remove("flash"), 1800);
+  }
 
   function onScroll() {
     const el = scroller.current;
@@ -138,6 +176,10 @@ export default function ChatPane(props: Props) {
         </h1>
 
         <InitiativeBar onOpenInbox={onOpenInbox} />
+
+        {chat && chat.messages.length > 0 && (
+          <ChatTools chatId={chat.id} messages={chat.messages} onFind={() => setFindOpen(true)} onJump={jumpTo} />
+        )}
 
         {chat && (
           <button
@@ -212,6 +254,16 @@ export default function ChatPane(props: Props) {
         </div>
       )}
 
+      <FindBar
+        open={findOpen && messages.length > 0}
+        onClose={() => {
+          setFindOpen(false);
+          document.getElementById("message-input")?.focus();
+        }}
+        scope={scroller}
+        revision={`${chat?.id}:${messages.length}:${tail}`}
+      />
+
       <div
         ref={scroller}
         onScroll={onScroll}
@@ -280,6 +332,7 @@ export default function ChatPane(props: Props) {
                 onSpeak={onSpeak}
                 speaking={speakingId === message.id}
                 onReact={streaming ? undefined : onReact}
+                onQuote={streaming ? undefined : onQuote}
               />
             ))}
             <Suggestions

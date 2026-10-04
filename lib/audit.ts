@@ -28,7 +28,9 @@ export type AuditKind =
   | "backup.auto.download"
   | "backup.restore"
   | "chat.trash"
-  | "chat.restore";
+  | "chat.restore"
+  | "chat.import"
+  | "export.markdown";
 
 export interface AuditEntry {
   at: number;

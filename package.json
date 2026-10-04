@@ -34,6 +34,7 @@
     "test:models": "node test/e2e-models.mjs",
     "test:extras": "node test/e2e-extras.mjs",
     "test:initiative": "node test/e2e-initiative.mjs",
+    "test:reading": "node test/e2e-reading.mjs",
     "icons": "node scripts/make-icons.mjs"
   },
   "dependencies": {

@@ -270,6 +270,16 @@ body {
   }
 }
 
+/* Find in this chat: every match, and the one you are on. */
+::highlight(find-match) {
+  background-color: rgb(251 191 36 / 0.4);
+  color: inherit;
+}
+::highlight(find-current) {
+  background-color: #f59e0b;
+  color: #000;
+}
+
 /* --- Keyboard focus --------------------------------------------------------
    Every control shows where focus is — a component that wants something else
    sets its own outline (and the browser suite fails if one has none). Fields

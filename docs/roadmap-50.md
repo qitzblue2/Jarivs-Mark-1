@@ -1,4 +1,4 @@
-# Fifty additions — and ten more
+# Fifty additions — and sixty more
 
 Built in batches, each with tests, each in its own commit. A box is ticked only
 when the feature works and its tests pass. Anything not ticked says why.
@@ -81,3 +81,15 @@ JARVIS speaking first, within limits you set. Every item here is opt-out, gentle
 - [x] 58. Follow-up buttons under replies
 - [x] 59. "Remember that?" — offers to save a lasting fact, only on a press
 - [x] 60. 👍 / 👎 on replies, counted under Usage
+
+## H. Reading and navigating chats
+- [x] 61. Find in this chat — every match marked, next and previous
+- [x] 62. Outline: your questions as a jump list
+- [x] 63. Alt+↑ / Alt+↓ between your messages
+- [x] 64. Quote a message into your next one
+- [x] 65. Copy a reply as plain text
+- [x] 66. Reading time and word count on long replies
+- [x] 67. Select several chats to archive, tag or trash together
+- [x] 68. Download a chat as a self-contained web page
+- [x] 69. Import a chat from a JSON export
+- [x] 70. Export every chat as a zip of Markdown files

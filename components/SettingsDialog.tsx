@@ -9,6 +9,7 @@ import { cleanPrompts, type SavedPrompt } from "@/lib/prompts";
 import PromptsEditor from "./PromptsEditor";
 import AppearanceSettings from "./AppearanceSettings";
 import InitiativeSettings from "./InitiativeSettings";
+import DataSettings from "./DataSettings";
 import PersonaPicker from "./PersonaPicker";
 import AutoBackups from "./AutoBackups";
 import { DEFAULT_GREETING } from "@/lib/voice/session";
@@ -322,6 +323,8 @@ export default function SettingsDialog({
           <MemoryEditor open={open} />
 
           <AutoBackups open={open} />
+
+          <DataSettings />
 
           <section className="space-y-2.5">
             <h3 className="text-[12px] font-semibold uppercase tracking-wide text-ink-dim">

@@ -1,8 +1,9 @@
 "use client";
 
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import { splitReasoning } from "@/lib/reasoning";
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Copy, GitBranch, Pencil, RefreshCw, Square, Star, ThumbsDown, ThumbsUp, Volume2, X } from "lucide-react";
+import { readingLabel, toPlainText } from "@/lib/reading";
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Copy, FileText, GitBranch, Pencil, Quote, RefreshCw, Square, Star, ThumbsDown, ThumbsUp, Volume2, X } from "lucide-react";
 import { describeStats, formatTime, isLongMessage } from "@/lib/format";
 import Markdown from "./Markdown";
 import ToolTrace from "./ToolTrace";
@@ -37,6 +38,8 @@ interface Props {
   speaking?: boolean;
   /** Rate a reply 👍 or 👎; pressing the same one again takes it back. */
   onReact?: (messageId: string, reaction: "up" | "down") => void;
+  /** Start your next message with this one quoted. */
+  onQuote?: (messageId: string) => void;
 }
 
 function MessageBody({
@@ -52,11 +55,13 @@ function MessageBody({
   onSpeak,
   speaking,
   onReact,
+  onQuote,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState(message.content);
   const [copied, setCopied] = useState(false);
+  const [copiedText, setCopiedText] = useState(false);
   const models = useModels();
 
   // Bound to this message here rather than by the list, so the props coming
@@ -76,6 +81,19 @@ function MessageBody({
   const isUser = message.role === "user";
   // Pasted logs and files are folded; replies are meant to be read in full.
   const long = isUser && isLongMessage(message.content);
+
+  // How long a long reply takes to read, once it has finished arriving.
+  const reading = useMemo(() => (message.role === "assistant" && !isStreaming ? readingLabel(message.content) : null), [message.role, message.content, isStreaming]);
+
+  async function copyPlain() {
+    try {
+      await navigator.clipboard.writeText(toPlainText(splitReasoning(message.content).answer || message.content));
+      setCopiedText(true);
+      setTimeout(() => setCopiedText(false), 1500);
+    } catch {
+      /* clipboard unavailable */
+    }
+  }
 
   async function copyAll() {
     try {
@@ -131,6 +149,7 @@ function MessageBody({
     <div
       id={`msg-${message.id}`}
       data-msg
+      data-role={message.role}
       className={`group px-4 py-5 sm:px-6 ${isUser ? "" : "border-y border-line-soft bg-panel/40"}`}
     >
       <div className="mx-auto flex max-w-3xl gap-3 sm:gap-4">
@@ -145,9 +164,10 @@ function MessageBody({
         </div>
 
         <div className="min-w-0 flex-1">
-          {!isUser && (message.model || message.fellBackFrom || message.stats || message.reaction || message.starred) && (
+          {!isUser && (message.model || message.fellBackFrom || message.stats || message.reaction || message.starred || reading) && (
             <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[11px] text-ink-faint">
               {message.model && <span className="font-mono">{message.model}</span>}
+              {reading && <span data-reading>{reading}</span>}
               {message.stats && (
                 <span data-stats title="Measured in your browser. Speed is estimated from the length of the reply.">
                   {describeStats(message.stats)}
@@ -224,7 +244,7 @@ function MessageBody({
           )}
 
           {!isStreaming && (
-            <div className="mt-2 flex items-center gap-1 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+            <div data-no-find className="mt-2 flex items-center gap-1 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
               <button
                 onClick={copyAll}
                 className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-ink-faint transition hover:bg-raised hover:text-ink"
@@ -232,6 +252,28 @@ function MessageBody({
                 {copied ? <Check size={12} className="text-arc" /> : <Copy size={12} />}
                 {copied ? "Copied" : "Copy"}
               </button>
+              {!isUser && message.content && (
+                <button
+                  onClick={copyPlain}
+                  className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-ink-faint transition hover:bg-raised hover:text-ink"
+                  title="Copy as plain text — no asterisks or hashes"
+                  data-copy-text
+                >
+                  {copiedText ? <Check size={12} className="text-arc" /> : <FileText size={12} />}
+                  {copiedText ? "Copied" : "Copy text"}
+                </button>
+              )}
+              {onQuote && message.content && (
+                <button
+                  onClick={() => onQuote(message.id)}
+                  className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-ink-faint transition hover:bg-raised hover:text-ink"
+                  title="Start your next message by quoting this one"
+                  data-quote
+                >
+                  <Quote size={12} />
+                  Quote
+                </button>
+              )}
               {isUser && canEdit && onEdit && (
                 <button
                   onClick={() => {
