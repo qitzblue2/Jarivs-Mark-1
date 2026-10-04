@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Archive, ArchiveRestore, Copy, Download, FileJson, SlidersHorizontal, Tag, X } from "lucide-react";
 import { normalizeTag, MAX_TAGS } from "@/lib/chat-ops";
+import { CHAT_COLORS, COLOR_HEX, COLOR_NAME, type ChatColor } from "@/lib/chat-colors";
 import { useEscape } from "@/lib/hooks/use-escape";
 import type { ChatMeta } from "@/lib/types";
 
@@ -16,6 +17,8 @@ interface Props {
   onArchive: (archived: boolean) => void;
   onDuplicate: () => void;
   onInstructions: () => void;
+  /** Set the colour label, or null to take it off. */
+  onColor: (color: ChatColor | null) => void;
 }
 
 const WIDTH = 220;
@@ -27,10 +30,11 @@ const WIDTH = 220;
  * positioned inside it would be clipped by the list's edge, or scroll away
  * from the row it belongs to.
  */
-export default function ChatMenu({ chat, anchor, onClose, onTags, onArchive, onDuplicate, onInstructions }: Props) {
+export default function ChatMenu({ chat, anchor, onClose, onTags, onArchive, onDuplicate, onInstructions, onColor }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const [tags, setTags] = useState<string[]>(chat.tags ?? []);
   const [draft, setDraft] = useState("");
+  const [color, setColor] = useState<ChatColor | null>(chat.color ?? null);
   const [pos, setPos] = useState({ left: Math.max(8, anchor.right - WIDTH), top: anchor.bottom + 4 });
 
   useEscape(true, onClose);
@@ -72,8 +76,11 @@ export default function ChatMenu({ chat, anchor, onClose, onTags, onArchive, onD
   return createPortal(
     <div
       ref={box}
-      role="menu"
+      // A dialog holding the tag box and colours, with the actions as a real menu inside it:
+      // a menu may only hold menu items, and a text field is not one.
+      role="dialog"
       aria-label={`Options for ${chat.title}`}
+      data-chat-menu
       className="fixed z-[70] rounded-lg border border-line bg-panel p-1 shadow-2xl"
       style={{ left: pos.left, top: pos.top, width: WIDTH }}
     >
@@ -109,8 +116,33 @@ export default function ChatMenu({ chat, anchor, onClose, onTags, onArchive, onD
         />
       </div>
 
+      <div className="px-2 pb-1.5">
+        <div className="mb-1 text-[10px] uppercase tracking-widest text-ink-faint">Colour label</div>
+        <div className="flex items-center gap-1.5" data-color-choices role="radiogroup" aria-label="Colour label">
+          {CHAT_COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              role="radio"
+              aria-checked={color === c}
+              aria-label={COLOR_NAME[c]}
+              title={color === c ? `${COLOR_NAME[c]} — press to remove` : COLOR_NAME[c]}
+              data-color={c}
+              onClick={() => {
+                const next = color === c ? null : c;
+                setColor(next);
+                onColor(next);
+              }}
+              className={`h-5 w-5 rounded-full ring-offset-2 ring-offset-panel transition ${color === c ? "ring-2 ring-ink" : "hover:ring-2 hover:ring-line-strong"}`}
+              style={{ background: COLOR_HEX[c] }}
+            />
+          ))}
+        </div>
+      </div>
+
       <div className="my-1 border-t border-line-soft" />
 
+      <div role="menu" aria-label="Chat actions">
       <button
         role="menuitem"
         className={item}
@@ -148,6 +180,7 @@ export default function ChatMenu({ chat, anchor, onClose, onTags, onArchive, onD
       <a role="menuitem" className={item} href={`/api/chats/${chat.id}/export?format=json`} onClick={onClose}>
         <FileJson size={13} /> Export as JSON
       </a>
+      </div>
     </div>,
     document.body,
   );

@@ -3,7 +3,7 @@
 import { memo, useCallback, useMemo, useState } from "react";
 import { splitReasoning } from "@/lib/reasoning";
 import { readingLabel, toPlainText } from "@/lib/reading";
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Copy, FileText, GitBranch, Pencil, Quote, RefreshCw, Square, Star, ThumbsDown, ThumbsUp, Volume2, X } from "lucide-react";
+import { AlertTriangle, Brain, Check, ChevronDown, ChevronRight, Copy, FileText, GitBranch, Pencil, Quote, RefreshCw, Square, Star, ThumbsDown, ThumbsUp, Volume2, X } from "lucide-react";
 import { describeStats, formatTime, isLongMessage } from "@/lib/format";
 import Markdown from "./Markdown";
 import ToolTrace from "./ToolTrace";
@@ -40,6 +40,8 @@ interface Props {
   onReact?: (messageId: string, reaction: "up" | "down") => void;
   /** Start your next message with this one quoted. */
   onQuote?: (messageId: string) => void;
+  /** Offer to save something from this message to memory — the words selected in it, if any. */
+  onRemember?: (messageId: string, selection: string) => void;
 }
 
 function MessageBody({
@@ -56,6 +58,7 @@ function MessageBody({
   speaking,
   onReact,
   onQuote,
+  onRemember,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -261,6 +264,23 @@ function MessageBody({
                 >
                   {copiedText ? <Check size={12} className="text-arc" /> : <FileText size={12} />}
                   {copiedText ? "Copied" : "Copy text"}
+                </button>
+              )}
+              {onRemember && message.content && (
+                <button
+                  // Pressing a button must not clear the text selected in the message: that is what gets remembered.
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    const sel = window.getSelection();
+                    const inside = sel && sel.rangeCount > 0 && document.getElementById(`msg-${message.id}`)?.contains(sel.anchorNode);
+                    onRemember(message.id, inside ? sel.toString() : "");
+                  }}
+                  className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-ink-faint transition hover:bg-raised hover:text-ink"
+                  title="Save this — or the words you have selected — to memory"
+                  data-remember
+                >
+                  <Brain size={12} />
+                  Remember
                 </button>
               )}
               {onQuote && message.content && (

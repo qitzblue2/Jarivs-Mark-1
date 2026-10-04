@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Brain, Check, Download, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react";
+import { Brain, Check, Download, GitMerge, ListPlus, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import type { MemoryEntry } from "@/lib/memory";
 import { filterMemory, parseTagInput, tagCounts } from "@/lib/memory/filter";
+import { dateInputOf, expiryFromDateInput, expiryLabel, findDuplicates, isExpired, mergeGroup, type DuplicateGroup } from "@/lib/memory/housekeeping";
 
 /**
  * Everything JARVIS remembers, editable, searchable, and portable.
@@ -22,6 +23,10 @@ export default function MemoryEditor({ open }: { open: boolean }) {
   const [draft, setDraft] = useState("");
   const [tagDraft, setTagDraft] = useState("");
   const [adding, setAdding] = useState(false);
+  const [expiryDraft, setExpiryDraft] = useState("");
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [dupes, setDupes] = useState<DuplicateGroup[] | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [query, setQuery] = useState("");
   const [tag, setTag] = useState("");
@@ -61,15 +66,67 @@ export default function MemoryEditor({ open }: { open: boolean }) {
   async function save(text: string, tagText: string, id?: string) {
     const trimmed = text.trim();
     if (!trimmed) return;
+    const expires = expiryDraft ? expiryFromDateInput(expiryDraft) : null;
     await fetch("/api/memory", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, text: trimmed, tags: parseTagInput(tagText) }),
+      // An edit always says what the expiry is, so clearing the date makes it last again.
+      body: JSON.stringify({ id, text: trimmed, tags: parseTagInput(tagText), ...(id || expires ? { expires } : {}) }),
     });
     setEditingId(null);
     setAdding(false);
     setDraft("");
     setTagDraft("");
+    setExpiryDraft("");
+    await load();
+  }
+
+  async function addMany() {
+    if (!bulkText.trim()) return;
+    setNote(null);
+    try {
+      const res = await fetch("/api/memory", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bulk: bulkText }) });
+      const data = await res.json();
+      if (!res.ok) return setNote({ ok: false, text: data.error ?? "Those couldn't be added." });
+      const s = data.skipped;
+      const parts = [`Added ${data.added}`];
+      if (s.duplicate) parts.push(`${s.duplicate} already remembered`);
+      if (s.tooLong) parts.push(`${s.tooLong} too long`);
+      if (s.overLimit) parts.push(`${s.overLimit} past the limit of 100 at a time`);
+      if (s.full) parts.push(`${s.full} left out — memory is full`);
+      setNote({ ok: true, text: `${parts.join(" · ")}.` });
+      setBulkText("");
+      setBulkOpen(false);
+      await load();
+    } catch {
+      setNote({ ok: false, text: "Couldn't reach the server." });
+    }
+  }
+
+  function checkDuplicates() {
+    const found = findDuplicates(entries);
+    setNote(found.length === 0 ? { ok: true, text: "No duplicates found — nothing says the same thing twice." } : null);
+    setDupes(found.length ? found : null);
+  }
+
+  async function mergeOne(group: DuplicateGroup) {
+    const merged = mergeGroup(group);
+    await fetch("/api/memory", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: merged.id, text: merged.text, tags: merged.tags, expires: merged.expires ?? null }),
+    });
+    for (const extra of group.extras) await fetch(`/api/memory?id=${encodeURIComponent(extra.id)}`, { method: "DELETE" });
+  }
+
+  async function merge(groups: DuplicateGroup[]) {
+    for (const g of groups) await mergeOne(g);
+    const removed = groups.reduce((n, g) => n + g.extras.length, 0);
+    setNote({ ok: true, text: `Merged ${removed + groups.length} entries into ${groups.length}.` });
+    setDupes((prev) => {
+      const left = (prev ?? []).filter((g) => !groups.includes(g));
+      return left.length ? left : null;
+    });
     await load();
   }
 
@@ -130,12 +187,36 @@ export default function MemoryEditor({ open }: { open: boolean }) {
             setAdding(true);
             setDraft("");
             setTagDraft("");
+            setExpiryDraft("");
           }}
           className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-ink-faint transition hover:text-arc"
         >
           <Plus size={11} />
           Add
         </button>
+        <button
+          type="button"
+          onClick={() => setBulkOpen((v) => !v)}
+          aria-expanded={bulkOpen}
+          data-memory-bulk-toggle
+          className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-ink-faint transition hover:text-arc"
+          title="Add several facts at once, one per line"
+        >
+          <ListPlus size={11} />
+          Add many
+        </button>
+        {entries.length > 1 && (
+          <button
+            type="button"
+            onClick={checkDuplicates}
+            data-memory-find-duplicates
+            className="flex items-center gap-1 rounded px-1.5 py-1 text-[11px] text-ink-faint transition hover:text-arc"
+            title="Find facts that say the same thing twice"
+          >
+            <GitMerge size={11} />
+            Duplicates
+          </button>
+        )}
         <a
           href="/api/memory/export"
           download
@@ -208,6 +289,61 @@ export default function MemoryEditor({ open }: { open: boolean }) {
         )}
       </div>
 
+      {bulkOpen && (
+        <div className="mb-2 space-y-1.5" data-memory-bulk>
+          <textarea
+            value={bulkText}
+            onChange={(e) => setBulkText(e.target.value)}
+            rows={5}
+            aria-label="Facts to add, one per line"
+            placeholder={"One fact per line. Bullets and numbers are fine.\nAllergic to peanuts #health\nPrefers metric units"}
+            data-memory-bulk-text
+            className="w-full resize-y rounded-md border border-arc-dim bg-base px-2.5 py-1.5 text-[12px] leading-relaxed outline-none placeholder:text-ink-faint"
+          />
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => void addMany()} disabled={!bulkText.trim()} data-memory-bulk-add className="rounded-md bg-arc-solid px-2.5 py-1 text-[12px] font-medium text-white transition hover:bg-arc-solid-hover disabled:opacity-50">
+              Add them
+            </button>
+            <span className="text-[11px] text-ink-faint">Up to 100 at a time. #tags at the end of a line become its tags; what is already remembered is skipped.</span>
+          </div>
+        </div>
+      )}
+
+      {dupes && (
+        <div className="mb-2 space-y-1.5 rounded-md border border-line bg-base p-2" data-memory-dupes>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11.5px] text-ink-dim">
+              {dupes.length} group{dupes.length === 1 ? "" : "s"} saying the same thing. Merging keeps the newest wording, everyone&apos;s tags, and removes the rest.
+            </p>
+            <span className="flex shrink-0 gap-1">
+              <button type="button" onClick={() => void merge(dupes)} data-memory-merge-all className="rounded px-1.5 py-1 text-[11px] text-arc transition hover:bg-raised">
+                Merge all
+              </button>
+              <button type="button" onClick={() => setDupes(null)} aria-label="Close duplicates" className="rounded p-1 text-ink-faint hover:text-ink">
+                <X size={11} />
+              </button>
+            </span>
+          </div>
+          <ul className="max-h-40 space-y-1.5 overflow-y-auto" tabIndex={0} aria-label="Groups of duplicates">
+            {dupes.map((g) => (
+              <li key={g.keep.id} data-memory-dupe-group className="flex items-start gap-2 rounded bg-raised/50 px-2 py-1.5">
+                <div className="min-w-0 flex-1 text-[11.5px] leading-relaxed">
+                  <p className="text-ink">{g.keep.text}</p>
+                  {g.extras.map((x) => (
+                    <p key={x.id} className="text-ink-faint line-through decoration-ink-faint/50">
+                      {x.text}
+                    </p>
+                  ))}
+                </div>
+                <button type="button" onClick={() => void merge([g])} data-memory-merge className="shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-ink-dim transition hover:text-ink">
+                  Merge {g.extras.length + 1}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {adding && (
         <div className="mb-2 space-y-1.5" data-memory-add>
           <div className="flex gap-1.5">
@@ -238,6 +374,18 @@ export default function MemoryEditor({ open }: { open: boolean }) {
             placeholder="Tags, separated by commas (optional)"
             className="w-full rounded-md border border-line bg-base px-2.5 py-1 text-[11.5px] outline-none focus:border-arc-dim"
           />
+          <label className="flex items-center gap-2 text-[11.5px] text-ink-dim">
+            Forget after
+            <input
+              type="date"
+              value={expiryDraft}
+              onChange={(e) => setExpiryDraft(e.target.value)}
+              aria-label="Stop using this after (optional)"
+              data-memory-expiry
+              className="rounded-md border border-line bg-base px-2 py-0.5 text-[11.5px] outline-none focus:border-arc-dim"
+            />
+            <span className="text-ink-faint">(optional)</span>
+          </label>
         </div>
       )}
 
@@ -320,6 +468,17 @@ export default function MemoryEditor({ open }: { open: boolean }) {
                       placeholder="Tags, separated by commas"
                       className="w-full rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10.5px] outline-none focus:border-arc-dim"
                     />
+                    <label className="flex items-center gap-1.5 text-[10.5px] text-ink-dim">
+                      Forget after
+                      <input
+                        type="date"
+                        value={expiryDraft}
+                        onChange={(e) => setExpiryDraft(e.target.value)}
+                        aria-label="Stop using this after (optional)"
+                        data-memory-expiry
+                        className="rounded border border-line bg-panel px-1.5 py-0.5 text-[10.5px] outline-none focus:border-arc-dim"
+                      />
+                    </label>
                   </div>
                   <button type="button" onClick={() => void save(draft, tagDraft, entry.id)} aria-label="Save" className="p-0.5 text-arc">
                     <Check size={12} />
@@ -332,12 +491,22 @@ export default function MemoryEditor({ open }: { open: boolean }) {
                     {entry.tags.length > 0 && (
                       <span className="ml-1.5 font-mono text-[9.5px] text-arc">{entry.tags.map((t) => `#${t}`).join(" ")}</span>
                     )}
+                    {expiryLabel(entry) && (
+                      <span
+                        data-memory-expiry-label={isExpired(entry) ? "expired" : "pending"}
+                        title={isExpired(entry) ? "No longer given to the model. Edit it to extend, or forget it." : "After this date it is no longer given to the model."}
+                        className={`ml-1.5 text-[10px] ${isExpired(entry) ? "text-warn" : "text-ink-faint"}`}
+                      >
+                        ({expiryLabel(entry)})
+                      </span>
+                    )}
                   </span>
                   <button
                     type="button"
                     onClick={() => {
                       setDraft(entry.text);
                       setTagDraft(entry.tags.join(", "));
+                      setExpiryDraft(dateInputOf(entry.expires));
                       setEditingId(entry.id);
                     }}
                     aria-label={`Edit: ${entry.text.slice(0, 40)}`}

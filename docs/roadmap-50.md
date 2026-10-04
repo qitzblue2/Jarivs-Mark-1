@@ -105,3 +105,15 @@ JARVIS speaking first, within limits you set. Every item here is opt-out, gentle
 - [x] 78. Saved prompts with `{{blanks}}` that ask before they fill
 - [x] 79. Search what you've sent (Ctrl/⌘+R)
 - [x] 80. Reply-style presets — Precise, Balanced, Creative
+
+## J. Organising and data
+- [x] 81. Remember from a message — the words you selected, or the start of it
+- [x] 82. Memory: find duplicates and merge them
+- [x] 83. Memory: facts that expire
+- [x] 84. Memory: add many facts from pasted lines
+- [x] 85. Private notes on a chat
+- [x] 86. Colour labels on chats
+- [x] 87. Choose how the chat list is ordered
+- [x] 88. Compact chat list
+- [x] 89. Storage view — where the disk space goes
+- [x] 90. The biggest chats, with a way to trash them

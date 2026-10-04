@@ -93,7 +93,14 @@ export interface Chat {
   persona?: string;
   /** Where a branched or duplicated chat came from. */
   branchedFrom?: { chatId: string; messageId?: string };
+  /** Private notes about this chat. Never sent to a model, never in an export. */
+  notes?: string;
+  /** A colour label, for telling chats apart at a glance in the list. */
+  color?: ChatColor;
 }
+
+export const CHAT_COLORS = ["red", "orange", "yellow", "green", "blue", "purple"] as const;
+export type ChatColor = (typeof CHAT_COLORS)[number];
 
 /** A chat in the trash, with when it went there. */
 export interface TrashedChat extends Chat {
@@ -110,6 +117,9 @@ export interface ChatMeta {
   pinned?: boolean;
   tags?: string[];
   archived?: boolean;
+  color?: ChatColor;
+  /** Has notes written in it. */
+  hasNotes?: boolean;
 }
 
 /** A fenced code block lifted out of a message and into the canvas. */
@@ -133,6 +143,8 @@ export function chatMeta(chat: Chat): ChatMeta {
     ...(chat.pinned ? { pinned: true } : {}),
     ...(chat.tags?.length ? { tags: chat.tags } : {}),
     ...(chat.archived ? { archived: true } : {}),
+    ...(chat.color ? { color: chat.color } : {}),
+    ...(chat.notes ? { hasNotes: true } : {}),
   };
 }
 

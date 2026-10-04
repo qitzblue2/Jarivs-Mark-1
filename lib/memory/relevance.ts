@@ -1,3 +1,4 @@
+import { isExpired } from "./housekeeping";
 import type { MemoryEntry } from "./types";
 
 /** Words too common to say anything about relevance. */
@@ -65,9 +66,11 @@ export function forPrompt(
   query: string,
   maxTokens = 400,
 ): MemoryEntry[] {
-  const pinned = entries.filter((e) => e.tags.some((t) => t.toLowerCase() === "always"));
+  // A fact that has run out is not offered to the model, however relevant or pinned.
+  const live = entries.filter((e) => !isExpired(e));
+  const pinned = live.filter((e) => e.tags.some((t) => t.toLowerCase() === "always"));
   const pinnedIds = new Set(pinned.map((e) => e.id));
-  const relevant = rank(entries.filter((e) => !pinnedIds.has(e.id)), query);
+  const relevant = rank(live.filter((e) => !pinnedIds.has(e.id)), query);
 
   const chosen: MemoryEntry[] = [];
   let used = 0;

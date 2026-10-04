@@ -7,6 +7,11 @@ export interface MemoryEntry {
   updatedAt: number;
   /** Which conversation it was learned in, for provenance. */
   sourceChatId?: string;
+  /**
+   * After this moment it is no longer put in the prompt. Never deleted for it:
+   * it stays in the list, flagged, until a person removes it or extends it.
+   */
+  expires?: number;
 }
 
 /**

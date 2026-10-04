@@ -73,7 +73,7 @@ const row = (title) => page.locator("[data-chat-row]").filter({ has: page.getByT
 const menuOf = async (title) => {
   await row(title).hover();
   await row(title).locator('button[title="More"]').click();
-  return page.locator('[role="menu"]');
+  return page.locator("[data-chat-menu]");
 };
 
 try {

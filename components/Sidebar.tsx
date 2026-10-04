@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
+  ArrowUpDown,
   Check,
   CheckSquare,
   ChevronRight,
@@ -27,6 +28,9 @@ import { groupByDate } from "@/lib/chat-groups";
 import { relativeTime } from "@/lib/format";
 import { tagCounts } from "@/lib/chat-ops";
 import ChatMenu from "./ChatMenu";
+import { COLOR_HEX, COLOR_NAME, type ChatColor } from "@/lib/chat-colors";
+import { nextSort, SORT_LABEL, sortChatList } from "@/lib/chat-list";
+import { setPrefs, usePrefs } from "@/lib/prefs-store";
 
 interface Props {
   chats: ChatMeta[];
@@ -41,6 +45,8 @@ interface Props {
   onTags: (id: string, tags: string[]) => void;
   /** Archive, trash or tag several chats at once. */
   onBulk: (ids: string[], action: { type: "archive" } | { type: "trash" } | { type: "tag"; tag: string }) => void;
+  /** Set a chat's colour label, or null to remove it. */
+  onColor: (id: string, color: ChatColor | null) => void;
   onDuplicate: (id: string) => void;
   onEditInstructions: (id: string) => void;
   onOpenTrash: () => void;
@@ -69,6 +75,7 @@ export default function Sidebar({
   onArchive,
   onTags,
   onBulk,
+  onColor,
   onDuplicate,
   onEditInstructions,
   onOpenTrash,
@@ -81,6 +88,7 @@ export default function Sidebar({
   storageDriver,
   edge,
 }: Props) {
+  const prefs = usePrefs();
   const [query, setQuery] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -156,6 +164,7 @@ export default function Sidebar({
   const live = useMemo(() => chats.filter((c) => !c.archived), [chats]);
   const archived = useMemo(() => chats.filter((c) => c.archived), [chats]);
   const sections = useMemo(() => groupByDate(live), [live]);
+  const flat = useMemo(() => (prefs.chatSort === "recent" ? [] : sortChatList(live, prefs.chatSort)), [live, prefs.chatSort]);
   const tags = useMemo(() => tagCounts(live), [live]);
 
   function commitRename(id: string) {
@@ -214,12 +223,15 @@ export default function Sidebar({
               <MessageSquare size={14} className={`shrink-0 ${active ? "text-arc" : "text-ink-faint"}`} />
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1 truncate text-[13px]">
+                  {chat.color && (
+                    <span role="img" aria-label={`${COLOR_NAME[chat.color]} label`} data-chat-color={chat.color} className="h-2 w-2 shrink-0 rounded-full" style={{ background: COLOR_HEX[chat.color] }} />
+                  )}
                   <span className="truncate">{chat.title}</span>
                   {chat.archived && <Archive size={10} className="shrink-0 text-ink-faint" aria-label="archived" />}
                 </span>
                 {chat.snippet ? (
                   <span className="line-clamp-2 block text-[11px] text-ink-dim">{chat.snippet}</span>
-                ) : (
+                ) : prefs.compactList ? null : (
                   <span className="block truncate text-[10px] text-ink-faint">
                     {relativeTime(chat.updatedAt)} · {chat.messageCount} msg
                     {chat.tags?.length ? ` · ${chat.tags.map((t) => `#${t}`).join(" ")}` : ""}
@@ -335,6 +347,16 @@ export default function Sidebar({
         </button>
         <button
           type="button"
+          onClick={() => setPrefs({ chatSort: nextSort(prefs.chatSort) })}
+          title={`${SORT_LABEL[prefs.chatSort]} — press to change the order`}
+          aria-label={`Chat order: ${SORT_LABEL[prefs.chatSort]}. Press to change.`}
+          data-sort-button={prefs.chatSort}
+          className={`shrink-0 rounded-lg border px-2.5 transition ${prefs.chatSort === "recent" ? "border-line bg-raised text-ink-faint hover:border-arc-dim/50 hover:text-arc" : "border-arc-dim bg-arc-dim/15 text-arc"}`}
+        >
+          <ArrowUpDown size={15} aria-hidden />
+        </button>
+        <button
+          type="button"
           onClick={() => (selecting ? endSelecting() : setSelecting(true))}
           aria-pressed={selecting}
           title={selecting ? "Stop selecting" : "Select several chats to archive, tag or trash together"}
@@ -397,7 +419,13 @@ export default function Sidebar({
             {live.length === 0 && archived.length === 0 && (
               <p className="px-2 py-6 text-center text-[13px] text-ink-faint">No chats yet.</p>
             )}
-            {sections.map((section) => (
+            {flat.length > 0 && (
+              <section data-chat-section="sorted">
+                <h2 className="px-2.5 pb-1 pt-1 text-[10px] font-normal uppercase tracking-widest text-ink-faint">{SORT_LABEL[prefs.chatSort]}</h2>
+                <ul className="space-y-0.5">{flat.map(row)}</ul>
+              </section>
+            )}
+            {flat.length === 0 && sections.map((section) => (
               <section key={section.label} data-chat-section={section.label}>
                 <h2 className="px-2.5 pb-1 pt-3 text-[10px] font-normal uppercase tracking-widest text-ink-faint first:pt-1">
                   {section.label}
@@ -533,6 +561,7 @@ export default function Sidebar({
           onArchive={(archivedNow) => onArchive(menuChat.id, archivedNow)}
           onDuplicate={() => onDuplicate(menuChat.id)}
           onInstructions={() => onEditInstructions(menuChat.id)}
+          onColor={(color) => onColor(menuChat.id, color)}
         />
       )}
       {edge}

@@ -68,6 +68,8 @@ interface Props {
   onQuickAction: (id: QuickActionId) => void;
   onReact: (messageId: string, reaction: "up" | "down") => void;
   onQuote: (messageId: string) => void;
+  onRemember: (messageId: string, selection: string) => void;
+  onOpenNotes: () => void;
   onOpenInbox: () => void;
   temperature: number;
   onTemperature: (value: number) => void;
@@ -88,7 +90,7 @@ export default function ChatPane(props: Props) {
     artifactCount, notice, onDismissNotice, onStartVoice,
     attachments, onAttach, onRemoveAttachment, onAttachError,
     approvals, onApprovalSettled, context, favorites, onToggleFavorite, recent, onOpenChat, onQuickAction,
-    onReact, onQuote, onOpenInbox, temperature, onTemperature,
+    onReact, onQuote, onRemember, onOpenNotes, onOpenInbox, temperature, onTemperature,
   } = props;
 
   const scroller = useRef<HTMLDivElement>(null);
@@ -180,7 +182,7 @@ export default function ChatPane(props: Props) {
         <InitiativeBar onOpenInbox={onOpenInbox} />
 
         {chat && chat.messages.length > 0 && (
-          <ChatTools chatId={chat.id} messages={chat.messages} onFind={() => setFindOpen(true)} onJump={jumpTo} />
+          <ChatTools chatId={chat.id} messages={chat.messages} hasNotes={Boolean(chat.notes)} onFind={() => setFindOpen(true)} onJump={jumpTo} onNotes={onOpenNotes} />
         )}
 
         {chat && (
@@ -335,6 +337,7 @@ export default function ChatPane(props: Props) {
                 speaking={speakingId === message.id}
                 onReact={streaming ? undefined : onReact}
                 onQuote={streaming ? undefined : onQuote}
+                onRemember={streaming ? undefined : onRemember}
               />
             ))}
             <Suggestions

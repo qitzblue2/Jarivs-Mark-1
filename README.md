@@ -492,6 +492,26 @@ In **Settings → Memory**:
   from someone else. (What `always` entries may cost per request is capped, as
   before.)
 
+### Tidying memory
+
+- **Remember from a message.** *Remember* under any message opens a small form
+  offering the words you had **selected** in it — or else the start of the
+  message as one plain line — to shorten or reword before it is kept (a memory is
+  read into every chat it is relevant to, so short ones cost less). *Always keep
+  in mind* tags it `always`. Saving the same words twice is noted as already
+  known, not added again.
+- **Facts that run out.** Give an entry a *Forget after* date (editing it, or
+  when adding): from then on it is **left out of the prompt** — pinned or not —
+  and the list shows *(expired)* or *(expires in 5 days)*. Nothing is deleted
+  for it; clear the date to make it last again. Expiry travels in exports.
+- **Add many.** Paste lines — bullets and numbers are fine, `#tags` at the end of a
+  line become its tags — up to 100 at a time. Lines already remembered, or
+  repeated in the paste, are skipped, and the result says how many and why.
+- **Duplicates.** *Duplicates* finds entries that say the same thing — identical
+  ignoring capitals and spacing, or sharing nearly all their words (three at
+  least) — and offers to merge each group: the newest wording is kept, everyone's
+  tags are joined, the rest go. Nothing merges until you press it.
+
 ## 6. Attachments
 
 Drag a file onto the composer, paste a screenshot, or use the clip button.
@@ -1005,6 +1025,24 @@ days** and **Older**, measured from local midnight, with pinned chats on top.
 - **Delete moves a chat to the trash**, where it can be restored for 30 days.
   Only **Delete for good** and **Empty trash**, both asking first, destroy one.
 
+### Notes, colours, order and space
+
+- **Notes.** *Notes about this chat* (the chat tools button) is a private
+  scratchpad kept with the chat: "what I decided", "still to check". It is
+  **never sent to a model** and left out of Markdown and web-page exports; it is
+  in the chat's JSON and in backups.
+- **Colour labels.** The chat's **…** menu has six colours; a dot shows in the
+  list (with a name for screen readers, so colour isn't the only signal). A
+  copy keeps the colour.
+- **Order.** The arrows button above the list cycles *most recent* (grouped by
+  day), *oldest*, *by title* and *longest*; the last three are one flat list,
+  pinned chats first. Also in Settings, along with **compact** — titles only.
+  Remembered on this device.
+- **Storage.** Settings → *Your chats, in and out* shows what each kind of thing
+  takes — chats, pictures, trash, daily backups, memory, the rest — the disk's free
+  space, and the chats that take the most, each with a *move to the trash* button
+  (it asks first, and the trash keeps it for 30 days).
+
 ### Backing up and restoring
 
 **Back up** at the bottom of the sidebar downloads all of `data/` as one zip,
@@ -1155,6 +1193,7 @@ npm run test:composer  # timestamps, saved messages, folding, drafts, up arrow, 
 npm run test:appearance  # theme, text size, shortcuts, resizing, focus, axe scan, print, manifest, offline
 npm run test:models  # persona presets, context meter, favourites, regenerate-with, memory search/export/import, units
 npm run test:extras  # templates, welcome screen, gallery families, usage CSV, daily backups, chat statistics
+npm run test:organising  # remember from a message, expiring memory, add many, duplicates, notes, colours, order, storage
 npm run test:writing  # counter, send key, spellcheck, reply style, /model /title /tag /undo, prompt blanks, searching what you sent
 npm run test:reading  # find, outline, jump keys, quote, plain copy, reading time, bulk select, web-page export, import, Markdown zip
 npm run test:initiative  # mood, cards, controls, focus timer, inbox, tone, follow-ups, ratings — takes a minute and a half (it waits for the real scheduler)

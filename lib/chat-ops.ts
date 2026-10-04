@@ -1,4 +1,4 @@
-import { newId, type Chat, type Message } from "@/lib/types";
+import { CHAT_COLORS, newId, type Chat, type ChatColor, type Message } from "@/lib/types";
 
 /**
  * Changing a chat: the rules, kept out of the routes so they can be tested.
@@ -7,6 +7,7 @@ import { newId, type Chat, type Message } from "@/lib/types";
 export const MAX_TAGS = 8;
 export const MAX_TAG_LENGTH = 24;
 export const MAX_PERSONA = 20_000;
+export const MAX_NOTES = 20_000;
 
 /**
  * One tag, in its canonical form: lowercase, words joined with hyphens, only
@@ -91,6 +92,15 @@ export function applyChatPatch(existing: Chat, body: unknown, now = Date.now()):
     const tags = normalizeTags(patch.tags);
     next.tags = tags.length ? tags : undefined;
   }
+  if ("notes" in patch) {
+    if (patch.notes !== null && typeof patch.notes !== "string") return { ok: false, error: "notes must be text, or null to clear them." };
+    const notes = typeof patch.notes === "string" ? patch.notes.slice(0, MAX_NOTES) : "";
+    next.notes = notes.trim() ? notes : undefined;
+  }
+  if ("color" in patch) {
+    if (patch.color !== null && !CHAT_COLORS.includes(patch.color as ChatColor)) return { ok: false, error: `color must be one of ${CHAT_COLORS.join(", ")}, or null.` };
+    next.color = (patch.color as ChatColor | null) ?? undefined;
+  }
   if ("persona" in patch) {
     if (patch.persona !== null && typeof patch.persona !== "string") return { ok: false, error: "persona must be text, or null to clear it." };
     const persona = typeof patch.persona === "string" ? patch.persona.trim().slice(0, MAX_PERSONA) : "";
@@ -129,6 +139,7 @@ export function branchChat(source: Chat, messageId: string | undefined, now = Da
     model: source.model,
     ...(source.tags?.length ? { tags: [...source.tags] } : {}),
     ...(source.persona ? { persona: source.persona } : {}),
+    ...(source.color ? { color: source.color } : {}),
     branchedFrom: { chatId: source.id, ...(messageId !== undefined ? { messageId } : {}) },
   };
 }

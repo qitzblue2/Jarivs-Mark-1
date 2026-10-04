@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { getMemory } from "@/lib/memory";
 import { cleanTags } from "@/lib/memory/filter";
+import { cleanExpiry, parseBulk } from "@/lib/memory/housekeeping";
+import { MAX_MEMORY_ENTRIES } from "@/lib/memory/transfer";
 import { isValidChatId, newId } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -16,10 +18,28 @@ export async function GET() {
   }
 }
 
-/** POST — add or edit an entry by hand. */
+/**
+ * POST — add or edit an entry by hand.
+ *
+ * `{ bulk: "line\nline #tag" }` adds one entry per line (see parseBulk), skipping
+ * what is already remembered, and says how many went in and why the rest didn't.
+ * `expires` is a time, or null to make an entry last again.
+ */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
+
+    if (typeof body?.bulk === "string") {
+      const store = getMemory();
+      const existing = await store.list();
+      const plan = parseBulk(body.bulk, existing.map((e) => e.text));
+      const room = Math.max(0, MAX_MEMORY_ENTRIES - existing.length);
+      const adding = plan.add.slice(0, room);
+      const now = Date.now();
+      await store.addMany(adding.map((a, i) => ({ id: newId(), text: a.text, tags: a.tags, createdAt: now + i, updatedAt: now + i })));
+      return Response.json({ added: adding.length, skipped: { ...plan.skipped, full: plan.add.length - adding.length } }, { status: 201 });
+    }
+
     const text = String(body?.text ?? "").trim();
     if (!text) return Response.json({ error: "Text is required." }, { status: 400 });
 
@@ -30,11 +50,16 @@ export async function POST(req: NextRequest) {
     // an entry in every chat.
     const sentTags = Array.isArray(body?.tags);
     const tags = cleanTags(body?.tags);
+    const expires = cleanExpiry(body?.expires);
 
     if (body?.id) {
       const existing = (await store.list()).find((e) => e.id === body.id);
       if (!existing) return Response.json({ error: "Not found" }, { status: 404 });
-      await store.save({ ...existing, text, tags: sentTags ? tags : existing.tags, updatedAt: now });
+      const next = { ...existing, text, tags: sentTags ? tags : existing.tags, updatedAt: now };
+      // Only touched when the request says something about it: an edit of the words must not make a fact last forever.
+      if (expires === null) delete next.expires;
+      else if (expires !== undefined) next.expires = expires;
+      await store.save(next);
       return Response.json({ ok: true });
     }
 
@@ -51,7 +76,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    await store.save({ id: newId(), text, tags, createdAt: now, updatedAt: now });
+    await store.save({ id: newId(), text, tags, createdAt: now, updatedAt: now, ...(typeof expires === "number" ? { expires } : {}) });
     return Response.json({ ok: true }, { status: 201 });
   } catch (err) {
     return Response.json({ error: (err as Error).message }, { status: 500 });

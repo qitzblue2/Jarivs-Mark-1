@@ -36,6 +36,7 @@
     "test:initiative": "node test/e2e-initiative.mjs",
     "test:reading": "node test/e2e-reading.mjs",
     "test:writing": "node test/e2e-writing.mjs",
+    "test:organising": "node test/e2e-organising.mjs",
     "icons": "node scripts/make-icons.mjs"
   },
   "dependencies": {

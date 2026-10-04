@@ -44,6 +44,10 @@ import { readTone, type Tone } from "@/lib/initiative/tone";
 import { appendQuote, quoteText } from "@/lib/reading";
 import { applyTagCommand, findModel, fillVariables, promptVariables, undoLastExchange } from "@/lib/composing";
 import PromptVariables from "./PromptVariables";
+import RememberDialog from "./RememberDialog";
+import ChatNotes from "./ChatNotes";
+import { rememberDraft } from "@/lib/memory/housekeeping";
+import type { ChatColor } from "@/lib/types";
 import { CHATS_CHANGED } from "./DataSettings";
 import { detectFact } from "@/lib/initiative/suggest";
 import { rememberNudge, type Nudge, type NudgeAction } from "@/lib/initiative/rules";
@@ -120,6 +124,9 @@ export default function Workspace() {
   const [instructionsFor, setInstructionsFor] = useState<{ id: string; title: string; persona?: string } | null>(null);
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [inboxOpen, setInboxOpen] = useState(false);
+  /** Something offered to memory from a message, waiting to be kept or reworded. */
+  const [remembering, setRemembering] = useState<string | null>(null);
+  const [notesOpen, setNotesOpen] = useState(false);
   /** A saved prompt with blanks, waiting for them to be filled. */
   const [fillingPrompt, setFillingPrompt] = useState<{ name: string; text: string; args: string } | null>(null);
   const [selfEdit, setSelfEdit] = useState<{ enabled: boolean; isSandbox: boolean; port: number } | null>(null);
@@ -1215,27 +1222,7 @@ export default function Workspace() {
         changeModel(action.provider, action.model);
         return setNotice(`Switched to ${action.model}. Your next message goes there.`);
       case "remember":
-        return void (async () => {
-          try {
-            const res = await fetch("/api/memory", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ text: action.text, tags: action.always ? ["always"] : [], dedupe: true }),
-            });
-            const data = await res.json().catch(() => ({}));
-            setNotice(
-              !res.ok
-                ? (data.error ?? "That didn't save.")
-                : data.duplicate
-                  ? "Already in memory."
-                  : action.always
-                    ? "Remembered — and kept in mind in every chat."
-                    : "Remembered. Change or remove it under Settings → Memory.",
-            );
-          } catch {
-            setNotice("Couldn't reach the server.");
-          }
-        })();
+        return void saveMemory(action.text, Boolean(action.always));
       case "show-approval": {
         const card = document.querySelector<HTMLElement>("[data-approval]");
         if (!card) return setNotice("That question has already been answered.");
@@ -1245,6 +1232,52 @@ export default function Workspace() {
       case "open-inbox":
         return setInboxOpen(true);
     }
+  }
+
+  /** Keep something in memory — once: the same words again are noted as already known. */
+  async function saveMemory(text: string, always: boolean) {
+    try {
+      const res = await fetch("/api/memory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, tags: always ? ["always"] : [], dedupe: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setNotice(
+        !res.ok
+          ? (data.error ?? "That didn't save.")
+          : data.duplicate
+            ? "Already in memory."
+            : always
+              ? "Remembered — and kept in mind in every chat."
+              : "Remembered. Change or remove it under Settings → Memory.",
+      );
+    } catch {
+      setNotice("Couldn't reach the server.");
+    }
+  }
+
+  const remember = useCallback(
+    (messageId: string, selection: string) => {
+      const message = chat?.messages.find((m) => m.id === messageId);
+      if (message) setRemembering(rememberDraft(message.content, selection));
+    },
+    [chat],
+  );
+
+  async function saveNotes(notes: string) {
+    if (!chat) return;
+    const kept = notes.trim() ? notes : undefined;
+    setChat({ ...chat, notes: kept });
+    setNotesOpen(false);
+    setNotice(kept ? "Notes saved with this chat." : "Notes cleared.");
+    await patchChat(chat.id, { notes: kept ?? null });
+  }
+
+  async function setChatColor(id: string, color: ChatColor | null) {
+    setChats((all) => all.map((c) => (c.id === id ? { ...c, color: color ?? undefined } : c)));
+    if (chat?.id === id) setChat((c) => (c ? { ...c, color: color ?? undefined } : c));
+    await patchChat(id, { color });
   }
 
   function onRuleMuted(rule: RuleId, learned: boolean) {
@@ -1308,6 +1341,7 @@ export default function Workspace() {
           onArchive={archiveChat}
           onTags={setChatTags}
           onBulk={bulkChats}
+          onColor={setChatColor}
           onDuplicate={(id) => void copyChat(id)}
           onEditInstructions={editInstructions}
           onOpenTrash={() => setTrashOpen(true)}
@@ -1336,6 +1370,7 @@ export default function Workspace() {
               onArchive={archiveChat}
               onTags={setChatTags}
               onBulk={bulkChats}
+              onColor={setChatColor}
               onDuplicate={(id) => void copyChat(id)}
               onEditInstructions={editInstructions}
               onOpenTrash={() => {
@@ -1429,6 +1464,8 @@ export default function Workspace() {
             temperature={settings.temperature}
             onTemperature={(temperature) => saveSettings({ ...settings, temperature })}
             onQuote={quote}
+            onRemember={remember}
+            onOpenNotes={() => setNotesOpen(true)}
             onOpenInbox={() => setInboxOpen(true)}
           />
           </ModelsContext.Provider>
@@ -1504,6 +1541,17 @@ export default function Workspace() {
       />
 
       <SandboxPanel open={sandboxOpen} onClose={() => setSandboxOpen(false)} />
+
+      <RememberDialog
+        draft={remembering}
+        onClose={() => setRemembering(null)}
+        onSave={(text, always) => {
+          setRemembering(null);
+          void saveMemory(text, always);
+        }}
+      />
+
+      <ChatNotes open={notesOpen && chat !== null} chatTitle={chat?.title ?? ""} notes={chat?.notes ?? ""} onSave={(n) => void saveNotes(n)} onClose={() => setNotesOpen(false)} />
 
       <PromptVariables
         prompt={fillingPrompt}

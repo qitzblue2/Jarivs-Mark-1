@@ -101,6 +101,11 @@ import { importChat, MAX_IMPORT_MESSAGES } from "../lib/chat-import";
 import { markdownEntryName, markdownArchiveName } from "../lib/chat-archive";
 import { composerCounts, counterLabel, shouldSend, findModel, applyTagCommand, undoLastExchange, promptVariables, fillVariables, searchHistory, TEMPERATURE_PRESETS, presetOf, nextPreset } from "../lib/composing";
 import { cleanPrefs, DEFAULT_PREFS } from "../lib/prefs";
+import { isExpired, expiryLabel, expiryFromDateInput, dateInputOf, cleanExpiry, parseBulk, findDuplicates, mergeGroup, rememberDraft } from "../lib/memory/housekeeping";
+import { sortChatList, nextSort, CHAT_SORTS } from "../lib/chat-list";
+import { categorize } from "../lib/storage-usage";
+import { formatBytes } from "../lib/format";
+import { chatMeta } from "../lib/types";
 import { SentenceSplitter, splitSentences } from "../lib/voice/tts/sentences";
 import { Speaker } from "../lib/voice/tts/speaker";
 import { encodeWav, durationOf } from "../lib/voice/wav";
@@ -3376,12 +3381,93 @@ console.log("\n--- initiative: the live state ---");
   eq("style: a value is a preset to within a hair", [presetOf(0.7)?.id, presetOf(0.72)?.id, presetOf(0.9), presetOf(1.1)?.id], ["balanced", "balanced", null, "creative"]);
   eq("style: pressing cycles; from a custom value it lands on balanced", [nextPreset(0.2).id, nextPreset(0.7).id, nextPreset(1.1).id, nextPreset(0.95).id], ["balanced", "creative", "precise", "balanced"]);
 
-  eq("prefs: defaults", DEFAULT_PREFS, { sendKey: "enter", spellcheck: true });
-  eq("prefs: junk becomes the defaults, field by field", [cleanPrefs(null), cleanPrefs({ sendKey: "tab", spellcheck: "no" }), cleanPrefs({ sendKey: "mod-enter", spellcheck: false })], [DEFAULT_PREFS, DEFAULT_PREFS, { sendKey: "mod-enter", spellcheck: false }]);
+  eq("prefs: defaults", DEFAULT_PREFS, { sendKey: "enter", spellcheck: true, chatSort: "recent", compactList: false });
+  eq("prefs: junk becomes the defaults, field by field", [cleanPrefs(null), cleanPrefs({ sendKey: "tab", spellcheck: "no" }), cleanPrefs({ sendKey: "mod-enter", spellcheck: false })], [DEFAULT_PREFS, DEFAULT_PREFS, { ...DEFAULT_PREFS, sendKey: "mod-enter", spellcheck: false }]);
 
   eq("slash: the new commands are listed, and the ones that need words say so", [COMMAND_NAMES.includes("model"), COMMAND_NAMES.includes("title"), COMMAND_NAMES.includes("tag"), COMMAND_NAMES.includes("undo"), matchSlash("/mo").map((m) => m.takesArgs), matchSlash("/un").map((m) => m.takesArgs)], [true, true, true, true, [true], [undefined]]);
   eq("slash: /title keeps its words", [parseSlash("/title My new name")?.name, parseSlash("/title My new name")?.args], ["title", "My new name"]);
   eq("prompts: one saved before a command existed is renamed, not lost", cleanPrompts([{ name: "tag", text: "my tag prompt" }, { name: "undo", text: "u" }, { name: "new", text: "still reserved" }, { name: "tag-prompt", text: "taken" }]).map((p) => p.name), ["tag-prompt", "undo-prompt"]);
+}
+
+// --- organising: memory housekeeping, chat notes and colours, sorting, storage ---
+{
+  console.log("\n--- organising and data ---");
+  const DAY = 86_400_000;
+  const NOW = Date.UTC(2026, 9, 3, 12);
+  eq("expiry: only a past or present time has run out", [isExpired({}, NOW), isExpired({ expires: NOW + 1 }, NOW), isExpired({ expires: NOW }, NOW), isExpired({ expires: NOW - 1 }, NOW)], [false, false, true, true]);
+  eq("expiry: the label, in plain days", [expiryLabel({}, NOW), expiryLabel({ expires: NOW - DAY }, NOW), expiryLabel({ expires: NOW + 3600_000 }, NOW), expiryLabel({ expires: NOW + DAY + 1000 }, NOW), expiryLabel({ expires: NOW + 11 * DAY + 1000 }, NOW)], [null, "expired", "expires today", "expires tomorrow", "expires in 11 days"]);
+  const end = expiryFromDateInput("2026-10-12")!;
+  eq("expiry: a date means the end of that day, here", [new Date(end).getDate(), new Date(end).getHours(), new Date(end).getMinutes(), dateInputOf(end)], [12, 23, 59, "2026-10-12"]);
+  eq("expiry: nonsense dates are refused, not rolled over", [expiryFromDateInput("2026-02-31"), expiryFromDateInput("soon"), expiryFromDateInput(""), expiryFromDateInput("2026-13-01")], [null, null, null, null]);
+  eq("expiry: an empty date field is an empty string", [dateInputOf(undefined), dateInputOf(NaN)], ["", ""]);
+  eq("expiry: a request may set it, clear it with null, or say nothing", [cleanExpiry(123.9), cleanExpiry(null), cleanExpiry(undefined), cleanExpiry("5"), cleanExpiry(-1), cleanExpiry(NaN)], [123, null, undefined, undefined, undefined, undefined]);
+
+  const bulk = parseBulk("- Allergic to peanuts #Health\n2. Prefers metric units\n\n  * plain fact  \n#only #tags\nprefers METRIC units\nAllergic to peanuts\nalready known\n" + "x".repeat(2001), ["Already known"]);
+  eq("bulk: one fact a line, bullets and numbers stripped, tags taken off the end", bulk.add, [{ text: "Allergic to peanuts", tags: ["health"] }, { text: "Prefers metric units", tags: [] }, { text: "plain fact", tags: [] }]);
+  eq("bulk: what is skipped, and why", bulk.skipped, { duplicate: 3, tooLong: 1, empty: 1, overLimit: 0 });
+  eq("bulk: a hundred at a time", [parseBulk(Array.from({ length: 130 }, (_, i) => `fact ${i}`).join("\n")).add.length, parseBulk(Array.from({ length: 130 }, (_, i) => `fact ${i}`).join("\n")).skipped.overLimit], [100, 30]);
+  eq("bulk: a tag in the middle of a line stays in the text", parseBulk("I use #hashtags a lot").add, [{ text: "I use #hashtags a lot", tags: [] }]);
+
+  const entry = (id: string, text: string, extra: Record<string, unknown> = {}) => ({ id, text, tags: [], createdAt: 100, updatedAt: 100, ...extra }) as never;
+  const dupes = findDuplicates([
+    entry("a", "Allergic to peanuts", { updatedAt: 500, tags: ["health"] }),
+    entry("b", "  allergic   to PEANUTS ", { updatedAt: 900, tags: ["always"], expires: NOW + DAY }),
+    entry("c", "Prefers metric units for everything", { updatedAt: 300 }),
+    entry("d", "Prefers metric units for everything please", { updatedAt: 200 }),
+    entry("e", "Lives in Cardiff", {}),
+    entry("f", "Likes tea", {}),
+    entry("g", "Likes tea a lot", {}),
+  ]);
+  eq("duplicates: the same words, however spaced, and near-identical wording are found", dupes.map((g) => [g.keep.id, g.extras.map((x: { id: string }) => x.id)]), [["b", ["a"]], ["c", ["d"]]]);
+  eq("duplicates: short entries are only duplicates when identical — 'Likes tea' isn't 'Likes tea a lot'", dupes.some((g) => g.keep.id === "f" || g.keep.id === "g"), false);
+  eq("duplicates: unrelated entries stay alone, and none is none", [findDuplicates([entry("a", "one thing"), entry("b", "another thing")]).length, findDuplicates([]).length], [0, 0]);
+  const merged = mergeGroup(dupes[0]);
+  eq("merge: the newest wording, everyone's tags, the earliest start, the latest touch", [merged.id, merged.text, merged.tags, merged.createdAt, merged.updatedAt], ["b", "  allergic   to PEANUTS ", ["always", "health"], 100, 900]);
+  eq("merge: it only expires if every one of them did", [merged.expires, mergeGroup({ keep: entry("a", "x", { expires: 5 }), extras: [entry("b", "x", { expires: 9 })] }).expires], [undefined, 9]);
+
+  eq("draft: the selection wins", rememberDraft("A long reply with many words.", "  the part I\n selected "), "the part I selected");
+  eq("draft: otherwise the message as one plain line", rememberDraft("# Title\n\nSome **bold** text.\n\n- one\n- two"), "Title Some bold text. • one • two");
+  eq("draft: thinking is left out", rememberDraft("<think>private</think>The answer."), "The answer.");
+  const long = `${"First sentence here. ".repeat(10)}${"word ".repeat(100)}`;
+  eq("draft: long ones are cut — at a sentence if there is one near the end", [rememberDraft(long).length <= 401, rememberDraft(long).endsWith("…"), rememberDraft("Short.")], [true, true, "Short."]);
+  eq("draft: with no sentence break it cuts at a word", rememberDraft("word ".repeat(200)).endsWith("word…"), true);
+
+  const rows = [
+    { title: "banana", createdAt: 3, updatedAt: 30, messageCount: 5 },
+    { title: "Apple", createdAt: 1, updatedAt: 10, messageCount: 50 },
+    { title: "cherry 10", createdAt: 2, updatedAt: 20, messageCount: 5 },
+    { title: "cherry 9", createdAt: 4, updatedAt: 40, messageCount: 1, pinned: true },
+  ];
+  eq("sort: recent, pinned first", sortChatList(rows, "recent").map((r) => r.title), ["cherry 9", "banana", "cherry 10", "Apple"]);
+  eq("sort: oldest", sortChatList(rows, "oldest").map((r) => r.title), ["cherry 9", "Apple", "cherry 10", "banana"]);
+  eq("sort: by title, ignoring case, numbers as numbers", sortChatList(rows, "title").map((r) => r.title), ["cherry 9", "Apple", "banana", "cherry 10"]);
+  eq("sort: longest first, ties by recency", sortChatList(rows, "messages").map((r) => r.title), ["cherry 9", "Apple", "banana", "cherry 10"]);
+  eq("sort: the original is untouched; pressing cycles all four and comes round", [rows[0].title, CHAT_SORTS.map((_, i) => nextSort(CHAT_SORTS[i]))], ["banana", ["oldest", "title", "messages", "recent"]]);
+
+  const base = { id: "c", title: "T", createdAt: 1, updatedAt: 2, messages: [] } as never;
+  const patched = (body: unknown) => applyChatPatch(base, body, 9999);
+  const ok2 = (r: ReturnType<typeof patched>) => (r.ok ? r.chat : null);
+  eq("chat: a colour can be set and cleared", [ok2(patched({ color: "green" }))?.color, ok2(patched({ color: null }))?.color], ["green", undefined]);
+  eq("chat: a colour that isn't one is refused", [patched({ color: "mauve" }).ok, patched({ color: 5 }).ok], [false, false]);
+  eq("chat: notes are saved as written, cleared by null or by being blank", [ok2(patched({ notes: "  keep this\nand this " }))?.notes, ok2(patched({ notes: null }))?.notes, ok2(patched({ notes: "   \n " }))?.notes], ["  keep this\nand this ", undefined, undefined]);
+  eq("chat: notes are cut at 20,000 and must be text", [ok2(patched({ notes: "x".repeat(30000) }))?.notes?.length, patched({ notes: 5 }).ok], [20000, false]);
+  eq("chat: tidying notes or colour isn't activity", [ok2(patched({ notes: "n" }))?.updatedAt, ok2(patched({ color: "red" }))?.updatedAt], [2, 2]);
+  eq("chat: the list row says its colour and whether it has notes — without carrying the notes", [chatMeta({ ...(base as object), color: "blue", notes: "secret" } as never), chatMeta(base)], [{ id: "c", title: "T", createdAt: 1, updatedAt: 2, messageCount: 0, color: "blue", hasNotes: true }, { id: "c", title: "T", createdAt: 1, updatedAt: 2, messageCount: 0 }]);
+  eq("chat: a branch keeps the colour but not the notes", (() => { const b = branchChat({ ...(base as object), color: "red", notes: "private", messages: [{ id: "m", role: "user", content: "x", createdAt: 1 }] } as never, undefined, 5)!; return [b.color, b.notes]; })(), ["red", undefined]);
+
+  const live = entry("live", "Prefers metric units", { tags: ["always"] });
+  const stale = entry("stale", "Prefers imperial units", { tags: ["always"], expires: Date.now() - 1000 });
+  const future = entry("future", "Is testing the typescript build", { expires: Date.now() + DAY });
+  eq("prompt: a fact that has run out is left out, pinned or not; one that hasn't, stays", forPrompt([live, stale, future], "typescript build").map((e) => e.id), ["live", "future"]);
+  const exported = exportMemory([entry("a", "keeps", { expires: 12345 }), entry("b", "forever")]).entries;
+  eq("transfer: an expiry travels in an export, only when there is one", [exported[0].expires, "expires" in exported[1]], [12345, false]);
+  const imported = planImport([], { format: "memory-bad" }, () => "x");
+  const plan = planImport([], [{ text: "a", expires: 777 }, { text: "b", expires: "soon" }, { text: "c", expires: -4 }], (() => { let n = 0; return () => `id${n++}`; })());
+  eq("transfer: and comes back in on import, if it is a real time", plan.ok ? plan.add.map((e) => e.expires) : null, [777, undefined, undefined]);
+  eq("transfer: (a wrong file is still refused)", imported.ok, false);
+
+  eq("storage: files are sorted into rows by where they sit", ["chats/a.json", "trash/b.json", "images/x.png", "backups/zip", "memory.json", "audit.jsonl", "schedule.json"].map(categorize), ["chats", "trash", "pictures", "backups", "memory", "other", "other"]);
+  eq("storage: sizes in words", [0, -5, NaN, 850, 1536, 15 * 1024, 5 * 1024 * 1024, 3 * 1024 ** 3].map(formatBytes), ["0 B", "0 B", "0 B", "850 B", "1.5 KB", "15 KB", "5.0 MB", "3.0 GB"]);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

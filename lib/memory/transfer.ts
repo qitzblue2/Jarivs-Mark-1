@@ -23,7 +23,7 @@ export interface MemoryFile {
   format: typeof MEMORY_FORMAT;
   version: 1;
   exportedAt: string;
-  entries: Pick<MemoryEntry, "text" | "tags" | "createdAt" | "updatedAt">[];
+  entries: Pick<MemoryEntry, "text" | "tags" | "createdAt" | "updatedAt" | "expires">[];
 }
 
 /** What gets written. `id` and `sourceChatId` are about this install, so they stay behind. */
@@ -34,7 +34,7 @@ export function exportMemory(entries: MemoryEntry[], now = new Date()): MemoryFi
     exportedAt: now.toISOString(),
     entries: [...entries]
       .sort((a, b) => a.createdAt - b.createdAt)
-      .map(({ text, tags, createdAt, updatedAt }) => ({ text, tags, createdAt, updatedAt })),
+      .map(({ text, tags, createdAt, updatedAt, expires }) => ({ text, tags, createdAt, updatedAt, ...(typeof expires === "number" ? { expires } : {}) })),
   };
 }
 
@@ -115,6 +115,7 @@ export function planImport(
       tags: cleanTags(record.tags),
       createdAt,
       updatedAt: timeOr(record.updatedAt, createdAt, now),
+      ...(typeof record.expires === "number" && Number.isFinite(record.expires) && record.expires > 0 ? { expires: Math.floor(record.expires) } : {}),
     });
   }
 

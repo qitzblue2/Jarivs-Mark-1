@@ -76,3 +76,16 @@ export function isLongMessage(text: string): boolean {
   for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10 && ++lines > LONG_MESSAGE_LINES) return true;
   return false;
 }
+
+/** "0 B", "850 B", "1.2 KB", "34 MB", "1.5 GB" — binary units, one decimal under ten. */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${unit === 0 || value >= 10 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+}
