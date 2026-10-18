@@ -4,6 +4,12 @@ import "./globals.css";
 import { INIT_SCRIPT } from "@/lib/appearance";
 import { PREFS_INIT_SCRIPT } from "@/lib/prefs";
 
+/**
+ * Find-in-chat highlights. Kept out of globals.css on purpose: the build's CSS
+ * parser does not know ::highlight() yet and warns on every request in dev.
+ */
+const HIGHLIGHT_CSS = `::highlight(find-match){background-color:rgb(251 191 36 / 0.4);color:inherit}::highlight(find-current){background-color:#f59e0b;color:#000}`;
+
 export const metadata: Metadata = {
   title: "JARVIS Mark 6",
   description: "A self-hosted AI workspace running on free, fast inference.",
@@ -28,6 +34,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Before first paint, so the chosen theme never flashes the other one. */}
         <script dangerouslySetInnerHTML={{ __html: INIT_SCRIPT }} />
         <script dangerouslySetInnerHTML={{ __html: PREFS_INIT_SCRIPT }} />
+        <style dangerouslySetInnerHTML={{ __html: HIGHLIGHT_CSS }} />
       </head>
       <body>{children}</body>
     </html>
