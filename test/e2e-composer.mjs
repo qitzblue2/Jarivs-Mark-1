@@ -31,6 +31,8 @@ await new Promise((r) => setTimeout(r, 50));
 
 const browser = await chromium.launch();
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
+// Settings is tabbed; these suites reach into every section, so show them all.
+await context.addInitScript(() => { try { localStorage.setItem("jarvis.settings-tab", "all"); } catch { /* storage blocked */ } });
 await context.grantPermissions(["clipboard-read", "clipboard-write"]);
 const page = await context.newPage();
 const errors = [];

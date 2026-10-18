@@ -47,6 +47,8 @@ async function seedChat(title, messages, patch = {}) {
 
 const browser = await chromium.launch();
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "dark" });
+// Settings is tabbed; these suites reach into every section, so show them all.
+await context.addInitScript(() => { try { localStorage.setItem("jarvis.settings-tab", "all"); } catch { /* storage blocked */ } });
 const errors = [];
 
 /** A fresh tab whose initiative storage starts as `seed` (merged over the defaults). Once per tab: reloads keep what the app saved. */

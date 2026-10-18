@@ -27,6 +27,7 @@ import { DEFAULT_PERSONA } from "@/lib/persona";
 import { isTone, toneHint } from "@/lib/initiative/tone";
 import { cleanDisabledTools } from "@/lib/model-prefs";
 import { isReplyLength, lengthHint } from "@/lib/composing";
+import { dialsHint } from "@/lib/persona-dials";
 import { environmentNote } from "@/lib/environment";
 import { forPrompt, getMemory } from "@/lib/memory";
 
@@ -72,6 +73,8 @@ interface ChatBody {
   tone?: string;
   /** "brief", "normal" or "detailed" — the server turns it into one sentence of guidance (see lengthHint). */
   length?: string;
+  /** Four 0-4 dials (formality, humour, warmth, detail). Numbers only; the server holds the words. */
+  dials?: unknown;
   /** Tools switched off in Settings. Only ever removes tools. */
   disabledTools?: string[];
   /** False: answer with the chosen model's provider or not at all, rather than trying the others. */
@@ -194,8 +197,9 @@ export async function POST(req: NextRequest) {
   // not the character.
   const styleHint = isTone(body.tone) ? toneHint(body.tone) : null;
   const sizeHint = isReplyLength(body.length) ? lengthHint(body.length) : null;
+  const dialLine = dialsHint(body.dials);
   const systemPrompt =
-    (persona?.trim() || DEFAULT_PERSONA) + environmentNote() + memoryBlock + (styleHint ? `\n\n${styleHint}` : "") + (sizeHint ? `\n\n${sizeHint}` : "");
+    (persona?.trim() || DEFAULT_PERSONA) + environmentNote() + memoryBlock + (styleHint ? `\n\n${styleHint}` : "") + (sizeHint ? `\n\n${sizeHint}` : "") + (dialLine ? `\n\n${dialLine}` : "");
   const disabledTools = cleanDisabledTools(body.disabledTools);
   const hasImages = messages.some((m) => m.attachments?.some((a) => a.kind === "image"));
   // Pictures still carrying their bytes are the ones attached this turn —

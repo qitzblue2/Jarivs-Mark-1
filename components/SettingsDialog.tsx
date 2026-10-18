@@ -24,6 +24,10 @@ import DevicePanel from "./DevicePanel";
 import DisplayPanel from "./DisplayPanel";
 import SchedulePanel from "./SchedulePanel";
 import ToolSettings from "./ToolSettings";
+import PersonalitySettings from "./PersonalitySettings";
+import ImageSettings from "./ImageSettings";
+import { DEFAULT_SETTINGS_TAB, isSettingsTab, nextTab, SETTINGS_TABS, SETTINGS_TAB_KEY, type SettingsTab } from "@/lib/settings-tabs";
+import type { CustomPersona, Dials } from "@/lib/persona-dials";
 import ModelSettings from "./ModelSettings";
 import type { ReplyLength } from "@/lib/composing";
 
@@ -74,6 +78,10 @@ export interface Settings {
   noFallback?: boolean;
   /** How long replies should be. */
   replyLength?: ReplyLength;
+  /** How formal, funny, warm and detailed — four dials, 0 to 4, 2 in the middle. */
+  personaDials?: Dials;
+  /** Personas you wrote and named, offered beside the ready-made ones. */
+  customPersonas?: CustomPersona[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -100,6 +108,8 @@ interface Props {
   storageDriver: string;
   onSave: (settings: Settings) => void;
   onClose: () => void;
+  /** Open the image studio (closes this first). */
+  onOpenStudio?: () => void;
 }
 
 export default function SettingsDialog({
@@ -109,6 +119,7 @@ export default function SettingsDialog({
   storageDriver,
   onSave,
   onClose,
+  onOpenStudio,
 }: Props) {
   const [draft, setDraft] = useState<Settings>(settings);
   const [voices, setVoices] = useState<{ id: string; label: string }[]>([]);
@@ -146,8 +157,26 @@ export default function SettingsDialog({
   const dialogRef = useDialogFocus(open);
   const bodyRef = useRef<HTMLDivElement>(null);
   const [find, setFind] = useState("");
+  const [tab, setTab] = useState<SettingsTab>(DEFAULT_SETTINGS_TAB);
+  // Remembered across visits, read after mount so the server and the first client render agree.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(SETTINGS_TAB_KEY);
+      if (isSettingsTab(saved)) setTab(saved);
+    } catch {
+      // Storage blocked: start on the first tab each time.
+    }
+  }, []);
+  function chooseTab(next: SettingsTab) {
+    setTab(next);
+    try {
+      localStorage.setItem(SETTINGS_TAB_KEY, next);
+    } catch {
+      // Remembering is a convenience.
+    }
+  }
   // Re-run the filter when what is in the form changes too: sections like memory fill in after they load.
-  const matching = useSectionFilter(bodyRef, find, `${open}:${providers.length}:${draft.prompts?.length ?? 0}`);
+  const matching = useSectionFilter(bodyRef, find, `${open}:${providers.length}:${draft.prompts?.length ?? 0}`, tab);
   useEffect(() => {
     if (!open) setFind("");
   }, [open]);
@@ -211,7 +240,38 @@ export default function SettingsDialog({
           </button>
         </header>
 
-        <div ref={bodyRef} className="max-h-[70vh] space-y-5 overflow-y-auto px-4 py-4">
+        <div role="tablist" aria-label="Settings sections" data-settings-tabs className="flex gap-1 overflow-x-auto border-b border-line px-3 pt-2">
+          {SETTINGS_TABS.map((t) => {
+            const on = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                id={`settings-tab-${t.id}`}
+                type="button"
+                role="tab"
+                aria-selected={on}
+                aria-controls="settings-panel"
+                tabIndex={on ? 0 : -1}
+                data-tab={t.id}
+                onClick={() => chooseTab(t.id)}
+                onKeyDown={(e) => {
+                  const next = nextTab(tab, e.key);
+                  if (!next) return;
+                  e.preventDefault();
+                  chooseTab(next);
+                  requestAnimationFrame(() => document.getElementById(`settings-tab-${next}`)?.focus());
+                }}
+                className={`-mb-px min-h-9 shrink-0 whitespace-nowrap border-b-2 px-3 text-[12.5px] transition ${
+                  on ? "border-arc text-arc" : "border-transparent text-ink-dim hover:text-ink"
+                }`}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div ref={bodyRef} id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`} className="max-h-[70vh] space-y-5 overflow-y-auto px-4 py-4">
           <div data-filter-keep>
             <input
               type="search"
@@ -326,7 +386,7 @@ export default function SettingsDialog({
                 Reset
               </button>
             </div>
-            <PersonaPicker value={draft.persona} onPick={(persona) => setDraft((d) => ({ ...d, persona }))} />
+            <PersonaPicker value={draft.persona} onPick={(persona) => setDraft((d) => ({ ...d, persona }))} saved={draft.customPersonas ?? []} />
             <textarea
               value={draft.persona}
               onChange={(e) => setDraft((d) => ({ ...d, persona: e.target.value }))}
@@ -357,6 +417,17 @@ export default function SettingsDialog({
               </span>
             </label>
           </section>
+
+          <PersonalitySettings
+            persona={draft.persona}
+            onPersona={(persona) => setDraft((d) => ({ ...d, persona }))}
+            dials={draft.personaDials}
+            onDials={(personaDials) => setDraft((d) => ({ ...d, personaDials }))}
+            saved={draft.customPersonas ?? []}
+            onSaved={(customPersonas) => setDraft((d) => ({ ...d, customPersonas }))}
+          />
+
+          <ImageSettings nanoKey={draft.keys?.nanogpt} onOpenStudio={onOpenStudio} />
 
           <ToolSettings disabled={draft.disabledTools ?? []} onChange={(disabledTools) => setDraft((d) => ({ ...d, disabledTools }))} />
 

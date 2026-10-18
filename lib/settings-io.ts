@@ -4,6 +4,7 @@ import { cleanPrompts } from "@/lib/prompts";
 import { cleanFavorites } from "@/lib/favorites";
 import { cleanDisabledTools, cleanModelNotes } from "@/lib/model-prefs";
 import { isReplyLength } from "@/lib/composing";
+import { cleanCustomPersonas, cleanDials } from "@/lib/persona-dials";
 
 /**
  * Moving your setup between browsers.
@@ -110,6 +111,9 @@ export function importSettings(raw: string, current: Settings): ImportResult {
   if (Array.isArray(incoming.disabledTools)) set("disabledTools", cleanDisabledTools(incoming.disabledTools));
   if (typeof incoming.noFallback === "boolean") set("noFallback", incoming.noFallback);
   if (isReplyLength(incoming.replyLength)) set("replyLength", incoming.replyLength);
+  // The dials and your own saved personas are text and numbers you chose, not secrets.
+  if (incoming.personaDials && typeof incoming.personaDials === "object") set("personaDials", cleanDials(incoming.personaDials));
+  if (Array.isArray(incoming.customPersonas)) set("customPersonas", cleanCustomPersonas(incoming.customPersonas));
   set("endpoints", cleanEndpoints(incoming.endpoints));
   set("budgets", cleanBudgets(incoming.budgets));
 

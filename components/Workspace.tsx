@@ -8,6 +8,7 @@ import CodeCanvas from "./CodeCanvas";
 import SettingsDialog, { DEFAULT_SETTINGS, type Settings } from "./SettingsDialog";
 import VoiceMode from "./VoiceMode";
 import Gallery from "./Gallery";
+import ImageStudio from "./ImageStudio";
 import UsagePanel from "./UsagePanel";
 import SandboxPanel from "./SandboxPanel";
 import TrashPanel from "./TrashPanel";
@@ -43,6 +44,8 @@ import { getInitiative, moodEvent, noteTone, offerNow } from "@/lib/initiative/s
 import { getPrefs } from "@/lib/prefs-store";
 import { readTone, type Tone } from "@/lib/initiative/tone";
 import { appendQuote, quoteText } from "@/lib/reading";
+import { cleanDials, isNeutral } from "@/lib/persona-dials";
+import { findPersona, PERSONA_PRESETS, presetText, randomPersona, searchPersonas } from "@/lib/personas";
 import { applyTagCommand, findModel, fillVariables, promptVariables, undoLastExchange } from "@/lib/composing";
 import PromptVariables from "./PromptVariables";
 import RememberDialog from "./RememberDialog";
@@ -119,6 +122,7 @@ export default function Workspace() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const [studio, setStudio] = useState<{ prompt?: string; autoRun?: boolean } | null>(null);
   const [usageOpen, setUsageOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -568,6 +572,7 @@ export default function Workspace() {
             persona: target.persona?.trim() ? target.persona : settings.persona,
             // How long to make it: a name, which the server turns into a sentence.
             length: settings.replyLength && settings.replyLength !== "normal" ? settings.replyLength : undefined,
+            dials: settings.personaDials && !isNeutral(cleanDials(settings.personaDials)) ? cleanDials(settings.personaDials) : undefined,
             disabledTools: settings.disabledTools?.length ? settings.disabledTools : undefined,
             // "Don't fall back" is sent only when it is on, so a missing field keeps the old behaviour.
             fallback: settings.noFallback ? false : undefined,
@@ -721,7 +726,7 @@ export default function Workspace() {
       return;
     }
     updateInput("");
-    const needsChat = ["pin", "archive", "export", "instructions", "title", "tag", "undo"];
+    const needsChat = ["pin", "archive", "export", "instructions", "title", "tag", "undo", "persona"];
     if (needsChat.includes(match.name) && !chat) return setNotice("Open a chat first.");
 
     switch (match.name) {
@@ -784,6 +789,36 @@ export default function Workspace() {
       }
       case "palette":
         return setPaletteOpen(true);
+      case "studio":
+        return setStudio({});
+      case "image": {
+        const wanted = match.args.trim();
+        // A command you typed and sent is the request: open the studio and draw it.
+        return setStudio(wanted ? { prompt: wanted, autoRun: true } : {});
+      }
+      case "persona": {
+        const wanted = match.args.trim();
+        const mine = settings.customPersonas ?? [];
+        const own = mine.find((p) => p.name.toLowerCase() === wanted.toLowerCase());
+        const current = PERSONA_PRESETS.find((p) => chat?.persona && presetText(p) === chat.persona.trim());
+        if (!wanted) {
+          return setNotice(`${current ? `This chat is using ${current.name}.` : chat?.persona ? "This chat has its own instructions." : "This chat uses your Settings persona."} Try /persona teacher, /persona random, or /persona off.`);
+        }
+        if (/^(off|default|reset)$/i.test(wanted)) {
+          setChat((c) => (c ? { ...c, persona: undefined } : c));
+          void patchChat(chat!.id, { persona: null });
+          return setNotice("Back to the persona in Settings for this chat.");
+        }
+        const found = wanted.toLowerCase() === "random" ? randomPersona(current?.id) : findPersona(wanted);
+        const text = own?.text ?? (found ? presetText(found) : null);
+        if (!text) {
+          const close = searchPersonas(wanted).slice(0, 4).map((p) => p.name);
+          return setNotice(`No single personality matches “${wanted}”.${close.length ? ` Did you mean ${close.join(", ")}?` : ""}`);
+        }
+        setChat((c) => (c ? { ...c, persona: text } : c));
+        void patchChat(chat!.id, { persona: text });
+        return setNotice(`This chat now talks as ${own?.name ?? found!.name}. Your next message uses it.`);
+      }
       case "theme": {
         const { theme } = getAppearance();
         return setAppearance({ theme: THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length] });
@@ -1175,6 +1210,7 @@ export default function Workspace() {
         return setVoiceOpen(true);
       }
       if (id === "pictures") return setGalleryOpen(true);
+      if (id === "studio") return setStudio({});
       if (id === "saved") return setSavedOpen(true);
       return setShortcutsOpen(true);
     },
@@ -1331,6 +1367,8 @@ export default function Workspace() {
       act("settings", "Open settings", () => setSettingsOpen(true), { keywords: "preferences options keys configure" }),
       act("usage", "Open usage", () => setUsageOpen(true), { keywords: "requests tokens limits statistics speed" }),
       act("pictures", "Open pictures", () => setGalleryOpen(true), { keywords: "gallery images" }),
+      act("studio", "Draw a picture (image studio)", () => setStudio({}), { hint: "/image", keywords: "image generate make art paint" }),
+      act("persona-random", "Random personality for this chat", () => runSlash({ name: "persona", summary: "", kind: "action", args: "random" }), { hint: "/persona", keywords: "character manner voice style" }),
       act("saved", "Open saved messages", () => setSavedOpen(true), { keywords: "starred bookmarks" }),
       act("trash", "Open the trash", () => setTrashOpen(true), { keywords: "deleted restore" }),
       act("inbox", "Open the inbox", () => setInboxOpen(true), { keywords: "notifications suggestions results" }),
@@ -1680,6 +1718,10 @@ export default function Workspace() {
       <Gallery
         open={galleryOpen}
         onClose={() => setGalleryOpen(false)}
+        onNew={() => {
+          setGalleryOpen(false);
+          setStudio({});
+        }}
         onEdit={(url) => {
           setGalleryOpen(false);
           updateInput(`Edit the picture ${url} — `);
@@ -1694,6 +1736,18 @@ export default function Workspace() {
         }}
       />
 
+      <ImageStudio
+        open={studio !== null}
+        onClose={() => setStudio(null)}
+        initialPrompt={studio?.prompt}
+        autoRun={studio?.autoRun}
+        nanoKey={settings.keys?.nanogpt}
+        onOpenGallery={() => {
+          setStudio(null);
+          setGalleryOpen(true);
+        }}
+      />
+
       <SettingsDialog
         open={settingsOpen}
         settings={settings}
@@ -1701,6 +1755,10 @@ export default function Workspace() {
         storageDriver={storage}
         onSave={saveSettings}
         onClose={() => setSettingsOpen(false)}
+        onOpenStudio={() => {
+          setSettingsOpen(false);
+          setStudio({});
+        }}
       />
     </div>
   );

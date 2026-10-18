@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, ListChecks, Paperclip, Square } from "lucide-react";
 import { composerCounts, counterLabel, LENGTH_HINT_TEXT, LENGTH_LABEL, nextLength, nextPreset, presetOf, searchHistory, shouldSend, type ReplyLength } from "@/lib/composing";
 import { usePrefs } from "@/lib/prefs-store";
+import { imagePromptFrom } from "@/lib/images/styles";
 import Attachments from "./Attachments";
 import { fileToAttachment } from "@/lib/attach-client";
 import { PromptHistory } from "@/lib/history";
@@ -77,6 +78,8 @@ export default function Composer({
   const [dismissedFor, setDismissedFor] = useState<string | null>(null);
   const matches = useMemo(() => matchSlash(value, prompts), [value, prompts]);
   const menuOpen = matches.length > 0 && dismissedFor !== value;
+  // A message that asks for a picture gets a button; nothing is drawn until it is pressed.
+  const drawPrompt = useMemo(() => imagePromptFrom(value), [value]);
   useEffect(() => setHighlight(0), [value]);
 
   // --- up-arrow history ---
@@ -433,6 +436,27 @@ export default function Composer({
                 : "Enter to send · Shift+Enter for a new line · / for commands · ↑ for your last message"}
           </span>
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {drawPrompt && (
+              <button
+                type="button"
+                onClick={() => onSlash({ name: "image", summary: "", kind: "action", takesArgs: true, args: drawPrompt })}
+                data-draw-this
+                title="Open the image studio with this as the prompt and draw it"
+                className="rounded px-1.5 py-0.5 text-arc transition hover:bg-arc-dim/10"
+              >
+                Draw this as a picture
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => onSlash({ name: "studio", summary: "", kind: "action", args: "" })}
+              data-open-studio-composer
+              aria-label="Open the image studio"
+              title="Draw a picture (or type /image)"
+              className="rounded px-1.5 py-0.5 transition hover:bg-raised hover:text-ink"
+            >
+              Draw
+            </button>
             {counts && (
               <span data-counter aria-label={counterLabel(counts)} title="Words, characters and an estimate of tokens (about four characters each)">
                 {counterLabel(counts)}

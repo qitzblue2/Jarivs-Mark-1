@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Check, Copy, Download, ImageIcon, Monitor, Pencil, Trash2, X } from "lucide-react";
+import { filterPictures } from "@/lib/images/styles";
 import { familyOf, lineageOf } from "@/lib/image-lineage";
 import Lightbox, { showOnDisplay } from "./Lightbox";
 import { useEscape } from "@/lib/hooks/use-escape";
@@ -14,6 +15,7 @@ interface Picture {
   model: string;
   createdAt: number;
   editedFrom?: string;
+  style?: string;
 }
 
 interface Props {
@@ -25,10 +27,12 @@ interface Props {
    * three chats ago.
    */
   onEdit?: (url: string) => void;
+  /** Open the image studio to make a new one. */
+  onNew?: () => void;
 }
 
 /** Every picture JARVIS has made, to look back at, download, or clear out. */
-export default function Gallery({ open, onClose, onEdit }: Props) {
+export default function Gallery({ open, onClose, onEdit, onNew }: Props) {
   const [pictures, setPictures] = useState<Picture[]>([]);
   const [viewing, setViewing] = useState<Picture | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -36,6 +40,7 @@ export default function Gallery({ open, onClose, onEdit }: Props) {
   /** Set to look at one picture's family — the original and everything edited from it. */
   const [familyFor, setFamilyFor] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -77,7 +82,7 @@ export default function Gallery({ open, onClose, onEdit }: Props) {
 
   const focus = familyFor ? pictures.find((p) => p.id === familyFor) : undefined;
   // In a family, oldest first: the original, then each edit in the order it was made.
-  const shown = focus ? familyOf(focus, pictures) : pictures;
+  const shown = filterPictures(focus ? familyOf(focus, pictures) : pictures, query);
 
   const dialogRef = useDialogFocus(open);
   if (!open) return null;
@@ -101,9 +106,27 @@ export default function Gallery({ open, onClose, onEdit }: Props) {
             Pictures
             <span className="text-[11px] font-normal text-ink-faint">{pictures.length}</span>
           </div>
+          <div className="flex items-center gap-2">
+            {pictures.length > 0 && (
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search prompts…"
+                aria-label="Search pictures by prompt"
+                data-gallery-search
+                className="w-40 rounded-md border border-line bg-base px-2 py-1 text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-arc-dim"
+              />
+            )}
+            {onNew && (
+              <button onClick={onNew} data-gallery-new className="min-h-8 rounded-md border border-line px-2.5 text-[12px] text-ink-dim hover:border-arc-dim/50 hover:text-ink">
+                New picture
+              </button>
+            )}
           <button onClick={onClose} className="rounded-md p-1.5 text-ink-faint hover:bg-raised hover:text-ink" title="Close">
             <X size={16} />
           </button>
+          </div>
         </div>
 
         {note && (
@@ -126,7 +149,11 @@ export default function Gallery({ open, onClose, onEdit }: Props) {
             <p className="py-10 text-center text-[13px] text-ink-faint">
               {loading
                 ? "Loading…"
-                : "No pictures yet. Ask JARVIS to draw something — it needs a NanoGPT key."}
+                : "No pictures yet. Press New picture, type /image in the message box, or ask JARVIS to draw something."}
+            </p>
+          ) : shown.length === 0 ? (
+            <p className="py-10 text-center text-[13px] text-ink-faint" data-gallery-none>
+              No picture’s prompt mentions “{query.trim()}”.
             </p>
           ) : (
             <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
@@ -144,7 +171,7 @@ export default function Gallery({ open, onClose, onEdit }: Props) {
                       {picture.prompt}
                     </p>
                     <p className="text-[10px] text-ink-faint">
-                      {new Date(picture.createdAt).toLocaleString()} · {picture.model}
+                      {new Date(picture.createdAt).toLocaleString()} · {picture.model}{picture.style ? ` · ${picture.style}` : ""}
                     </p>
                     {(picture.editedFrom || lineage.edits.length > 0) && (
                       <p className="mt-0.5 flex flex-wrap items-center gap-x-1 text-[10.5px]" data-lineage>

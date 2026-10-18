@@ -13,10 +13,40 @@ can now use tools mid-answer instead of only talking.
 - **Tool-using.** Calls tools mid-answer and shows you exactly what it ran.
 - **Voice.** Say "Hey JARVIS" and talk to it. Wake word runs on your machine.
 - **Proactive.** Reminders, briefings and watchers it speaks aloud unasked.
-- **Pictures.** With a NanoGPT key it draws, and edits pictures you attach.
+- **Pictures.** Draws like any image generator — with no key at all, or with NanoGPT for better models and edits. Ten styles, four shapes, up to four at a time.
+- **Personalities.** Twenty-one ready-made manners, four dials, and your own.
 - **Edits its own code** (opt-in) — in an always-running sandbox copy, applied
   to the real thing only when you say so, with undo.
 - **Yours.** Chats are plain JSON files on your disk. Nothing to sign into.
+
+## Quick start
+
+You need [Node.js](https://nodejs.org) 20 or newer (the current LTS is fine) and one free API key.
+
+```bash
+git clone https://github.com/qitzblue2/Jarivs-Mark-1.git
+cd Jarivs-Mark-1
+npm run launch
+```
+
+That one command installs what is missing, checks the machine, builds the app the first time and starts it, then opens
+**http://localhost:3000**. No key yet? Run `npm run setup` first — it asks for them and writes `.env.local` for you (or paste one into
+**Settings → API keys** once it is running). Prefer clicking: double-click **`start.sh`** (Mac/Linux) or **`start.bat`** (Windows).
+
+| To… | Run |
+|---|---|
+| Start it | `npm run launch` |
+| Start it for hacking on (live reload, no build) | `npm run launch -- --dev` |
+| Reach it from your phone (needs `JARVIS_PASSWORD`) | `npm run launch -- --lan` |
+| Rebuild after pulling an update | `npm run launch -- --rebuild` |
+| Not open a browser tab | `npm run launch -- --no-open` |
+| Use another port | `PORT=4000 npm run launch` |
+| Stop it | `Ctrl+C` in that window |
+| Ask what's wrong | `npm run doctor` — says what is missing and the exact command to fix it |
+| Add or change keys | `npm run setup` (it never prints a key back, and leaves the rest of the file alone) |
+
+If it won't start, `npm run doctor` is the first thing to run. The usual causes: Node older than 20, no API key, or `npm install` never finished.
+Voice needs its models (`npm run setup:voice`); text chat and pictures don't.
 
 ---
 
@@ -173,13 +203,22 @@ free forever, and nobody's terms apply to a machine you own.
 
 ## 2. Run it
 
+The [quick start](#quick-start) above is the short version. The long one, by hand:
+
 ```bash
 npm install
-cp .env.example .env.local     # then paste your key(s) into .env.local
-npm run dev
+cp .env.example .env.local     # then paste your key(s) into .env.local (or: npm run setup)
+npm run dev                    # development, with live reload
+# — or, for everyday use —
+npm run build && npm start     # production
 ```
 
-Open **http://localhost:3000**.
+Open **http://localhost:3000**. To have it start by itself when the machine boots, run `npm run build` once and then
+`npm start` from a service manager: with systemd, a unit whose `ExecStart` is `/usr/bin/npm start` and `WorkingDirectory` is this folder;
+with pm2, `pm2 start npm --name jarvis -- start` and `pm2 save`. On Windows, a Task Scheduler task running `start.bat` at logon does it.
+
+**Settings are tabbed:** Keys & models, Personality, Pictures, Assistant, Look, Data & about — and *Everything*, the long single page, if you
+liked that better. The arrow keys move between tabs, the one you were on is remembered, and the search box looks through all of them.
 
 No `.env.local`? You can also paste a key into **Settings → API keys** and it
 will be kept in your browser instead. Handy for a deployed copy, but a key in
@@ -363,6 +402,21 @@ pictures, saved messages and the shortcuts.
   prompts for missing keys) and asks again with the one you pick. The new reply
   names the model that wrote it, and that model becomes the selected one, so the
   next message doesn't go somewhere you just moved away from.
+
+### Personalities
+
+**Settings → Personality.** JARVIS ships with twenty-one ready-made manners in five groups — Everyday (JARVIS, Brief, Coach, Calm, Dry wit),
+Work (Code reviewer, Editor, Researcher, Interviewer, Rubber duck), Learning (Teacher, Socratic, Language tutor, Plain words), Creative
+(Brainstorm, Storyteller, Game master, Poet) and Challenge (Skeptic, Debate partner, Negotiator). A personality changes the *manner*, not
+the abilities: each keeps the same operating rules, so a Poet still fences code with a filename and still uses the calculator.
+
+- **Dials.** Formality, humour, warmth and detail, each from 0 to 4 with 2 in the middle, or pick a mood (Balanced, Buddy, Professional,
+  Terse, Mentor). A dial adds a sentence to each reply's instructions and the settings page shows you exactly which. All four in the middle
+  adds nothing and costs nothing. The page sends only the numbers; the words live on the server.
+- **Your own.** Write instructions in the persona box, give them a name and press Save (up to twelve). They appear under *Yours* in the picker.
+- **Surprise me** picks one at random, and the command palette has *Random personality for this chat*.
+- **Per chat:** type `/persona teacher` (a name, or the start of one) to give just this chat a personality, `/persona random`, or
+  `/persona off` to return to Settings. Your next message uses it. A name that matches more than one asks you to be clearer instead of guessing.
 
 ### Look, feel and accessibility
 
@@ -1270,6 +1324,7 @@ npm run test:composer  # timestamps, saved messages, folding, drafts, up arrow, 
 npm run test:appearance  # theme, text size, shortcuts, resizing, focus, axe scan, print, manifest, offline
 npm run test:models  # persona presets, context meter, favourites, regenerate-with, memory search/export/import, units
 npm run test:extras  # templates, welcome screen, gallery families, usage CSV, daily backups, chat statistics
+npm run test:studio  # settings tabs, personalities and dials, /persona, the image studio, /image, the Draw button, gallery search (needs JARVIS_POLLINATIONS_URL=http://localhost:8899 on the server)
 npm run test:polish  # command palette, settings search, diagnostics, reset, typeface, accents, width, blur, folding
 npm run test:choosing  # chat info, speeds, model notes, new-chat model, tools off, reply length, no fallback, quieter page
 npm run test:organising  # remember from a message, expiring memory, add many, duplicates, notes, colours, order, storage
@@ -1525,30 +1580,38 @@ image, its name is the thing to check.
 
 ### Making pictures
 
-With a NanoGPT key — in `.env.local` or pasted into Settings — JARVIS can draw.
-"Draw a lighthouse in a storm" makes one; "make it night-time" edits the last
-one; attach a photo and say "put a hat on him" to edit yours. Ask for a
-portrait or landscape picture and it will be one — if a model refuses that
-size, you get a square one and are told why, rather than an error.
+JARVIS draws like any image generator. There are three ways in, and **none of them needs a key**:
 
-- Pictures are saved to `data/images/` and served from `/api/images/<id>`,
-  behind the same login as your chats. Only a short path goes back to the
-  model — never the image itself, which would be a megabyte of text.
-- Click one in the chat to enlarge it, or use its download button. The
-  **Pictures** button at the top of the sidebar lists every one, to view,
-  download, copy its prompt, send to the room display, or delete.
-- An edit remembers the picture it started from. In the gallery an edit says
-  *Edited from an earlier picture*, an original says *1 edit* (or *3 edits*),
-  and either opens the whole family — the original and everything made from it,
-  oldest first. If the original has since been deleted the edit says so.
-- The model is picked by the server, not the chat model: `JARVIS_IMAGE_MODEL`
-  (default `hidream`), and `JARVIS_IMAGE_EDIT_MODEL` for edits. The oldest
-  pictures are removed past `JARVIS_IMAGE_KEEP` (default 200; 0 keeps all).
-- With no key the tool isn't offered at all, so it costs nothing on the free
-  tiers' per-minute token limits.
-- In voice mode a picture is announced as "picture shown on screen" rather
-  than read out as a URL, and if a room display is connected JARVIS can put
-  it there.
+- Type **`/image a red fox in the snow`** in the message box. The studio opens with that prompt and draws it.
+- Press **Draw** under the message box (or choose *Draw a picture* on the welcome screen or in the command palette) to open the **image studio**.
+- Write "draw a lighthouse in a storm" and a **Draw this as a picture** button appears. Nothing is drawn until you press it.
+
+**The studio** has a prompt, ten styles (Photo, Watercolour, Anime, 3D render, Pixel art, Logo, Sketch, Cinematic, Oil painting, or none), four
+shapes (square, portrait, landscape, wide), one to four pictures at a time, a *leave out* list ("text, watermark"), and an optional seed. Each
+result has **Another seed** (same prompt, different picture) and **Save**. Your last choices and recent prompts are remembered in this browser.
+It talks to the picture service directly, so it costs no chat tokens.
+
+**Who draws it.** With no key, a free public service (Pollinations, FLUX models) — which means *your prompt is sent to that service*. If that
+is not acceptable, set `JARVIS_FREE_IMAGES=0` and pictures are simply unavailable until you add a NanoGPT key. With a NanoGPT key (in
+`.env.local` or Settings → API keys) it is used first: better models, and the only way to **edit** a picture. **Settings → Pictures** shows
+which one would draw right now.
+
+**Letting the chat model draw too.** "Draw a lighthouse" in an ordinary message makes the model call a picture tool. That tool is offered
+only with a NanoGPT key — or, to use the free service the same way, set `JARVIS_FREE_IMAGES=1`. It is off by default because a tool's
+description is sent with every request, drawing or not. "Make it night-time" edits the last picture and "put a hat on him" edits an attached
+photo, both NanoGPT only. A model that refuses a shape gives you a square and tells you why.
+
+- Pictures are saved to `data/images/` and served from `/api/images/<id>`, behind the same login as your chats. Only a short path goes back
+  to the model — never the image itself, which would be a megabyte of text.
+- Click one in the chat to enlarge it, or use its download button. The **Pictures** button at the top of the sidebar lists every one, with
+  a **search by prompt** box, a **New picture** button, and for each: view, download, copy its prompt, send to the room display, delete.
+  Pictures from the studio show their style.
+- An edit remembers the picture it started from. In the gallery an edit says *Edited from an earlier picture*, an original says *1 edit*
+  (or *3 edits*), and either opens the whole family — the original and everything made from it, oldest first.
+- The paid model is picked by the server: `JARVIS_IMAGE_MODEL` (default `hidream`) and `JARVIS_IMAGE_EDIT_MODEL`. The oldest pictures are
+  removed past `JARVIS_IMAGE_KEEP` (default 200; 0 keeps all).
+- In voice mode a picture is announced as "picture shown on screen" rather than read out as a URL, and if a room display is connected JARVIS
+  can put it there.
 
 ## The room display
 

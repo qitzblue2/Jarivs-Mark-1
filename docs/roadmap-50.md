@@ -141,3 +141,55 @@ JARVIS speaking first, within limits you set. Every item here is opt-out, gentle
 - [x] 108. Always show the buttons under messages
 - [x] 109. Fold long code blocks
 - [x] 110. Reset this browser, keeping your Settings unless you say otherwise
+
+## M. Personalities, pictures, design and start-up
+- [x] 111. Socratic personality
+- [x] 112. Language tutor
+- [x] 113. Plain words (explain it to a ten-year-old)
+- [x] 114. Researcher — sourced, honest about uncertainty
+- [x] 115. Interviewer — mock interviews with feedback
+- [x] 116. Coach
+- [x] 117. Calm
+- [x] 118. Dry wit
+- [x] 119. Storyteller
+- [x] 120. Game master
+- [x] 121. Poet
+- [x] 122. Skeptic
+- [x] 123. Debate partner
+- [x] 124. Rubber duck
+- [x] 125. Negotiator — practise a hard conversation
+- [x] 126. Personalities grouped under five headings in the picker
+- [x] 127. Four dials — formality, humour, warmth, detail
+- [x] 128. Overall moods for the dials (Buddy, Professional, Terse, Mentor)
+- [x] 129. The dials show exactly what they add to each reply
+- [x] 130. Save your own personalities (up to twelve)
+- [x] 131. Surprise me — a random personality
+- [x] 132. `/persona` — by name, `random`, or `off`, for one chat
+- [x] 133. Random personality in the command palette
+- [x] 134. Dials and saved personalities travel in the settings file
+- [x] 135. Draw with no key, through a free service (switch off with `JARVIS_FREE_IMAGES=0`)
+- [x] 136. `/image` — draw from the message box
+- [x] 137. `/studio` and a Draw button under the message box
+- [x] 138. The image studio
+- [x] 139. Ten picture styles
+- [x] 140. Four shapes, including wide
+- [x] 141. One to four pictures at a time
+- [x] 142. Seeds, and Another seed
+- [x] 143. A leave-out list
+- [x] 144. Recent prompts and remembered choices
+- [x] 145. "Draw this as a picture" when a message asks for one
+- [x] 146. Search the gallery by prompt
+- [x] 147. New picture from the gallery; styles shown on pictures
+- [x] 148. Settings → Pictures says which service would draw
+- [x] 149. Let the chat model draw without a key (`JARVIS_FREE_IMAGES=1`)
+- [x] 150. Draw a picture on the welcome screen
+- [x] 151. A Claude Design canvas for the site, its tabs and the studio
+- [x] 152. Settings split into tabs
+- [x] 153. Tabs you can drive with the arrow keys, remembered between visits
+- [x] 154. Search across every tab; an *Everything* tab for the old long page
+- [x] 155. `npm run launch` — install, check, build, start, open the browser
+- [x] 156. `start.sh` and `start.bat` to double-click
+- [x] 157. `npm run setup` — a key wizard that never prints a key back
+- [x] 158. `npm run doctor` — what is missing and how to fix it
+- [x] 159. `--dev`, `--lan`, `--rebuild`, `--no-open` and `PORT`
+- [x] 160. A quick start, service recipes and troubleshooting in the README

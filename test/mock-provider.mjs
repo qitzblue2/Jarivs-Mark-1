@@ -140,7 +140,7 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({ error: { message: `Unexpected Authorization: ${auth}` } }));
   }
 
-  if (NO_AUTH || req.url.startsWith("/search")) {
+  if (NO_AUTH || req.url.startsWith("/search") || req.url.startsWith("/prompt/")) {
     // fall through to the handler below; neither needs auth
   } else if (!auth.startsWith("Bearer ")) {
     res.writeHead(401, { "Content-Type": "application/json" });
@@ -177,6 +177,17 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ data: [{ b64_json: png.toString("base64") }] }));
     });
+    return;
+  }
+
+  // Stands in for the free keyless image service: point JARVIS_POLLINATIONS_URL
+  // at http://localhost:8899 and GET /prompt/<text>?seed=...
+  if (req.url.startsWith("/prompt/")) {
+    const u = new URL(req.url, "http://localhost");
+    process.stdout.write(`[mock] free image seed=${u.searchParams.get("seed")} size=${u.searchParams.get("width")}x${u.searchParams.get("height")} prompt=${decodeURIComponent(u.pathname.slice(8))}\n`);
+    const png = solidPng(64, 64, [52, 211, 153]);
+    res.writeHead(200, { "Content-Type": "image/png", "Content-Length": png.length });
+    res.end(png);
     return;
   }
 

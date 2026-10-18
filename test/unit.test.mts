@@ -61,6 +61,13 @@ import type { ConnectionEvent, ConnectionState } from "../lib/connection";
 import { inflateSync } from "node:zlib";
 import { DEFAULT_INTRO, DEFAULT_PERSONA as PERSONA_NOW, PERSONA_RULES } from "../lib/persona";
 import { PERSONA_PRESETS, matchPreset, presetText } from "../lib/personas";
+import { groupedPresets, findPersona, searchPersonas, randomPersona, PERSONA_GROUPS } from "../lib/personas";
+import { cleanDials, dialsHint, isNeutral, moodOf, cleanCustomPersonas, DIAL_MOODS, NEUTRAL_DIALS, DIALS } from "../lib/persona-dials";
+import { IMAGE_STYLES, cleanImageRequest, styledPrompt, seedsFor, imagePromptFrom, filterPictures, rememberImagePrompt, SHAPE_PIXELS } from "../lib/images/styles";
+import { freeImageUrl } from "../lib/images/free";
+import { SETTINGS_TABS, tabForSection, nextTab, isSettingsTab } from "../lib/settings-tabs";
+import { cleanStudio, loadStudio, saveStudio, STUDIO_KEY } from "../lib/images/studio-store";
+import { runChecks, formatChecks, canStart, mergeEnv, nodeMajor, localUrl, configuredProviders } from "../lib/doctor";
 import { UnitError, describeConversion, formatNumber, lookupUnit, parseConversion } from "../lib/tools/units";
 import { calculateTool } from "../lib/tools/calculate";
 import { toWireTool } from "../lib/tools/types";
@@ -3593,6 +3600,75 @@ console.log("\n--- initiative: the live state ---");
   eq("page: the attributes", attrs({ font: "serif", accent: "rose", width: "wide", privacyBlur: true, alwaysActions: true }), { "data-font": "serif", "data-accent": "rose", "data-width": "wide", "data-blur": "true", "data-actions": "always" });
   eq("prefs: the choices are the ones the stylesheet and the settings page know", [FONTS.join(), WIDTHS.join(), COLLAPSE_CHOICES.join()], ["sans,serif,mono,readable", "narrow,normal,wide", "0,20,40"]);
   eq("prefs: each rule in the stylesheet for a font and width exists", [FONTS.filter((f) => f !== "sans").every((f) => css.includes(`html[data-font="${f}"]`)), WIDTHS.filter((w) => w !== "normal").every((w) => css.includes(`html[data-width="${w}"]`)), css.includes('html[data-blur="true"]')], [true, true, true]);
+}
+
+console.log("\n--- batch M: personalities, pictures, start-up ---");
+{
+  eq("personas: twenty-one, each in a known group, ids unique", [PERSONA_PRESETS.length, PERSONA_PRESETS.every((p) => (PERSONA_GROUPS as readonly string[]).includes(p.group))], [21, true]);
+  eq("personas: grouping loses none and drops no empty heading", [groupedPresets().flatMap((g) => g.presets).length, groupedPresets().every((g) => g.presets.length > 0)], [21, true]);
+  eq("personas: found by id, name, or an unambiguous start; ambiguous or unknown is null", [findPersona("socratic")?.id, findPersona("Language tutor")?.id, findPersona("deb")?.id, findPersona("c"), findPersona("zzz"), findPersona("")], ["socratic", "tutor", "debater", null, null, null]);
+  eq("personas: search matches every word in name, blurb or group", [searchPersonas("code").map((p) => p.id), searchPersonas("").length, searchPersonas("nothing like this")], [["reviewer"], 21, []]);
+  eq("personas: random never repeats the current one and is steered by the dice", [randomPersona("jarvis", () => 0).id !== "jarvis", randomPersona(undefined, () => 0.9999).id, randomPersona("jarvis", () => 0.5) === randomPersona("jarvis", () => 0.5)], [true, PERSONA_PRESETS[20].id, true]);
+  ok("personas: every new intro stays cheap and none says it is a safety system", PERSONA_PRESETS.every((p) => estimateTokens(p.intro) <= 80));
+
+  eq("dials: nothing sent, or junk, is the middle and adds no words", [dialsHint(undefined), dialsHint({}), dialsHint({ formality: "high" }), dialsHint(NEUTRAL_DIALS), isNeutral(cleanDials(null))], [null, null, null, null, true]);
+  eq("dials: only whole numbers 0 to 4 count", [cleanDials({ warmth: 4.5 }).warmth, cleanDials({ warmth: -1 }).warmth, cleanDials({ warmth: 5 }).warmth, cleanDials({ warmth: 3 }).warmth], [2, 2, 2, 3]);
+  eq("dials: each end of each dial says something different, and the middle says nothing", DIALS.map((d) => [0, 1, 3, 4].map((v) => dialsHint({ ...NEUTRAL_DIALS, [d]: v })).every((t) => typeof t === "string" && t.length > 10) && new Set([0, 1, 3, 4].map((v) => dialsHint({ ...NEUTRAL_DIALS, [d]: v }))).size === 4), [true, true, true, true]);
+  eq("dials: several at once join into one paragraph", dialsHint({ formality: 0, humour: 4, warmth: 2, detail: 2 })!.split(". ").length >= 2, true);
+  eq("dials: the named moods are recognised, a custom mix is not", [moodOf(DIAL_MOODS[1].dials), moodOf({ formality: 1, humour: 1, warmth: 1, detail: 1 })], ["buddy", null]);
+  ok("dials: a hint costs under 80 tokens even with all four moved", estimateTokens(dialsHint({ formality: 4, humour: 4, warmth: 4, detail: 4 })!) <= 80);
+  eq("custom personas: trimmed, capped, de-duplicated by name ignoring case, bad rows dropped", cleanCustomPersonas([{ name: " Pirate  ", text: "Arr" }, { name: "pirate", text: "dup" }, { name: "", text: "x" }, { name: "x", text: 5 }, null, "s"]), [{ name: "Pirate", text: "Arr" }]);
+  eq("custom personas: no more than twelve", cleanCustomPersonas(Array.from({ length: 30 }, (_, i) => ({ name: `p${i}`, text: "t" }))).length, 12);
+
+  eq("pictures: ten styles starting with none, none adding nothing", [IMAGE_STYLES.length, IMAGE_STYLES[0].id, IMAGE_STYLES[0].suffix], [10, "none", ""]);
+  eq("pictures: a request is cleaned and defaulted", cleanImageRequest({ prompt: "  a   fox\n in snow " }), { ok: true, request: { prompt: "a fox in snow", style: "none", avoid: "", shape: "square", count: 1, seed: null } });
+  eq("pictures: bad requests say why", [cleanImageRequest(null), cleanImageRequest({ prompt: "  " }), cleanImageRequest({ prompt: "x", style: "evil" }), cleanImageRequest({ prompt: "x", shape: "tiny" }), cleanImageRequest({ prompt: "x", count: 5 }), cleanImageRequest({ prompt: "x", count: 1.5 }), cleanImageRequest({ prompt: "x", seed: -1 })].map((r) => r.ok), [false, false, false, false, false, false, false]);
+  eq("pictures: a long prompt is cut, the avoid line too", [(cleanImageRequest({ prompt: "x".repeat(5000) }) as { request: { prompt: string } }).request.prompt.length, (cleanImageRequest({ prompt: "x", avoid: "y".repeat(5000) }) as { request: { avoid: string } }).request.avoid.length], [1000, 300]);
+  eq("pictures: the style and the avoid list are added in words", styledPrompt("a fox", "pixel", "text, blur"), "a fox, pixel art, limited palette, crisp pixels, retro game sprite, avoid: text, blur");
+  eq("pictures: no style and no avoid is exactly the prompt; an unknown style adds nothing", [styledPrompt("a fox", "none"), styledPrompt("a fox", "bogus")], ["a fox", "a fox"]);
+  eq("pictures: variations get different seeds, in range, repeatably from the first", [new Set(seedsFor(4, 10)).size, seedsFor(2, 10), seedsFor(4, null, () => 0.5).every((n) => n >= 0 && n <= 2_147_483_647)], [4, [10, 7929], true]);
+  eq("pictures: every shape is on a multiple of 64", Object.values(SHAPE_PIXELS).every((p) => p.width % 64 === 0 && p.height % 64 === 0), true);
+  eq("pictures: asking for one is recognised, and ordinary talk is not", ["draw a lighthouse in a storm", "Can you draw me a fox?", "make me an image of a red bicycle", "generate a picture of a city at night", "paint the sunset over water", "what is a good way to draw blood for a test", "draw", "/image fox", "tell me about foxes", "please create a logo for a bakery called Rye"].map((t) => imagePromptFrom(t)), ["a lighthouse in a storm", "a fox", "a red bicycle", "a city at night", "the sunset over water", null, null, null, null, "a bakery called Rye"]);
+  eq("pictures: a multi-line or very long message is never offered", [imagePromptFrom("draw a fox\nand a hen"), imagePromptFrom("draw " + "x".repeat(500))], [null, null]);
+  eq("pictures: the gallery filter needs every word", [filterPictures([{ prompt: "A red fox" }, { prompt: "A blue fox" }], "red fox").length, filterPictures([{ prompt: "A red fox" }], "").length, filterPictures([{ prompt: "A red fox" }], "owl").length], [1, 1, 0]);
+  eq("pictures: recent prompts are newest first, unique and capped", [rememberImagePrompt(["a", "b"], "b"), rememberImagePrompt(["a"], " "), rememberImagePrompt(Array.from({ length: 12 }, (_, i) => `p${i}`), "new").length], [["b", "a"], ["a"], 12]);
+  const url = freeImageUrl("a fox & a hen", "wide", 42);
+  eq("pictures: the free service address carries the size, seed and an escaped prompt", [url.startsWith("https://image.pollinations.ai/prompt/a%20fox%20%26%20a%20hen?"), url.includes("width=1344"), url.includes("height=768"), url.includes("seed=42"), url.includes("nologo=true")], [true, true, true, true, true]);
+
+  const facts = { env: { GROQ_API_KEY: "k" }, nodeVersion: "v22.1.0", envFileExists: true, nodeModulesExists: true, builtExists: true, voiceModelsExist: true, dataWritable: true };
+  const status = (f: Partial<typeof facts>, id: string) => runChecks({ ...facts, ...f }).find((c) => c.id === id)?.status;
+  eq("doctor: a ready machine has no failures", [canStart(runChecks(facts)), runChecks(facts).some((c) => c.status === "fail")], [true, false]);
+  eq("doctor: old Node, missing install, unwritable data and no key each fail", [status({ nodeVersion: "v18.0.0" }, "node"), status({ nodeModulesExists: false }, "install"), status({ dataWritable: false }, "data"), status({ env: {} }, "keys")], ["fail", "fail", "fail", "warn"]);
+  eq("doctor: no key and no env file is a failure, with the way to fix it", [status({ env: {}, envFileExists: false }, "keys"), runChecks({ ...facts, env: {}, envFileExists: false }).find((c) => c.id === "keys")?.fix?.includes("npm run setup")], ["fail", true]);
+  eq("doctor: opening the network without a password fails; with one it is fine", [status({ env: { GROQ_API_KEY: "k", JARVIS_OPEN_NETWORK: "1" } }, "lan"), status({ env: { GROQ_API_KEY: "k", JARVIS_OPEN_NETWORK: "1", JARVIS_PASSWORD: "p" } }, "lan")], ["fail", "ok"]);
+  eq("doctor: missing voice models and build are suggestions, not blockers", [status({ voiceModelsExist: false }, "voice"), status({ builtExists: false }, "build"), canStart(runChecks({ ...facts, voiceModelsExist: false, builtExists: false }))], ["warn", "warn", true]);
+  eq("doctor: pictures are free by default, off when disabled and no key, and NanoGPT when keyed", [status({}, "pictures"), status({ env: { GROQ_API_KEY: "k", JARVIS_FREE_IMAGES: "0" } }, "pictures"), runChecks({ ...facts, env: { NANOGPT_API_KEY: "n" } }).find((c) => c.id === "pictures")?.detail], ["ok", "warn", "drawn by NanoGPT"]);
+  eq("doctor: the report never contains a key", formatChecks(runChecks({ ...facts, env: { GROQ_API_KEY: "sekrit-value" } })).includes("sekrit-value"), false);
+  eq("doctor: the powers line shows the risky ones when on", runChecks({ ...facts, env: { GROQ_API_KEY: "k", JARVIS_ALLOW_COMPUTER: "1" } }).find((c) => c.id === "powers")?.detail, "on: computer access");
+  eq("doctor: node versions and providers read", [nodeMajor("v22.1.0"), nodeMajor("20.9.0"), nodeMajor("nonsense"), configuredProviders({ GROQ_API_KEY: "a", NANOGPT_API_KEY: " " })], [22, 20, 0, ["Groq"]]);
+  eq("env file: replaces one key, appends another, leaves comments and the rest alone", mergeEnv("# mine\nGROQ_API_KEY=old\nOTHER=1\n", { GROQ_API_KEY: "new", CEREBRAS_API_KEY: "c" }), "# mine\nGROQ_API_KEY=new\nOTHER=1\nCEREBRAS_API_KEY=c\n");
+  eq("env file: blank values, bad names and newlines in a value are refused", mergeEnv("A=1\n", { B: " ", "bad name": "x", C: "x\nEVIL=1", lower: "x" }), "A=1\n");
+  eq("env file: a value with $ or regex characters goes in literally", mergeEnv("K=old\n", { K: "a$&b" }), "K=a$&b\n");
+  eq("env file: an empty file gets a clean line", mergeEnv("", { K: "v" }), "K=v\n");
+  eq("start: the address follows PORT when it is a number", [localUrl({}), localUrl({ PORT: "4000" }), localUrl({ PORT: "x" })], ["http://localhost:3000", "http://localhost:4000", "http://localhost:3000"]);
+
+  eq("tabs: seven, the last showing everything", [SETTINGS_TABS.length, SETTINGS_TABS.at(-1)!.id], [7, "all"]);
+  eq("tabs: a section is filed by its marker, else its heading, else Assistant", [
+    tabForSection({ attributes: ["data-look-settings"], heading: "Whatever", text: "" }),
+    tabForSection({ attributes: [], heading: "API keys", text: "" }),
+    tabForSection({ attributes: [], heading: "Persona", text: "" }),
+    tabForSection({ attributes: [], heading: "", text: "Tool use Let JARVIS run tools" }),
+    tabForSection({ attributes: [], heading: "", text: "Storage: JSON files in ./data/chats" }),
+    tabForSection({ attributes: [], heading: "Memory", text: "" }),
+    tabForSection({ attributes: [], heading: "Something new", text: "" }),
+    tabForSection({ attributes: ["data-personality-settings"], heading: "Personality", text: "" }),
+    tabForSection({ attributes: ["data-image-settings"], heading: "Pictures", text: "" }),
+  ], ["look", "models", "personality", "models", "data", "data", "assistant", "personality", "pictures"]);
+  eq("tabs: arrows wrap, Home and End jump, other keys do nothing", [nextTab("models", "ArrowRight"), nextTab("models", "ArrowLeft"), nextTab("look", "Home"), nextTab("look", "End"), nextTab("look", "a")], ["personality", "all", "models", "all", null]);
+  eq("tabs: only real ids are accepted back from storage", [isSettingsTab("look"), isSettingsTab("nope"), isSettingsTab(null)], [true, false, false]);
+  eq("studio: junk in storage becomes the defaults, field by field", cleanStudio({ style: "evil", shape: "wide", count: 9, history: ["a", 5, ""] }), { style: "none", shape: "wide", count: 1, history: ["a"] });
+  eq("studio: saved and loaded back, and a storage that throws is the defaults", (() => { const mem = new Map<string, string>(); saveStudio({ setItem: (k: string, v: string) => void mem.set(k, v) }, { style: "pixel", shape: "wide", count: 2, history: ["x"] }); const back = loadStudio({ getItem: (k: string) => mem.get(k) ?? null }); const broken = loadStudio({ getItem: () => { throw new Error("blocked"); } }); return [mem.has(STUDIO_KEY), back.style, back.count, broken.style]; })(), [true, "pixel", 2, "none"]);
+  eq("studio: saving to a full or blocked storage doesn't throw", (() => { try { saveStudio({ setItem: () => { throw new Error("full"); } }, cleanStudio(null)); return true; } catch { return false; } })(), true);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -1,5 +1,6 @@
 import { calculateTool } from "./calculate";
 import { generateImageTool, resolveImageKey } from "./generate-image";
+import { freeImagesForModel } from "@/lib/images/free";
 import { fetchUrlTool } from "./fetch-url";
 import { forgetTool, recallTool, rememberTool } from "./remember";
 import { listFilesTool, readFileTool, writeFileTool } from "./fs/files";
@@ -98,11 +99,12 @@ function displayAvailable(): boolean {
 
 /**
  * Pictures, offered only when there is a NanoGPT key to make them with —
- * the server's or one from Settings. Without one the schema is a tax on every
+ * the server's or one from Settings — or the free service was switched on for
+ * the model (JARVIS_FREE_IMAGES=1). Without one the schema is a tax on every
  * request for a call that can only fail.
  */
 function imagesAvailable(ctx: Pick<ToolContext, "imageKey">): boolean {
-  return Boolean(ctx.imageKey ?? resolveImageKey());
+  return Boolean(ctx.imageKey ?? resolveImageKey()) || freeImagesForModel();
 }
 
 export function allTools(ctx: Pick<ToolContext, "imageKey" | "disabledTools"> = {}): Tool[] {

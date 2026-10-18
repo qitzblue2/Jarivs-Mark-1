@@ -1,5 +1,6 @@
 import { imageIdFrom, imageUrl, readImage, saveImage } from "@/lib/images/store";
 import { displayConnected } from "@/lib/display";
+import { FREE_MODEL, FREE_USAGE_ID, freeImage, freeImagesForModel } from "@/lib/images/free";
 import { deviceMode } from "@/lib/voice/device/detect";
 import { recordRequest } from "@/lib/providers/usage";
 import { guardedFetch, readCappedBytes } from "./net-guard";
@@ -39,6 +40,7 @@ export const SHAPES: Record<string, string> = {
   square: "1024x1024",
   portrait: "768x1024",
   landscape: "1024x768",
+  wide: "1344x768",
 };
 
 /** How picture requests appear on the usage page. */
@@ -80,6 +82,79 @@ async function sourceImage(
   return { dataUrl: `data:${found.meta.mime};base64,${found.bytes.toString("base64")}`, fromId: found.meta.id };
 }
 
+/**
+ * One NanoGPT request, with the square fallback and the safe download of a
+ * returned URL. Shared by the tool the model calls and the studio you press.
+ */
+export async function nanoImage(opts: {
+  apiKey: string;
+  prompt: string;
+  model: string;
+  shape: string;
+  /** A picture to change rather than draw from nothing. */
+  source?: string;
+  signal?: AbortSignal;
+}): Promise<{ bytes: Buffer; squared: boolean }> {
+  const { apiKey, prompt, model, shape, source } = opts;
+  const signal = opts.signal
+    ? AbortSignal.any([opts.signal, AbortSignal.timeout(TIMEOUT_MS)])
+    : AbortSignal.timeout(TIMEOUT_MS);
+
+  const request = (size: string) =>
+    fetch(endpoint(), {
+      method: "POST",
+      signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        prompt,
+        n: 1,
+        size,
+        response_format: "b64_json",
+        ...(source ? { imageDataUrl: source } : {}),
+      }),
+    });
+
+  // Counted apart from chat: the subscription's picture allowance is its own
+  // number (100 a day), and mixing the two would hide both.
+  let res = await request(SHAPES[shape] ?? SHAPES.square);
+  recordRequest(IMAGE_USAGE_ID, 0, res.status);
+  let squared = false;
+  if (res.status === 400 && shape !== "square") {
+    await res.text().catch(() => "");
+    res = await request(SHAPES.square);
+    recordRequest(IMAGE_USAGE_ID, 0, res.status);
+    squared = true;
+  }
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`NanoGPT image generation failed (${res.status}): ${detail.slice(0, 200)}`);
+  }
+
+  const json = await res.json();
+  const item = json?.data?.[0];
+  if (!item) throw new Error("NanoGPT returned no image.");
+
+  let bytes: Buffer;
+  if (item.b64_json) {
+    bytes = Buffer.from(String(item.b64_json), "base64");
+    if (bytes.length > MAX_IMAGE_BYTES) throw new Error("The returned picture was implausibly large.");
+  } else if (item.url) {
+    // The URL comes out of a provider response, so it gets the same guard
+    // as one a model chose: no private addresses, a size cap, a timeout.
+    const { response } = await guardedFetch(String(item.url), { signal });
+    if (!response.ok) throw new Error(`Couldn't download the generated picture (${response.status}).`);
+    bytes = Buffer.from(await readCappedBytes(response, MAX_IMAGE_BYTES, true));
+  } else {
+    throw new Error("NanoGPT returned no image data.");
+  }
+  return { bytes, squared };
+}
+
 export const generateImageTool: Tool = {
   name: "generate_image",
   description:
@@ -100,7 +175,7 @@ export const generateImageTool: Tool = {
     if (!prompt) throw new Error("No prompt given.");
 
     const apiKey = ctx.imageKey ?? resolveImageKey();
-    if (!apiKey) {
+    if (!apiKey && !freeImagesForModel()) {
       throw new Error("No NanoGPT key — pictures need one, even when another provider is answering.");
     }
 
@@ -109,65 +184,19 @@ export const generateImageTool: Tool = {
     if (source && source.dataUrl.length > MAX_EDIT_INPUT_CHARS) {
       throw new Error("That picture is too large to edit (4MB limit). Ask for a smaller one.");
     }
-    const model = source ? editModel() : imageModel();
     const shape = typeof args.shape === "string" && SHAPES[args.shape] ? args.shape : "square";
-
-    const signal = ctx.signal
-      ? AbortSignal.any([ctx.signal, AbortSignal.timeout(TIMEOUT_MS)])
-      : AbortSignal.timeout(TIMEOUT_MS);
-
-    const request = (size: string) =>
-      fetch(endpoint(), {
-        method: "POST",
-        signal,
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          prompt,
-          n: 1,
-          size,
-          response_format: "b64_json",
-          ...(source ? { imageDataUrl: source.dataUrl } : {}),
-        }),
-      });
-
-    // Counted apart from chat: the subscription's picture allowance is its own
-    // number (100 a day), and mixing the two would hide both.
-    let res = await request(SHAPES[shape]);
-    recordRequest(IMAGE_USAGE_ID, 0, res.status);
-    let squared = false;
-    if (res.status === 400 && shape !== "square") {
-      await res.text().catch(() => "");
-      res = await request(SHAPES.square);
-      recordRequest(IMAGE_USAGE_ID, 0, res.status);
-      squared = true;
+    if (!apiKey) {
+      // The free service draws from nothing; changing a picture needs the paid one.
+      if (source) throw new Error("Editing a picture needs a NanoGPT key. The free service can only draw new ones.");
+      const bytes = await freeImage({ prompt, shape: shape as "square", seed: Math.floor(Math.random() * 1_000_000_000), signal: ctx.signal });
+      recordRequest(FREE_USAGE_ID, 0, 200);
+      const saved = await saveImage(bytes, { prompt, model: FREE_MODEL });
+      const freeAlt = prompt.replace(/[[\]\n]/g, " ").slice(0, 80).trim();
+      return `Saved. Show it with: ![${freeAlt}](${imageUrl(saved.id)})`;
     }
+    const model = source ? editModel() : imageModel();
 
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      throw new Error(`NanoGPT image generation failed (${res.status}): ${detail.slice(0, 200)}`);
-    }
-
-    const json = await res.json();
-    const item = json?.data?.[0];
-    if (!item) throw new Error("NanoGPT returned no image.");
-
-    let bytes: Buffer;
-    if (item.b64_json) {
-      bytes = Buffer.from(String(item.b64_json), "base64");
-      if (bytes.length > MAX_IMAGE_BYTES) throw new Error("The returned picture was implausibly large.");
-    } else if (item.url) {
-      // The URL comes out of a provider response, so it gets the same guard
-      // as one a model chose: no private addresses, a size cap, a timeout.
-      const { response } = await guardedFetch(String(item.url), { signal });
-      if (!response.ok) throw new Error(`Couldn't download the generated picture (${response.status}).`);
-      bytes = Buffer.from(await readCappedBytes(response, MAX_IMAGE_BYTES, true));
-    } else {
-      throw new Error("NanoGPT returned no image data.");
-    }
+    const { bytes, squared } = await nanoImage({ apiKey, prompt, model, shape, source: source?.dataUrl, signal: ctx.signal });
 
     const meta = await saveImage(bytes, { prompt, model, editedFrom: source?.fromId });
     const alt = prompt.replace(/[[\]\n]/g, " ").slice(0, 80).trim();

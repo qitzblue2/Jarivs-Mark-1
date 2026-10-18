@@ -22,6 +22,9 @@ export interface ImageMeta {
   createdAt: number;
   /** Set when the picture was an edit of another one. */
   editedFrom?: string;
+  /** The style and seed it was made with, when it came from the studio. */
+  style?: string;
+  seed?: number;
 }
 
 const MIMES: Record<string, string> = { png: "png", jpeg: "jpg", webp: "webp", gif: "gif" };
@@ -74,7 +77,7 @@ function metaPath(id: string): string {
 
 export async function saveImage(
   bytes: Buffer,
-  info: { prompt: string; model: string; editedFrom?: string },
+  info: { prompt: string; model: string; editedFrom?: string; style?: string; seed?: number },
 ): Promise<ImageMeta> {
   const mime = sniffMime(bytes);
   if (!mime) throw new Error("The provider sent back something that isn't an image.");
@@ -87,6 +90,8 @@ export async function saveImage(
     bytes: bytes.length,
     createdAt: Date.now(),
     ...(info.editedFrom ? { editedFrom: info.editedFrom } : {}),
+    ...(info.style && info.style !== "none" ? { style: info.style } : {}),
+    ...(typeof info.seed === "number" ? { seed: info.seed } : {}),
   };
 
   await fs.mkdir(imageDir(), { recursive: true });

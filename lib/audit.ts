@@ -30,7 +30,8 @@ export type AuditKind =
   | "chat.trash"
   | "chat.restore"
   | "chat.import"
-  | "export.markdown";
+  | "export.markdown"
+  | "image.make";
 
 export interface AuditEntry {
   at: number;

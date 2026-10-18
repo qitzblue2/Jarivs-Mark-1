@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type RefObject } from "react";
+import { tabForSection, type SettingsTab } from "@/lib/settings-tabs";
 
 /** Whether `text` contains every word of `query`, in any order, ignoring case. An empty query matches everything. */
 export function matchesAllWords(text: string, query: string): boolean {
@@ -16,8 +17,12 @@ export function matchesAllWords(text: string, query: string): boolean {
  * `hidden` attribute, so the form's own state (what is typed in a field in a
  * hidden section) is untouched. A child marked `data-filter-keep` (the search
  * box itself) is never hidden. Returns how many sections are showing.
+ *
+ * With a `tab`, only that tab's sections show — until something is typed in the
+ * search box, which looks through every tab (a result you can't see because it
+ * is on another tab is no result).
  */
-export function useSectionFilter(ref: RefObject<HTMLElement | null>, query: string, ready: unknown): number | null {
+export function useSectionFilter(ref: RefObject<HTMLElement | null>, query: string, ready: unknown, tab?: SettingsTab): number | null {
   const [shown, setShown] = useState<number | null>(null);
   useEffect(() => {
     const root = ref.current;
@@ -25,11 +30,21 @@ export function useSectionFilter(ref: RefObject<HTMLElement | null>, query: stri
     let count = 0;
     for (const el of root.children) {
       if (!(el instanceof HTMLElement) || el.hasAttribute("data-filter-keep")) continue;
-      const match = matchesAllWords(el.textContent ?? "", query);
+      const searching = query.trim().length > 0;
+      const inTab =
+        searching ||
+        !tab ||
+        tab === "all" ||
+        tabForSection({
+          attributes: el.getAttributeNames(),
+          heading: el.querySelector("h3, h2, legend")?.textContent ?? "",
+          text: el.textContent ?? "",
+        }) === tab;
+      const match = inTab && matchesAllWords(el.textContent ?? "", query);
       el.hidden = !match;
       if (match) count++;
     }
     setShown(query.trim() ? count : null);
-  }, [ref, query, ready]);
+  }, [ref, query, ready, tab]);
   return shown;
 }
