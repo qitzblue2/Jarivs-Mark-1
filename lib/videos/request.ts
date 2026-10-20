@@ -10,9 +10,9 @@
  */
 export const VIDEO_ASPECTS = ["16:9", "9:16"] as const;
 export type VideoAspect = (typeof VIDEO_ASPECTS)[number];
-export const VIDEO_SECONDS = [4, 6, 8] as const;
+export const VIDEO_SECONDS = [4, 5, 6, 8, 10, 12] as const;
 export type VideoSeconds = (typeof VIDEO_SECONDS)[number];
-export const VIDEO_QUALITIES = ["720p", "1080p"] as const;
+export const VIDEO_QUALITIES = ["480p", "720p", "1080p"] as const;
 export type VideoQuality = (typeof VIDEO_QUALITIES)[number];
 
 export const MAX_SCENE = 1200;
@@ -24,6 +24,8 @@ export const MAX_AVOID_VIDEO = 200;
 export const REALISM = "photorealistic live-action footage, shot on a cinema camera, natural lighting, realistic motion and physics, true-to-life skin and textures";
 
 export interface VideoRequest {
+  /** A NanoGPT model id, or "" for the default. Checked against the known list by the server. */
+  model: string;
   scene: string;
   /** What is said aloud, in the words to be spoken. */
   speech: string;
@@ -47,16 +49,17 @@ export function cleanVideoRequest(raw: unknown): VideoRequestResult {
   const scene = oneLine(r.scene, MAX_SCENE);
   if (!scene) return { ok: false, error: "Describe the scene." };
   if (r.aspect !== undefined && !isOf(VIDEO_ASPECTS, r.aspect)) return { ok: false, error: "Aspect must be 16:9 or 9:16." };
-  if (r.seconds !== undefined && !isOf(VIDEO_SECONDS, r.seconds)) return { ok: false, error: "Length must be 4, 6 or 8 seconds." };
-  if (r.quality !== undefined && !isOf(VIDEO_QUALITIES, r.quality)) return { ok: false, error: "Quality must be 720p or 1080p." };
+  if (r.seconds !== undefined && !isOf(VIDEO_SECONDS, r.seconds)) return { ok: false, error: "Length must be 4, 5, 6, 8, 10 or 12 seconds." };
+  if (r.quality !== undefined && !isOf(VIDEO_QUALITIES, r.quality)) return { ok: false, error: "Quality must be 480p, 720p or 1080p." };
   if (r.realistic !== undefined && typeof r.realistic !== "boolean") return { ok: false, error: "realistic must be true or false." };
+  if (r.model !== undefined && (typeof r.model !== "string" || !/^[a-z0-9.\-]{0,60}$/.test(r.model))) return { ok: false, error: "Unknown model." };
   const seconds = (r.seconds as VideoSeconds | undefined) ?? 8;
   const aspect = (r.aspect as VideoAspect | undefined) ?? "16:9";
-  // 1080p is only offered by the model for a full 8 seconds in landscape; asking for it otherwise is quietly 720p.
-  const quality = r.quality === "1080p" && seconds === 8 && aspect === "16:9" ? "1080p" : "720p";
+  const quality = (r.quality as VideoQuality | undefined) ?? "720p";
   return {
     ok: true,
     request: {
+      model: typeof r.model === "string" ? r.model : "",
       scene,
       speech: oneLine(r.speech, MAX_SPEECH).replace(/"/g, "'"),
       sound: oneLine(r.sound, MAX_SOUND),
@@ -70,8 +73,13 @@ export function cleanVideoRequest(raw: unknown): VideoRequestResult {
 }
 
 /** The one prompt the model reads: scene, then what is said, then what is heard, then the look. */
-export function composeVideoPrompt(r: Pick<VideoRequest, "scene" | "speech" | "sound" | "realistic">): string {
+export function composeVideoPrompt(r: Pick<VideoRequest, "scene" | "speech" | "sound" | "realistic">, audio = true): string {
   const parts = [r.scene.replace(/[.\s]+$/, "") + "."];
+  // A silent model is not told about voices it cannot make.
+  if (!audio) {
+    if (r.realistic) parts.push(`Look: ${REALISM}.`);
+    return parts.join(" ");
+  }
   if (r.speech) parts.push(`Dialogue, spoken aloud in a natural voice: "${r.speech}"`);
   if (r.sound) parts.push(`Sound: ${r.sound.replace(/[.\s]+$/, "")}.`);
   else parts.push("Sound: natural ambient sound that fits the scene.");

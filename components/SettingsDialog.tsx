@@ -433,7 +433,7 @@ export default function SettingsDialog({
 
           <ImageSettings nanoKey={draft.keys?.nanogpt} onOpenStudio={onOpenStudio} />
 
-          <VideoSettings geminiKey={draft.keys?.gemini} onOpenStudio={onOpenVideoStudio} />
+          <VideoSettings keys={draft.keys} onOpenStudio={onOpenVideoStudio} />
 
           <ToolSettings disabled={draft.disabledTools ?? []} onChange={(disabledTools) => setDraft((d) => ({ ...d, disabledTools }))} />
 

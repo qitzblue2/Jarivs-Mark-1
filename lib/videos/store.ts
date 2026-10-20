@@ -16,6 +16,9 @@ export interface VideoMeta {
   speech?: string;
   sound?: string;
   model: string;
+  /** Which service made it, and what it said it charged in dollars, if it said. */
+  provider?: string;
+  cost?: number;
   aspect: string;
   seconds: number;
   quality: string;

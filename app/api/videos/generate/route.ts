@@ -1,36 +1,36 @@
 import { NextRequest } from "next/server";
 import { randomUUID } from "node:crypto";
-import { startJob, runningJob } from "@/lib/videos/jobs";
+import { runningJob, startJob } from "@/lib/videos/jobs";
+import { chooseBackend, describeVideo, resolveNanoKey, resolveVideoKey, type Keys } from "@/lib/videos/provider";
 import { cleanVideoRequest, composeVideoPrompt, underLimit } from "@/lib/videos/request";
 import { listVideos } from "@/lib/videos/store";
-import { resolveVideoKey, videoModel } from "@/lib/videos/veo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function clientGeminiKey(req: NextRequest): string | undefined {
+/** Keys from the server's environment, or the ones Settings sends in a header. */
+function keysFrom(req: NextRequest): Keys {
+  let client: Record<string, unknown> = {};
   try {
-    const parsed = JSON.parse(req.headers.get("x-jarvis-keys") || "{}");
-    return typeof parsed?.gemini === "string" ? parsed.gemini : undefined;
+    client = JSON.parse(req.headers.get("x-jarvis-keys") || "{}") ?? {};
   } catch {
-    return undefined;
+    // Not JSON: no client keys.
   }
+  const text = (v: unknown) => (typeof v === "string" ? v : undefined);
+  return { nanogpt: resolveNanoKey(text(client.nanogpt)), gemini: resolveVideoKey(text(client.gemini)) };
 }
 
-/** GET /api/videos/generate — whether video can be made, with what, and how many are left today. */
+function noteFor(provider: string | null): string {
+  if (provider === "nanogpt") return "Made through NanoGPT and billed to your NanoGPT account.";
+  if (provider === "gemini") return "Made by Google's Veo through your Gemini key — a paid model that bills your Google account.";
+  return "Needs a NanoGPT key (recommended) or a Gemini key with access to Veo — in .env.local or Settings → API keys. Video is a paid feature on both.";
+}
+
+/** GET /api/videos/generate — whether video can be made, by whom, with which models, and how many are left today. */
 export async function GET(req: NextRequest) {
-  const key = resolveVideoKey(clientGeminiKey(req));
+  const info = describeVideo(keysFrom(req));
   const limit = underLimit((await listVideos()).map((v) => v.createdAt));
-  return Response.json({
-    available: Boolean(key),
-    model: videoModel(),
-    used: limit.used,
-    limit: limit.limit,
-    running: runningJob()?.id ?? null,
-    note: key
-      ? "Made by Google's Veo through your Gemini key — a paid model that bills your Google account."
-      : "Needs a Gemini key with access to Veo, in .env.local (GEMINI_API_KEY) or Settings → API keys. Veo is a paid model.",
-  });
+  return Response.json({ ...info, used: limit.used, limit: limit.limit, running: runningJob()?.id ?? null, note: noteFor(info.provider) });
 }
 
 /**
@@ -48,8 +48,8 @@ export async function POST(req: NextRequest) {
   const parsed = cleanVideoRequest(body);
   if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
 
-  const key = resolveVideoKey(clientGeminiKey(req));
-  if (!key) return Response.json({ error: "No Gemini key is set up, so there is nothing to make video with." }, { status: 503 });
+  const chosen = chooseBackend(keysFrom(req), parsed.request.model || undefined);
+  if (!chosen) return Response.json({ error: "No NanoGPT or Gemini key is set up, so there is nothing to make video with." }, { status: 503 });
 
   const running = runningJob();
   if (running) return Response.json({ error: "A video is already being made. Wait for it, or stop it.", job: running }, { status: 429 });
@@ -59,6 +59,7 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: `That is today's limit (${limit.limit}). Raise JARVIS_VIDEO_DAILY_LIMIT if you want more — each video is billed by your provider.` }, { status: 429 });
   }
 
-  const job = startJob({ id: randomUUID(), key, model: videoModel(), request: parsed.request });
-  return Response.json({ job, prompt: composeVideoPrompt(parsed.request) }, { status: 202 });
+  const sound = chosen.sound !== "no";
+  const job = startJob({ id: randomUUID(), backend: chosen.backend, request: parsed.request, sound });
+  return Response.json({ job, prompt: composeVideoPrompt(parsed.request, sound), silent: !sound }, { status: 202 });
 }

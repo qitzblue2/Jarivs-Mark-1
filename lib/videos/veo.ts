@@ -1,5 +1,6 @@
 import { readCappedBytes } from "@/lib/tools/net-guard";
 import type { VideoAspect, VideoQuality, VideoSeconds } from "./request";
+import type { VideoBackend } from "./backend";
 
 /**
  * Video from Google's Veo models through the Gemini API — the one provider here
@@ -99,4 +100,23 @@ export async function downloadVeo(o: { key: string; uri: string; signal?: AbortS
   const res = await fetch(url, { signal: o.signal, redirect: "follow", headers: trusted ? { "x-goog-api-key": o.key } : {} });
   if (!res.ok) throw await failure(res, "Downloading the video");
   return Buffer.from(await readCappedBytes(res, MAX_VIDEO_BYTES, true));
+}
+
+/** Veo through a Gemini key, as the job runner sees it. */
+export function geminiBackend(key: string, model: string): VideoBackend {
+  return {
+    id: "gemini",
+    model,
+    async start(r, prompt, signal) {
+      // Veo through Gemini takes 4, 6 or 8 seconds.
+      const seconds = ([4, 6, 8] as const).reduce((best, v) => (Math.abs(v - r.seconds) < Math.abs(best - r.seconds) ? v : best), 8 as VideoSeconds);
+      const handle = await startVeo({ key, model, prompt, aspect: r.aspect, seconds, quality: r.quality === "1080p" && seconds === 8 && r.aspect === "16:9" ? "1080p" : "720p", avoid: r.avoid, signal });
+      return { handle, seconds };
+    },
+    async poll(handle, signal) {
+      const p = await pollVeo({ key, name: handle, signal });
+      return p;
+    },
+    download: (uri, signal) => downloadVeo({ key, uri, signal }),
+  };
 }

@@ -140,7 +140,7 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({ error: { message: `Unexpected Authorization: ${auth}` } }));
   }
 
-  if (NO_AUTH || req.url.startsWith("/search") || req.url.startsWith("/prompt/") || req.url.startsWith("/v1beta/") || req.url.startsWith("/files/")) {
+  if (NO_AUTH || req.url.startsWith("/search") || req.url.startsWith("/prompt/") || req.url.startsWith("/v1beta/") || req.url.startsWith("/files/") || req.url.startsWith("/api/generate-video") || req.url.startsWith("/api/video/status")) {
     // fall through to the handler below; neither needs auth
   } else if (!auth.startsWith("Bearer ")) {
     res.writeHead(401, { "Content-Type": "application/json" });
@@ -178,6 +178,34 @@ const server = http.createServer((req, res) => {
       res.end(JSON.stringify({ data: [{ b64_json: png.toString("base64") }] }));
     });
     return;
+  }
+
+  // Stands in for NanoGPT's video API (JARVIS_NANOGPT_VIDEO_URL=http://localhost:8899): submit returns a
+  // run id, the second status poll is COMPLETED (nested under `data`, as NanoGPT's examples show).
+  if (req.url === "/api/generate-video" && req.method === "POST") {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      const parsed = JSON.parse(body || "{}");
+      process.stdout.write(`[mock] nano video key=${req.headers["x-api-key"] ? "yes" : "no"} body=${JSON.stringify({ ...parsed, prompt: undefined })} prompt=${String(parsed.prompt).slice(0, 300)}\n`);
+      globalThis.__nano = globalThis.__nano ?? {};
+      const runId = `vid_${Date.now()}`;
+      globalThis.__nano[runId] = { polls: 0, blocked: String(parsed.prompt).includes("BLOCKME") };
+      res.writeHead(202, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ runId, id: runId, status: "pending", model: parsed.model, cost: 0.35 }));
+    });
+    return;
+  }
+  if (req.url.startsWith("/api/video/status")) {
+    const id = new URL(req.url, "http://x").searchParams.get("requestId");
+    const op = globalThis.__nano?.[id];
+    if (!req.headers["x-api-key"]) { res.writeHead(401, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ error: 401, message: "no key" })); }
+    if (!op) { res.writeHead(404, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ error: 404, message: "unknown job" })); }
+    op.polls += 1;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    if (op.polls < 2) return res.end(JSON.stringify({ requestId: id, data: { status: "IN_PROGRESS", requestId: id } }));
+    if (op.blocked) return res.end(JSON.stringify({ requestId: id, data: { status: "FAILED", error: "content policy", userFriendlyError: "That scene was declined by the content filter.", isNSFWError: true } }));
+    return res.end(JSON.stringify({ requestId: id, data: { status: "COMPLETED", output: { video: { url: "http://localhost:8899/files/clip.mp4" } }, cost: 0.35 } }));
   }
 
   // Stands in for Gemini's Veo video endpoints (JARVIS_GEMINI_VIDEO_URL=http://localhost:8899):

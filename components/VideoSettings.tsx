@@ -5,6 +5,7 @@ import { Clapperboard } from "lucide-react";
 
 interface Status {
   available: boolean;
+  provider: string | null;
   model: string;
   used: number;
   limit: number;
@@ -12,20 +13,21 @@ interface Status {
 }
 
 /** Whether video can be made, in words the server vouches for, and a way into the studio. */
-export default function VideoSettings({ geminiKey, onOpenStudio }: { geminiKey?: string; onOpenStudio?: () => void }) {
+export default function VideoSettings({ keys, onOpenStudio }: { keys?: { nanogpt?: string; gemini?: string }; onOpenStudio?: () => void }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [failed, setFailed] = useState(false);
 
+  const keyHeader = JSON.stringify({ nanogpt: keys?.nanogpt, gemini: keys?.gemini });
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/videos/generate", { headers: geminiKey ? { "x-jarvis-keys": JSON.stringify({ gemini: geminiKey }) } : {} })
+    fetch("/api/videos/generate", { headers: keyHeader !== "{}" ? { "x-jarvis-keys": keyHeader } : {} })
       .then((r) => r.json())
       .then((d) => !cancelled && setStatus(d))
       .catch(() => !cancelled && setFailed(true));
     return () => {
       cancelled = true;
     };
-  }, [geminiKey]);
+  }, [keyHeader]);
 
   return (
     <section className="space-y-2.5" data-video-settings>
@@ -35,7 +37,7 @@ export default function VideoSettings({ geminiKey, onOpenStudio }: { geminiKey?:
           Video
         </h3>
         <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
-          JARVIS can make short clips with sound — speech, effects and ambience — using Google&apos;s Veo model. Describe the scene, write what is said and what is heard,
+          JARVIS can make short clips with sound — speech, effects and ambience — through NanoGPT (Veo 3 is the one documented to make sound) or Google&apos;s Veo with a Gemini key. Describe the scene, write what is said and what is heard,
           and press the button; type <code className="font-mono">/video</code> to open the studio. It takes a minute or three.
         </p>
       </div>
@@ -44,11 +46,11 @@ export default function VideoSettings({ geminiKey, onOpenStudio }: { geminiKey?:
       </p>
       <ul className="list-disc space-y-1 pl-5 text-[11.5px] leading-relaxed text-ink-faint">
         <li>
-          <b className="font-medium text-ink-dim">It costs money.</b> Veo is a paid model billed by your Google account, so nothing starts until you press the button, one video is made at a
+          <b className="font-medium text-ink-dim">It costs money.</b> Video is billed by NanoGPT (or Google, with a Gemini key); NanoGPT is used first when it has a key, so nothing starts until you press the button, one video is made at a
           time, and there is a daily limit (<code className="font-mono">JARVIS_VIDEO_DAILY_LIMIT</code>, default 5).
         </li>
         <li>
-          <b className="font-medium text-ink-dim">Clips are short:</b> 4, 6 or 8 seconds, landscape or vertical, 720p (1080p for 8-second landscape).
+          <b className="font-medium text-ink-dim">Clips are short:</b> 4 to 12 seconds depending on the model, landscape or vertical.
         </li>
         <li>
           <b className="font-medium text-ink-dim">The model never makes videos by itself</b> — it can&apos;t spend your money. Only you can start one.

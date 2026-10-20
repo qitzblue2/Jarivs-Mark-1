@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Clapperboard, Download, Loader2, Trash2, X } from "lucide-react";
 import { useEscape } from "@/lib/hooks/use-escape";
 import { useDialogFocus } from "@/lib/hooks/use-dialog-focus";
-import { MAX_SCENE, MAX_SOUND, MAX_SPEECH, VIDEO_ASPECTS, VIDEO_QUALITIES, VIDEO_SECONDS, waitLabel, type VideoAspect, type VideoQuality, type VideoSeconds } from "@/lib/videos/request";
+import { MAX_SCENE, MAX_SOUND, MAX_SPEECH, VIDEO_ASPECTS, VIDEO_QUALITIES, waitLabel, type VideoAspect, type VideoQuality } from "@/lib/videos/request";
+import { nearestSeconds, type VideoModel } from "@/lib/videos/models";
 
 interface Job {
   id: string;
@@ -13,6 +14,8 @@ interface Job {
   error?: string;
   url?: string;
   videoId?: string;
+  cost?: number;
+  provider?: string;
 }
 interface Made {
   id: string;
@@ -24,9 +27,13 @@ interface Made {
   aspect: string;
   quality: string;
   createdAt: number;
+  provider?: string;
+  cost?: number;
 }
 interface Status {
   available: boolean;
+  provider: "nanogpt" | "gemini" | null;
+  models: VideoModel[];
   model: string;
   used: number;
   limit: number;
@@ -38,8 +45,8 @@ interface Props {
   open: boolean;
   onClose: () => void;
   initialScene?: string;
-  /** Your Gemini key from Settings, if you gave one there. */
-  geminiKey?: string;
+  /** Keys from Settings, if you gave any there. */
+  keys?: { nanogpt?: string; gemini?: string };
 }
 
 /**
@@ -47,13 +54,14 @@ interface Props {
  * what is heard. It costs real money on a paid model, so nothing starts until
  * you press the button, one is made at a time, and there is a daily limit.
  */
-export default function VideoStudio({ open, onClose, initialScene, geminiKey }: Props) {
+export default function VideoStudio({ open, onClose, initialScene, keys }: Props) {
   const [scene, setScene] = useState("");
   const [speech, setSpeech] = useState("");
   const [sound, setSound] = useState("");
   const [avoid, setAvoid] = useState("");
   const [aspect, setAspect] = useState<VideoAspect>("16:9");
-  const [seconds, setSeconds] = useState<VideoSeconds>(8);
+  const [seconds, setSeconds] = useState<number>(8);
+  const [model, setModel] = useState<string>("");
   const [quality, setQuality] = useState<VideoQuality>("720p");
   const [realistic, setRealistic] = useState(true);
   const [status, setStatus] = useState<Status | null>(null);
@@ -63,7 +71,8 @@ export default function VideoStudio({ open, onClose, initialScene, geminiKey }: 
   const [library, setLibrary] = useState<Made[]>([]);
   const [playing, setPlaying] = useState<Made | null>(null);
 
-  const headers = useCallback((json = false): HeadersInit => ({ ...(json ? { "Content-Type": "application/json" } : {}), ...(geminiKey ? { "x-jarvis-keys": JSON.stringify({ gemini: geminiKey }) } : {}) }), [geminiKey]);
+  const keyHeader = JSON.stringify({ nanogpt: keys?.nanogpt, gemini: keys?.gemini });
+  const headers = useCallback((json = false): HeadersInit => ({ ...(json ? { "Content-Type": "application/json" } : {}), ...(keyHeader !== "{}" ? { "x-jarvis-keys": keyHeader } : {}) }), [keyHeader]);
 
   const refresh = useCallback(async () => {
     try {
@@ -116,6 +125,20 @@ export default function VideoStudio({ open, onClose, initialScene, geminiKey }: 
     };
   }, [open, jobId, refresh]);
 
+  const models = status?.models ?? [];
+  const current = models.find((m) => m.id === model) ?? models.find((m) => m.id === status?.model);
+  const silent = current?.sound === "no";
+  const lengths = current ? current.seconds : [4, 6, 8];
+  const showQuality = status?.provider === "gemini" || Boolean(current?.resolutions);
+  const qualities = current?.resolutions ?? VIDEO_QUALITIES.filter((q) => q !== "480p");
+  function chooseModel(id: string) {
+    setModel(id);
+    const next = models.find((m) => m.id === id);
+    if (next) {
+      setSeconds((s) => nearestSeconds(next, s));
+      if (!next.aspects.includes(aspect)) setAspect(next.aspects[0] as VideoAspect);
+    }
+  }
   const abort = useRef<AbortController | null>(null);
   async function make() {
     setError(null);
@@ -124,7 +147,7 @@ export default function VideoStudio({ open, onClose, initialScene, geminiKey }: 
     const res = await fetch("/api/videos/generate", {
       method: "POST",
       headers: headers(true),
-      body: JSON.stringify({ scene, speech, sound, avoid, aspect, seconds, quality, realistic }),
+      body: JSON.stringify({ scene, speech: silent ? "" : speech, sound: silent ? "" : sound, avoid, aspect, seconds, quality, realistic, ...(current && status?.provider === "nanogpt" ? { model: current.id } : {}) }),
       signal: abort.current.signal,
     }).catch((e: Error) => ({ ok: false, json: async () => ({ error: e.message }) }) as Response);
     const data = await res.json().catch(() => ({}));
@@ -151,7 +174,7 @@ export default function VideoStudio({ open, onClose, initialScene, geminiKey }: 
   const running = job?.status === "running";
   const elapsed = job ? Math.max(0, Math.floor((now - job.startedAt) / 1000)) : 0;
   const choice = (on: boolean) => `min-h-8 rounded-md border px-2.5 py-1 text-[12px] transition ${on ? "border-arc-dim bg-arc-dim/15 text-ink" : "border-line text-ink-dim hover:border-arc-dim/50 hover:text-ink"}`;
-  const hiRes = seconds === 8 && aspect === "16:9";
+  const hiRes = status?.provider === "gemini" ? seconds === 8 && aspect === "16:9" : true;
 
   return (
     <div ref={dialogRef} className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm sm:items-center" onClick={onClose}>
@@ -169,9 +192,26 @@ export default function VideoStudio({ open, onClose, initialScene, geminiKey }: 
         <div className="max-h-[78vh] space-y-3.5 overflow-y-auto p-4" tabIndex={0} role="region" aria-label="Video studio controls">
           <p className="rounded-md border border-line-soft bg-base px-3 py-2 text-[12px] leading-relaxed text-ink-dim" data-video-status>
             {status ? status.note : "Checking…"}
-            {status?.available && ` Model: ${status.model}. ${status.used} of ${status.limit} made today.`}
+            {status?.available && ` ${status.used} of ${status.limit} made today.`}
           </p>
 
+          {models.length > 0 && (
+            <div>
+              <label htmlFor="video-model" className="mb-1 block text-[12px] text-ink-dim">
+                Model
+              </label>
+              <select id="video-model" data-video-model value={current?.id ?? ""} onChange={(e) => chooseModel(e.target.value)} className="w-full rounded-md border border-line bg-base px-2 py-1.5 text-[12.5px] text-ink outline-none focus:border-arc-dim">
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[11.5px] text-ink-faint" data-video-sound-note>
+                {current?.sound === "yes" ? "Makes its own sound: speech, effects and ambience." : current?.sound === "unknown" ? "NanoGPT doesn't document sound for this model, so it may come back silent. Veo 3 is the one documented to make it." : "This model makes silent video; the speech and sound boxes are ignored."}
+              </p>
+            </div>
+          )}
           <div>
             <label htmlFor="video-scene" className="mb-1 block text-[12px] text-ink-dim">
               The scene — who, where, what happens, how it is shot
@@ -183,13 +223,13 @@ export default function VideoStudio({ open, onClose, initialScene, geminiKey }: 
               <label htmlFor="video-speech" className="mb-1 block text-[12px] text-ink-dim">
                 What is said <span className="text-ink-faint">(optional, spoken aloud)</span>
               </label>
-              <input id="video-speech" data-video-speech value={speech} onChange={(e) => setSpeech(e.target.value.slice(0, MAX_SPEECH))} placeholder="Good catch today, wasn't it?" className="w-full rounded-md border border-line bg-base px-2.5 py-1.5 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:border-arc-dim" />
+              <input id="video-speech" data-video-speech disabled={silent} value={speech} onChange={(e) => setSpeech(e.target.value.slice(0, MAX_SPEECH))} placeholder="Good catch today, wasn't it?" className="w-full rounded-md border border-line bg-base px-2.5 py-1.5 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:border-arc-dim disabled:opacity-50" />
             </div>
             <div className="min-w-0 flex-1 basis-64">
               <label htmlFor="video-sound" className="mb-1 block text-[12px] text-ink-dim">
                 What is heard <span className="text-ink-faint">(optional)</span>
               </label>
-              <input id="video-sound" data-video-sound value={sound} onChange={(e) => setSound(e.target.value.slice(0, MAX_SOUND))} placeholder="gulls, water lapping, rope creaking, distant bell" className="w-full rounded-md border border-line bg-base px-2.5 py-1.5 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:border-arc-dim" />
+              <input id="video-sound" data-video-sound disabled={silent} value={sound} onChange={(e) => setSound(e.target.value.slice(0, MAX_SOUND))} placeholder="gulls, water lapping, rope creaking, distant bell" className="w-full rounded-md border border-line bg-base px-2.5 py-1.5 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:border-arc-dim disabled:opacity-50" />
             </div>
           </div>
           <div>
@@ -213,23 +253,25 @@ export default function VideoStudio({ open, onClose, initialScene, geminiKey }: 
             <div role="radiogroup" aria-label="Length" data-choice="seconds" className="space-y-1">
               <span className="block text-[12px] text-ink-dim">Length</span>
               <div className="flex gap-1.5">
-                {VIDEO_SECONDS.map((s) => (
+                {lengths.map((s) => (
                   <button key={s} type="button" role="radio" aria-checked={seconds === s} data-value={s} onClick={() => setSeconds(s)} className={choice(seconds === s)}>
                     {s} seconds
                   </button>
                 ))}
               </div>
             </div>
+            {showQuality && (
             <div role="radiogroup" aria-label="Quality" data-choice="quality" className="space-y-1">
               <span className="block text-[12px] text-ink-dim">Quality</span>
               <div className="flex gap-1.5">
-                {VIDEO_QUALITIES.map((q) => (
-                  <button key={q} type="button" role="radio" aria-checked={quality === q} data-value={q} disabled={q === "1080p" && !hiRes} onClick={() => setQuality(q)} title={q === "1080p" && !hiRes ? "1080p needs 8 seconds, landscape" : undefined} className={`${choice(quality === q)} disabled:opacity-50`}>
+                {qualities.map((q) => (
+                  <button key={q} type="button" role="radio" aria-checked={quality === q} data-value={q} disabled={q === "1080p" && !hiRes} onClick={() => setQuality(q as VideoQuality)} title={q === "1080p" && !hiRes ? "1080p needs 8 seconds, landscape" : undefined} className={`${choice(quality === q)} disabled:opacity-50`}>
                     {q}
                   </button>
                 ))}
               </div>
             </div>
+            )}
           </div>
           <label className="flex cursor-pointer items-start gap-2.5">
             <input type="checkbox" checked={realistic} onChange={(e) => setRealistic(e.target.checked)} data-video-realistic className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[var(--color-arc-solid)]" />
@@ -258,6 +300,7 @@ export default function VideoStudio({ open, onClose, initialScene, geminiKey }: 
           {running && (
             <p role="status" className="text-[12.5px] text-ink-dim" data-video-progress>
               {waitLabel(elapsed)} <span className="font-mono text-ink-faint">{elapsed}s</span>
+              {job?.cost !== undefined && <span className="ml-2 text-ink-faint" data-video-cost>charged ${job.cost.toFixed(2)}</span>}
             </p>
           )}
           {error && (
@@ -292,7 +335,7 @@ export default function VideoStudio({ open, onClose, initialScene, geminiKey }: 
                       {v.scene}
                     </button>
                     <span className="shrink-0 text-ink-faint">
-                      {v.seconds}s · {v.aspect} · {v.quality}
+                      {v.seconds}s · {v.aspect}{v.cost !== undefined ? ` · $${v.cost.toFixed(2)}` : ""}
                     </span>
                     <button type="button" onClick={() => void remove(v)} aria-label={`Delete the video: ${v.scene}`} className="rounded p-1.5 text-ink-faint transition hover:bg-raised hover:text-danger">
                       <Trash2 size={13} />

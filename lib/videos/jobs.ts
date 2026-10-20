@@ -1,8 +1,8 @@
 import { audit } from "@/lib/audit";
 import { recordRequest } from "@/lib/providers/usage";
+import type { VideoBackend } from "./backend";
 import { composeVideoPrompt, type VideoRequest } from "./request";
 import { saveVideo, videoUrl } from "./store";
-import { downloadVeo, pollVeo, startVeo, VIDEO_USAGE_ID } from "./veo";
 
 /**
  * A video takes minutes, so asking for one starts a job and returns at once;
@@ -11,7 +11,7 @@ import { downloadVeo, pollVeo, startVeo, VIDEO_USAGE_ID } from "./veo";
  * after ten minutes because the saved video is the record that matters.
  *
  * One job at a time, on purpose: a paid model plus a second tab pressed twice
- * should not be two bills. The key is held only in the running closure and is
+ * should not be two bills. The key lives inside the backend closure and is
  * never stored on the job or sent to the page.
  */
 export type JobStatus = "running" | "done" | "error" | "cancelled";
@@ -24,6 +24,10 @@ export interface VideoJob {
   error?: string;
   videoId?: string;
   url?: string;
+  /** What the provider said it charged, in dollars. */
+  cost?: number;
+  provider?: string;
+  model?: string;
 }
 
 interface Internal extends VideoJob {
@@ -34,10 +38,10 @@ const g = globalThis as unknown as { __jarvisVideoJobs?: Map<string, Internal> }
 const jobs = (g.__jarvisVideoJobs ??= new Map());
 
 const pollMs = () => Math.max(50, Number(process.env.JARVIS_VIDEO_POLL_MS) || 5000);
-const timeoutMs = () => Math.max(1000, Number(process.env.JARVIS_VIDEO_TIMEOUT_MS) || 6 * 60_000);
+const timeoutMs = () => Math.max(1000, Number(process.env.JARVIS_VIDEO_TIMEOUT_MS) || 8 * 60_000);
 const KEEP_FINISHED_MS = 10 * 60_000;
 
-const publicJob = (j: Internal): VideoJob => ({ id: j.id, status: j.status, startedAt: j.startedAt, finishedAt: j.finishedAt, error: j.error, videoId: j.videoId, url: j.url });
+const publicJob = (j: Internal): VideoJob => ({ id: j.id, status: j.status, startedAt: j.startedAt, finishedAt: j.finishedAt, error: j.error, videoId: j.videoId, url: j.url, cost: j.cost, provider: j.provider, model: j.model });
 
 function forget() {
   const now = Date.now();
@@ -63,17 +67,21 @@ const sleep = (ms: number, signal: AbortSignal) =>
     signal.addEventListener("abort", () => { clearTimeout(t); resolve(); }, { once: true });
   });
 
-export function startJob(o: { id: string; key: string; model: string; request: VideoRequest }): VideoJob {
+export function startJob(o: { id: string; backend: VideoBackend; request: VideoRequest; /** Whether this model makes sound, so the prompt describes it. */ sound: boolean }): VideoJob {
   forget();
-  const job: Internal = { id: o.id, status: "running", startedAt: Date.now(), controller: new AbortController() };
+  const { backend } = o;
+  const job: Internal = { id: o.id, status: "running", startedAt: Date.now(), controller: new AbortController(), provider: backend.id, model: backend.model };
   jobs.set(job.id, job);
   const { signal } = job.controller;
   const r = o.request;
+  const usageId = `${backend.id}:video`;
 
   void (async () => {
     try {
-      const name = await startVeo({ key: o.key, model: o.model, prompt: composeVideoPrompt(r), aspect: r.aspect, seconds: r.seconds, quality: r.quality, avoid: r.avoid, signal });
-      recordRequest(VIDEO_USAGE_ID, 0, 200);
+      const started = await backend.start(r, composeVideoPrompt(r, o.sound), signal);
+      if (started.cost !== undefined) job.cost = started.cost;
+      const seconds = started.seconds ?? r.seconds;
+      recordRequest(usageId, 0, 200);
       const deadline = Date.now() + timeoutMs();
       for (;;) {
         await sleep(pollMs(), signal);
@@ -83,22 +91,23 @@ export function startJob(o: { id: string; key: string; model: string; request: V
           return;
         }
         if (Date.now() > deadline) throw new Error("The video took too long and was given up on. The provider may still finish and charge for it.");
-        const polled = await pollVeo({ key: o.key, name, signal });
+        const polled = await backend.poll(started.handle, signal);
         if (!polled.done) continue;
         if ("error" in polled) throw new Error(polled.error);
-        const bytes = await downloadVeo({ key: o.key, uri: polled.uri, signal });
-        const meta = await saveVideo(bytes, { scene: r.scene, speech: r.speech || undefined, sound: r.sound || undefined, model: o.model, aspect: r.aspect, seconds: r.seconds, quality: r.quality });
+        if (polled.cost !== undefined) job.cost = polled.cost;
+        const bytes = await backend.download(polled.uri, signal);
+        const meta = await saveVideo(bytes, { scene: r.scene, speech: o.sound ? r.speech || undefined : undefined, sound: o.sound ? r.sound || undefined : undefined, model: backend.model, provider: backend.id, cost: job.cost, aspect: r.aspect, seconds, quality: r.quality });
         job.videoId = meta.id;
         job.url = videoUrl(meta.id);
         job.status = "done";
-        audit("video.make", `${r.seconds}s ${r.aspect} ${r.quality}`);
+        audit("video.make", `${backend.id} ${backend.model} ${r.seconds}s ${r.aspect}`);
         return;
       }
     } catch (err) {
       if (job.status === "running") {
         job.status = signal.aborted ? "cancelled" : "error";
         job.error = signal.aborted ? "Stopped." : (err as Error).message;
-        if (!signal.aborted) recordRequest(VIDEO_USAGE_ID, 0, 500);
+        if (!signal.aborted) recordRequest(usageId, 0, 500);
       }
     } finally {
       job.finishedAt = Date.now();

@@ -1755,7 +1755,7 @@ export default function Workspace() {
         }}
       />
 
-      <VideoStudio open={videoStudio !== null} onClose={() => setVideoStudio(null)} initialScene={videoStudio?.scene} geminiKey={settings.keys?.gemini} />
+      <VideoStudio open={videoStudio !== null} onClose={() => setVideoStudio(null)} initialScene={videoStudio?.scene} keys={settings.keys} />
 
       <SettingsDialog
         open={settingsOpen}

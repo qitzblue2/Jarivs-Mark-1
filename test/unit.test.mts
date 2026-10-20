@@ -68,6 +68,9 @@ import { freeImageUrl } from "../lib/images/free";
 import { SETTINGS_TABS, tabForSection, nextTab, isSettingsTab } from "../lib/settings-tabs";
 import { cleanVideoRequest, composeVideoPrompt, dailyLimit, madeToday, underLimit, waitLabel, REALISM } from "../lib/videos/request";
 import { isMp4, parseRange, isVideoId, videoKeepLimit } from "../lib/videos/store";
+import { parseNanoStatus, isRunId } from "../lib/videos/nano";
+import { pickProvider, chooseBackend, describeVideo } from "../lib/videos/provider";
+import { NANO_VIDEO_MODELS, pickNanoModel, nearestSeconds, findNanoModel } from "../lib/videos/models";
 import { isOperationName, DEFAULT_VIDEO_MODEL, videoModel } from "../lib/videos/veo";
 import { cleanStudio, loadStudio, saveStudio, STUDIO_KEY } from "../lib/images/studio-store";
 import { runChecks, formatChecks, canStart, mergeEnv, nodeMajor, localUrl, configuredProviders } from "../lib/doctor";
@@ -3655,9 +3658,9 @@ console.log("\n--- batch M: personalities, pictures, start-up ---");
   eq("env file: an empty file gets a clean line", mergeEnv("", { K: "v" }), "K=v\n");
   eq("start: the address follows PORT when it is a number", [localUrl({}), localUrl({ PORT: "4000" }), localUrl({ PORT: "x" })], ["http://localhost:3000", "http://localhost:4000", "http://localhost:3000"]);
 
-  eq("video: a scene is required, and defaults are 16:9, 8 seconds, 720p, realistic", cleanVideoRequest({ scene: "  a  fox\n runs " }), { ok: true, request: { scene: "a fox runs", speech: "", sound: "", avoid: "", aspect: "16:9", seconds: 8, quality: "720p", realistic: true } });
-  eq("video: bad requests say why", [cleanVideoRequest(null), cleanVideoRequest({ scene: " " }), cleanVideoRequest({ scene: "x", aspect: "4:3" }), cleanVideoRequest({ scene: "x", seconds: 5 }), cleanVideoRequest({ scene: "x", quality: "4k" }), cleanVideoRequest({ scene: "x", realistic: "yes" })].map((r) => r.ok), [false, false, false, false, false, false]);
-  eq("video: 1080p only survives for eight seconds of landscape", [["8", "16:9"], ["6", "16:9"], ["8", "9:16"]].map(([sec, asp]) => (cleanVideoRequest({ scene: "x", seconds: Number(sec), aspect: asp, quality: "1080p" }) as { request: { quality: string } }).request.quality), ["1080p", "720p", "720p"]);
+  eq("video: a scene is required, and defaults are 16:9, 8 seconds, 720p, realistic", cleanVideoRequest({ scene: "  a  fox\n runs " }), { ok: true, request: { model: "", scene: "a fox runs", speech: "", sound: "", avoid: "", aspect: "16:9", seconds: 8, quality: "720p", realistic: true } });
+  eq("video: bad requests say why", [cleanVideoRequest(null), cleanVideoRequest({ scene: " " }), cleanVideoRequest({ scene: "x", aspect: "4:3" }), cleanVideoRequest({ scene: "x", seconds: 7 }), cleanVideoRequest({ scene: "x", quality: "4k" }), cleanVideoRequest({ scene: "x", realistic: "yes" })].map((r) => r.ok), [false, false, false, false, false, false]);
+  eq("video: the quality asked for is kept for the provider to judge (480p, 720p, 1080p)", ["480p", "720p", "1080p"].map((q) => (cleanVideoRequest({ scene: "x", quality: q }) as { request: { quality: string } }).request.quality), ["480p", "720p", "1080p"]);
   eq("video: quote marks in speech can't break out of the dialogue line", (cleanVideoRequest({ scene: "x", speech: 'He said "stop" now' }) as { request: { speech: string } }).request.speech, "He said 'stop' now");
   eq("video: lengths are capped", [(cleanVideoRequest({ scene: "x".repeat(5000) }) as { request: { scene: string } }).request.scene.length, (cleanVideoRequest({ scene: "x", speech: "y".repeat(5000) }) as { request: { speech: string } }).request.speech.length, (cleanVideoRequest({ scene: "x", sound: "z".repeat(5000) }) as { request: { sound: string } }).request.sound.length], [1200, 400, 300]);
   eq("video: the prompt carries scene, spoken words, sound and the live-action look in that order", composeVideoPrompt({ scene: "A fisherman mends a net.", speech: "Good catch.", sound: "gulls, water", realistic: true }), `A fisherman mends a net. Dialogue, spoken aloud in a natural voice: "Good catch." Sound: gulls, water. Look: ${REALISM}.`);
@@ -3672,6 +3675,24 @@ console.log("\n--- batch M: personalities, pictures, start-up ---");
   eq("video: Range headers", [parseRange(null, 100), parseRange("bytes=0-9", 100), parseRange("bytes=90-", 100), parseRange("bytes=-10", 100), parseRange("bytes=50-500", 100), parseRange("bytes=100-", 100), parseRange("bytes=9-3", 100), parseRange("junk", 100), parseRange("bytes=-0", 100)], [null, { start: 0, end: 9 }, { start: 90, end: 99 }, { start: 90, end: 99 }, { start: 50, end: 99 }, "bad", "bad", "bad", "bad"]);
   eq("video: ids and operation names are checked before they go into a path or URL", [isVideoId("0b0f1d3e-5c5a-4a6e-9a3e-0123456789ab"), isVideoId("../x"), isOperationName("models/veo/operations/abc-123"), isOperationName("../../etc"), isOperationName("a b"), isOperationName(5)], [true, false, true, false, false, false]);
   eq("video: the model is Veo 3 unless set, and keeping defaults to thirty", [videoModel(), DEFAULT_VIDEO_MODEL, videoKeepLimit()], ["veo-3.0-generate-001", "veo-3.0-generate-001", 30]);
+
+  eq("nanogpt video: both documented status shapes are read, in either case", [
+    parseNanoStatus({ requestId: "r", data: { status: "COMPLETED", output: { video: { url: "https://x/v.mp4" } }, cost: 0.35 } }),
+    parseNanoStatus({ status: "completed", videoUrl: "https://x/v.mp4" }),
+    parseNanoStatus({ data: { status: "IN_PROGRESS" } }),
+    parseNanoStatus({ status: "queued" }),
+    parseNanoStatus({ data: { status: "FAILED", error: "boom", userFriendlyError: "Try another prompt" } }),
+    parseNanoStatus({ data: { status: "CANCELED" } }),
+  ], [{ state: "done", url: "https://x/v.mp4", cost: 0.35 }, { state: "done", url: "https://x/v.mp4", cost: undefined }, { state: "pending", cost: undefined }, { state: "pending", cost: undefined }, { state: "failed", error: "Try another prompt", cost: undefined }, { state: "cancelled", error: "NanoGPT cancelled the job.", cost: undefined }]);
+  eq("nanogpt video: 'completed' with no link is a failure, not an endless wait; junk is still going", [parseNanoStatus({ data: { status: "COMPLETED" } }).state, parseNanoStatus(null).state, parseNanoStatus("x").state, parseNanoStatus({ data: { status: "weird" } }).state], ["failed", "pending", "pending", "pending"]);
+  eq("nanogpt video: job ids are checked before they go into a URL", [isRunId("vid_abc-123"), isRunId("a/../b"), isRunId("a b"), isRunId("")], [true, false, false, false]);
+  eq("video models: Veo 3 is the default and the only one documented to have sound", [pickNanoModel(undefined, {}).id, NANO_VIDEO_MODELS.filter((m) => m.sound === "yes").map((m) => m.id)], ["veo3-video", ["veo3-video"]]);
+  eq("video models: a known id is honoured, an unknown one falls back, the env setting is a default", [pickNanoModel("sora-2", {}).id, pickNanoModel("nonsense", {}).id, pickNanoModel(undefined, { JARVIS_NANOGPT_VIDEO_MODEL: "kling-video-v2" }).id, pickNanoModel("veo3-1-video", { JARVIS_NANOGPT_VIDEO_MODEL: "kling-video-v2" }).id], ["sora-2", "veo3-video", "kling-video-v2", "veo3-1-video"]);
+  eq("video models: a length is moved to the nearest the model takes, shorter on a tie", [nearestSeconds(findNanoModel("veo3-video")!, 4), nearestSeconds(findNanoModel("sora-2")!, 6), nearestSeconds(findNanoModel("kling-video-v2")!, 8), nearestSeconds(findNanoModel("kling-video-v2")!, 12)], [8, 4, 10, 10]);
+  eq("video provider: NanoGPT first, Gemini as the fallback, neither is none, and it can be forced", [pickProvider({ nanogpt: "n", gemini: "g" }, {}), pickProvider({ gemini: "g" }, {}), pickProvider({}, {}), pickProvider({ nanogpt: "n", gemini: "g" }, { JARVIS_VIDEO_PROVIDER: "gemini" }), pickProvider({ nanogpt: "n" }, { JARVIS_VIDEO_PROVIDER: "gemini" })], ["nanogpt", "gemini", null, "gemini", null]);
+  eq("video provider: the backend carries the chosen model and whether it makes sound", [chooseBackend({ nanogpt: "n" }, undefined, {})?.backend.model, chooseBackend({ nanogpt: "n" }, "kling-video-v2", {})?.sound, chooseBackend({ gemini: "g" }, undefined, {})?.backend.id, chooseBackend({}, undefined, {})], ["veo3-video", "no", "gemini", null]);
+  eq("video provider: the studio is told the models only when NanoGPT is the one", [describeVideo({ nanogpt: "n" }, {}).models.length, describeVideo({ gemini: "g" }, {}).models.length, describeVideo({}, {}).available], [NANO_VIDEO_MODELS.length, 0, false]);
+  eq("video prompt: a silent model is not asked for voices", [composeVideoPrompt({ scene: "A cat", speech: "Hi", sound: "purring", realistic: false }, false), composeVideoPrompt({ scene: "A cat", speech: "Hi", sound: "purring", realistic: false }, true).includes("Dialogue")], ["A cat.", true]);
 
   eq("tabs: seven, the last showing everything", [SETTINGS_TABS.length, SETTINGS_TABS.at(-1)!.id], [7, "all"]);
   eq("tabs: a section is filed by its marker, else its heading, else Assistant", [

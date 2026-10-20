@@ -195,11 +195,12 @@ JARVIS speaking first, within limits you set. Every item here is opt-out, gentle
 - [x] 160. A quick start, service recipes and troubleshooting in the README
 
 ## N. Video
-- [x] 161. Make short videos with speech, effects and ambience (Veo, through your Gemini key)
+- [x] 161. Make short videos with speech, effects and ambience — through NanoGPT first, Google's Veo as the fallback
 - [x] 162. `/video`, a video studio, the palette and the welcome screen
 - [x] 163. Scene, what is said and what is heard written into one prompt; a live-action realism switch
 - [x] 164. Landscape or vertical, 4, 6 or 8 seconds, 720p or 1080p
 - [x] 165. One video at a time, a daily limit and no model access, so it cannot overspend
 - [x] 166. Background jobs with a progress message, stop-waiting, and the model's refusals shown
 - [x] 167. A library of your videos, served with seeking and download
-
+- [x] 168. Choose the video model (Veo 3, 3.1, 3 Fast, Sora 2, Kling 2, Seedance), with its lengths and whether it makes sound
+- [x] 169. Show what the provider charged for each video

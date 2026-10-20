@@ -14,7 +14,7 @@ can now use tools mid-answer instead of only talking.
 - **Voice.** Say "Hey JARVIS" and talk to it. Wake word runs on your machine.
 - **Proactive.** Reminders, briefings and watchers it speaks aloud unasked.
 - **Pictures.** Draws like any image generator — with no key at all, or with NanoGPT for better models and edits. Ten styles, four shapes, up to four at a time.
-- **Video with sound.** Short clips with speech, effects and ambience, made by Google's Veo through your Gemini key (a paid model).
+- **Video, with sound.** Short clips through NanoGPT (Veo 3 makes speech, effects and ambience) or Google's Veo — paid, started only by you, with a daily limit.
 - **Personalities.** Twenty-one ready-made manners, four dials, and your own.
 - **Edits its own code** (opt-in) — in an always-running sandbox copy, applied
   to the real thing only when you say so, with undo.
@@ -1325,7 +1325,7 @@ npm run test:composer  # timestamps, saved messages, folding, drafts, up arrow, 
 npm run test:appearance  # theme, text size, shortcuts, resizing, focus, axe scan, print, manifest, offline
 npm run test:models  # persona presets, context meter, favourites, regenerate-with, memory search/export/import, units
 npm run test:extras  # templates, welcome screen, gallery families, usage CSV, daily backups, chat statistics
-npm run test:video  # video: the studio, one job at a time, Range seeking, refusals, stopping, the library (server needs JARVIS_GEMINI_VIDEO_URL=http://localhost:8899 JARVIS_VIDEO_POLL_MS=300)
+npm run test:video  # video: the studio, one job at a time, Range seeking, refusals, stopping, the library (server needs JARVIS_NANOGPT_VIDEO_URL and JARVIS_GEMINI_VIDEO_URL=http://localhost:8899, JARVIS_VIDEO_POLL_MS=300)
 npm run test:studio  # settings tabs, personalities and dials, /persona, the image studio, /image, the Draw button, gallery search (needs JARVIS_POLLINATIONS_URL=http://localhost:8899 on the server)
 npm run test:polish  # command palette, settings search, diagnostics, reset, typeface, accents, width, blur, folding
 npm run test:choosing  # chat info, speeds, model notes, new-chat model, tools off, reply length, no fallback, quieter page
@@ -1617,28 +1617,35 @@ photo, both NanoGPT only. A model that refuses a shape gives you a square and te
 
 ## Video
 
-JARVIS can make short videos **with sound** — people speaking, effects, ambience — using Google's **Veo** model through the Gemini API.
+JARVIS can make short videos — and, with the right model, **with sound**: people speaking, effects, ambience.
 Type **`/video a fisherman mends a net on a pier at dawn`**, press *Make a video* on the welcome screen, or pick it from the command palette.
-The **video studio** opens; describe the scene, write **what is said** and **what is heard**, choose landscape or vertical, 4, 6 or 8 seconds and 720p
-(1080p for eight-second landscape), and press **Make the video**. It takes about one to three minutes and then plays in the studio, can be saved,
-and is kept in *Your videos*.
+The **video studio** opens; choose a model, describe the scene, write **what is said** and **what is heard**, pick landscape or vertical and a length,
+and press **Make the video**. It takes a minute or three, then plays in the studio, can be saved, and is kept in *Your videos*.
 
-- **It needs a Gemini key with access to Veo, and it is a paid model** billed by your Google account (`GEMINI_API_KEY` in `.env.local`, or
-  Settings → API keys). The free Gemini chat tier does not cover it. Check Google's current pricing before you rely on it.
-- **Voices and noise come from the prompt.** Veo mixes the soundtrack itself: words you put in *What is said* are spoken aloud in a natural voice,
-  and *What is heard* describes effects and ambience. Leave them empty and it adds fitting ambient sound. There is no separate audio switch.
-- **"Extremely realistic".** *Aim for live-action realism* (on by default) adds cinema-camera, natural-light and true-to-life wording; the rest is
-  the model. Realism depends on what you ask for — specific, physical, single-shot scenes (one subject, one camera move, concrete sounds) come out
-  best; crowds, hands doing fine work and on-screen text are where video models still slip. It is as realistic as Veo is, no more.
+**Who makes it.** **NanoGPT first**: with a NanoGPT key (`NANOGPT_API_KEY` in `.env.local`, or Settings → API keys) it is used, and your NanoGPT balance
+pays — the video's cost, as NanoGPT reports it, shows while it is made and in your library. With no NanoGPT key but a Gemini key it falls back to
+Google's Veo (also paid, to your Google account). `JARVIS_VIDEO_PROVIDER=gemini` or `nanogpt` forces one.
+
+**Models (NanoGPT).** Veo 3 (default), Veo 3.1, Veo 3 Fast, Sora 2, Kling 2 and Seedance, each offering the lengths it takes (Veo 3 is a fixed eight
+seconds). **Only Veo 3 is documented by NanoGPT as making sound**; JARVIS asks the Veo and Sora models for audio anyway and tells you in the studio
+that it may come back silent. Kling and Seedance are silent, so the speech and sound boxes switch off for them and their prompt carries no voices.
+`JARVIS_NANOGPT_VIDEO_MODEL` changes the default.
+
+- **Voices and noise come from the prompt.** Words in *What is said* are spoken aloud in a natural voice and *What is heard* describes effects and
+  ambience; leave them empty and it asks for fitting ambient sound. There is no separate audio dial — Veo mixes the soundtrack itself.
+- **"Extremely realistic".** *Aim for live-action realism* (on by default) adds cinema-camera, natural-light and true-to-life wording; the rest is the
+  model. Specific, physical, single-shot scenes (one subject, one camera move, concrete sounds) come out best; crowds, hands doing fine work and
+  on-screen text are where video models still slip. It is as realistic as the model is, no more.
 - **Spending guards.** Nothing starts until you press the button (typing `/video …` only fills the studio in). One video is made at a time, and the
   default limit is five a day (`JARVIS_VIDEO_DAILY_LIMIT`, `0` turns video off). The chat model has no way to make a video — it cannot spend your money.
   *Stop waiting* ends the wait, but the provider may still bill for work already started.
-- **Please use it honestly.** Veo marks its output as AI-generated. Don't make a video that passes a real person off as saying or doing something
-  they didn't, and don't present one as real footage.
+- **Please use it honestly.** Don't make a video that passes a real person off as saying or doing something they didn't, and don't present one as real footage.
 - Videos are saved to `data/videos/` and served from `/api/videos/<id>` behind the same login as your chats, with seeking. The oldest are removed
-  past `JARVIS_VIDEO_KEEP` (default 30; `0` keeps all). The model is `JARVIS_VIDEO_MODEL` (default `veo-3.0-generate-001`).
-- Honest limits: this was built against Google's published request shape and exercised against a stand-in server; I have not been able to run it against
-  the real paid service, so if Google's names have moved, `JARVIS_VIDEO_MODEL` and `JARVIS_GEMINI_VIDEO_URL` are the first things to check.
+  past `JARVIS_VIDEO_KEEP` (default 30; `0` keeps all).
+- **Honest limits.** This was built from NanoGPT's and Google's published API documentation and exercised against stand-in servers; I have not been able
+  to run it against either real paid service. NanoGPT's own docs show two shapes for the status reply and two spellings of its states, so both are read
+  and an unrecognised state is treated as "still going". If something doesn't match, `JARVIS_NANOGPT_VIDEO_URL` / `JARVIS_GEMINI_VIDEO_URL` and the model
+  settings are the first things to check, and `data/audit.jsonl` shows what ran.
 
 ## The room display
 
