@@ -26,6 +26,7 @@ import SchedulePanel from "./SchedulePanel";
 import ToolSettings from "./ToolSettings";
 import PersonalitySettings from "./PersonalitySettings";
 import ImageSettings from "./ImageSettings";
+import VideoSettings from "./VideoSettings";
 import { DEFAULT_SETTINGS_TAB, isSettingsTab, nextTab, SETTINGS_TABS, SETTINGS_TAB_KEY, type SettingsTab } from "@/lib/settings-tabs";
 import type { CustomPersona, Dials } from "@/lib/persona-dials";
 import ModelSettings from "./ModelSettings";
@@ -110,6 +111,8 @@ interface Props {
   onClose: () => void;
   /** Open the image studio (closes this first). */
   onOpenStudio?: () => void;
+  /** Open the video studio (closes this first). */
+  onOpenVideoStudio?: () => void;
 }
 
 export default function SettingsDialog({
@@ -120,6 +123,7 @@ export default function SettingsDialog({
   onSave,
   onClose,
   onOpenStudio,
+  onOpenVideoStudio,
 }: Props) {
   const [draft, setDraft] = useState<Settings>(settings);
   const [voices, setVoices] = useState<{ id: string; label: string }[]>([]);
@@ -428,6 +432,8 @@ export default function SettingsDialog({
           />
 
           <ImageSettings nanoKey={draft.keys?.nanogpt} onOpenStudio={onOpenStudio} />
+
+          <VideoSettings geminiKey={draft.keys?.gemini} onOpenStudio={onOpenVideoStudio} />
 
           <ToolSettings disabled={draft.disabledTools ?? []} onChange={(disabledTools) => setDraft((d) => ({ ...d, disabledTools }))} />
 

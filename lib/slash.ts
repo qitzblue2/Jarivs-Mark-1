@@ -32,6 +32,7 @@ export const COMMANDS: SlashCommand[] = [
   { name: "tag", summary: "Add or remove tags — /tag work -old", kind: "action", takesArgs: true },
   { name: "persona", summary: "Switch personality for this chat — /persona teacher, or /persona random", kind: "action", takesArgs: true },
   { name: "image", summary: "Draw a picture — /image a fox in snow", kind: "action", takesArgs: true },
+  { name: "video", summary: "Make a video with sound — /video a fisherman at dawn", kind: "action", takesArgs: true },
   { name: "studio", summary: "Open the image studio", kind: "action" },
   { name: "undo", summary: "Take back your last message and its reply", kind: "action" },
   { name: "palette", summary: "Open the command palette", kind: "action" },

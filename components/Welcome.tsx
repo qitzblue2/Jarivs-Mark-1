@@ -1,17 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AudioLines, ImageIcon, Keyboard, MessageSquare, Palette, Search, Star } from "lucide-react";
+import { AudioLines, Clapperboard, ImageIcon, Keyboard, MessageSquare, Palette, Search, Star } from "lucide-react";
 import { relativeTime } from "@/lib/format";
 import { timeGreeting } from "@/lib/welcome";
 import type { ChatMeta } from "@/lib/types";
 
-export type QuickActionId = "search" | "voice" | "pictures" | "studio" | "saved" | "shortcuts";
+export type QuickActionId = "search" | "voice" | "pictures" | "studio" | "video" | "saved" | "shortcuts";
 
 const ACTIONS: { id: QuickActionId; label: string; hint?: string; icon: typeof Search }[] = [
   { id: "search", label: "Search chats", hint: "Ctrl+/", icon: Search },
   { id: "voice", label: "Voice mode", hint: "Ctrl+J", icon: AudioLines },
   { id: "studio", label: "Draw a picture", hint: "/image", icon: Palette },
+  { id: "video", label: "Make a video", hint: "/video", icon: Clapperboard },
   { id: "pictures", label: "Pictures", icon: ImageIcon },
   { id: "saved", label: "Saved messages", icon: Star },
   { id: "shortcuts", label: "Keyboard shortcuts", hint: "?", icon: Keyboard },

@@ -8,7 +8,7 @@
 export const SETTINGS_TABS = [
   { id: "models", label: "Keys & models" },
   { id: "personality", label: "Personality" },
-  { id: "pictures", label: "Pictures" },
+  { id: "pictures", label: "Pictures & video" },
   { id: "assistant", label: "Assistant" },
   { id: "look", label: "Look" },
   { id: "data", label: "Data & about" },
@@ -26,6 +26,7 @@ const BY_ATTRIBUTE: [string, SettingsTab][] = [
   ["data-tool-settings", "models"],
   ["data-personality-settings", "personality"],
   ["data-image-settings", "pictures"],
+  ["data-video-settings", "pictures"],
   ["data-appearance", "look"],
   ["data-look-settings", "look"],
   ["data-prefs-settings", "assistant"],

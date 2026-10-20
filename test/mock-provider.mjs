@@ -140,7 +140,7 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({ error: { message: `Unexpected Authorization: ${auth}` } }));
   }
 
-  if (NO_AUTH || req.url.startsWith("/search") || req.url.startsWith("/prompt/")) {
+  if (NO_AUTH || req.url.startsWith("/search") || req.url.startsWith("/prompt/") || req.url.startsWith("/v1beta/") || req.url.startsWith("/files/")) {
     // fall through to the handler below; neither needs auth
   } else if (!auth.startsWith("Bearer ")) {
     res.writeHead(401, { "Content-Type": "application/json" });
@@ -178,6 +178,39 @@ const server = http.createServer((req, res) => {
       res.end(JSON.stringify({ data: [{ b64_json: png.toString("base64") }] }));
     });
     return;
+  }
+
+  // Stands in for Gemini's Veo video endpoints (JARVIS_GEMINI_VIDEO_URL=http://localhost:8899):
+  // start returns an operation, the second poll of it is done, and the file is a bare MP4 header.
+  if (req.url.includes(":predictLongRunning") && req.method === "POST") {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      const parsed = JSON.parse(body || "{}");
+      const prompt = parsed.instances?.[0]?.prompt ?? "";
+      process.stdout.write(`[mock] video key=${req.headers["x-goog-api-key"] ? "yes" : "no"} params=${JSON.stringify(parsed.parameters)} prompt=${prompt.slice(0, 200)}\n`);
+      globalThis.__ops = globalThis.__ops ?? {};
+      const name = `models/veo/operations/op${Date.now()}`;
+      globalThis.__ops[name] = { polls: 0, blocked: prompt.includes("BLOCKME") };
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ name }));
+    });
+    return;
+  }
+  if (req.url.startsWith("/v1beta/models/veo/operations/")) {
+    const name = req.url.slice("/v1beta/".length);
+    const op = globalThis.__ops?.[name];
+    res.writeHead(op ? 200 : 404, { "Content-Type": "application/json" });
+    if (!op) return res.end(JSON.stringify({ error: { message: "no such operation" } }));
+    op.polls += 1;
+    if (op.polls < 2) return res.end(JSON.stringify({ name, done: false }));
+    if (op.blocked) return res.end(JSON.stringify({ name, done: true, response: { generateVideoResponse: { raiMediaFilteredReasons: ["Blocked by the safety filter."] } } }));
+    return res.end(JSON.stringify({ name, done: true, response: { generateVideoResponse: { generatedSamples: [{ video: { uri: "http://localhost:8899/files/clip.mp4" } }] } } }));
+  }
+  if (req.url === "/files/clip.mp4") {
+    const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from("ftypisom"), Buffer.from([0, 0, 2, 0]), Buffer.from("isomiso2"), Buffer.alloc(2000, 7)]);
+    res.writeHead(200, { "Content-Type": "video/mp4", "Content-Length": mp4.length });
+    return res.end(mp4);
   }
 
   // Stands in for the free keyless image service: point JARVIS_POLLINATIONS_URL

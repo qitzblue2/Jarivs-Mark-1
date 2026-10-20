@@ -66,6 +66,9 @@ import { cleanDials, dialsHint, isNeutral, moodOf, cleanCustomPersonas, DIAL_MOO
 import { IMAGE_STYLES, cleanImageRequest, styledPrompt, seedsFor, imagePromptFrom, filterPictures, rememberImagePrompt, SHAPE_PIXELS } from "../lib/images/styles";
 import { freeImageUrl } from "../lib/images/free";
 import { SETTINGS_TABS, tabForSection, nextTab, isSettingsTab } from "../lib/settings-tabs";
+import { cleanVideoRequest, composeVideoPrompt, dailyLimit, madeToday, underLimit, waitLabel, REALISM } from "../lib/videos/request";
+import { isMp4, parseRange, isVideoId, videoKeepLimit } from "../lib/videos/store";
+import { isOperationName, DEFAULT_VIDEO_MODEL, videoModel } from "../lib/videos/veo";
 import { cleanStudio, loadStudio, saveStudio, STUDIO_KEY } from "../lib/images/studio-store";
 import { runChecks, formatChecks, canStart, mergeEnv, nodeMajor, localUrl, configuredProviders } from "../lib/doctor";
 import { UnitError, describeConversion, formatNumber, lookupUnit, parseConversion } from "../lib/tools/units";
@@ -3651,6 +3654,24 @@ console.log("\n--- batch M: personalities, pictures, start-up ---");
   eq("env file: a value with $ or regex characters goes in literally", mergeEnv("K=old\n", { K: "a$&b" }), "K=a$&b\n");
   eq("env file: an empty file gets a clean line", mergeEnv("", { K: "v" }), "K=v\n");
   eq("start: the address follows PORT when it is a number", [localUrl({}), localUrl({ PORT: "4000" }), localUrl({ PORT: "x" })], ["http://localhost:3000", "http://localhost:4000", "http://localhost:3000"]);
+
+  eq("video: a scene is required, and defaults are 16:9, 8 seconds, 720p, realistic", cleanVideoRequest({ scene: "  a  fox\n runs " }), { ok: true, request: { scene: "a fox runs", speech: "", sound: "", avoid: "", aspect: "16:9", seconds: 8, quality: "720p", realistic: true } });
+  eq("video: bad requests say why", [cleanVideoRequest(null), cleanVideoRequest({ scene: " " }), cleanVideoRequest({ scene: "x", aspect: "4:3" }), cleanVideoRequest({ scene: "x", seconds: 5 }), cleanVideoRequest({ scene: "x", quality: "4k" }), cleanVideoRequest({ scene: "x", realistic: "yes" })].map((r) => r.ok), [false, false, false, false, false, false]);
+  eq("video: 1080p only survives for eight seconds of landscape", [["8", "16:9"], ["6", "16:9"], ["8", "9:16"]].map(([sec, asp]) => (cleanVideoRequest({ scene: "x", seconds: Number(sec), aspect: asp, quality: "1080p" }) as { request: { quality: string } }).request.quality), ["1080p", "720p", "720p"]);
+  eq("video: quote marks in speech can't break out of the dialogue line", (cleanVideoRequest({ scene: "x", speech: 'He said "stop" now' }) as { request: { speech: string } }).request.speech, "He said 'stop' now");
+  eq("video: lengths are capped", [(cleanVideoRequest({ scene: "x".repeat(5000) }) as { request: { scene: string } }).request.scene.length, (cleanVideoRequest({ scene: "x", speech: "y".repeat(5000) }) as { request: { speech: string } }).request.speech.length, (cleanVideoRequest({ scene: "x", sound: "z".repeat(5000) }) as { request: { sound: string } }).request.sound.length], [1200, 400, 300]);
+  eq("video: the prompt carries scene, spoken words, sound and the live-action look in that order", composeVideoPrompt({ scene: "A fisherman mends a net.", speech: "Good catch.", sound: "gulls, water", realistic: true }), `A fisherman mends a net. Dialogue, spoken aloud in a natural voice: "Good catch." Sound: gulls, water. Look: ${REALISM}.`);
+  eq("video: with no sound given it still asks for natural ambience; realism can be off", composeVideoPrompt({ scene: "A cat", speech: "", sound: "", realistic: false }), "A cat. Sound: natural ambient sound that fits the scene.");
+  eq("video: the daily limit reads the setting, 5 by default, bad values fall back", [dailyLimit({}), dailyLimit({ JARVIS_VIDEO_DAILY_LIMIT: "2" }), dailyLimit({ JARVIS_VIDEO_DAILY_LIMIT: "-1" }), dailyLimit({ JARVIS_VIDEO_DAILY_LIMIT: "x" }), dailyLimit({ JARVIS_VIDEO_DAILY_LIMIT: "0" })], [5, 2, 5, 5, 0]);
+  const noon = new Date(2026, 9, 20, 12, 0, 0);
+  const at = (h: number, d = 20) => new Date(2026, 9, d, h).getTime();
+  eq("video: only today's count toward today's limit", [madeToday([at(1), at(23), at(9, 19), at(9, 21)], noon), underLimit([at(1), at(2)], noon, 2).ok, underLimit([at(1)], noon, 2).ok, underLimit([], noon, 0).ok], [2, false, true, false]);
+  eq("video: the wait message changes as time passes", [0, 30, 120, 300].map((n) => waitLabel(n).slice(0, 12)), ["Sending the ", "Filming… thi", "Still filmin", "Taking longe"]);
+  const header = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from("ftypisom")]);
+  eq("video: an MP4 is recognised by its header, anything else is not", [isMp4(header), isMp4(Buffer.from("<html>not a video</html>")), isMp4(Buffer.alloc(3))], [true, false, false]);
+  eq("video: Range headers", [parseRange(null, 100), parseRange("bytes=0-9", 100), parseRange("bytes=90-", 100), parseRange("bytes=-10", 100), parseRange("bytes=50-500", 100), parseRange("bytes=100-", 100), parseRange("bytes=9-3", 100), parseRange("junk", 100), parseRange("bytes=-0", 100)], [null, { start: 0, end: 9 }, { start: 90, end: 99 }, { start: 90, end: 99 }, { start: 50, end: 99 }, "bad", "bad", "bad", "bad"]);
+  eq("video: ids and operation names are checked before they go into a path or URL", [isVideoId("0b0f1d3e-5c5a-4a6e-9a3e-0123456789ab"), isVideoId("../x"), isOperationName("models/veo/operations/abc-123"), isOperationName("../../etc"), isOperationName("a b"), isOperationName(5)], [true, false, true, false, false, false]);
+  eq("video: the model is Veo 3 unless set, and keeping defaults to thirty", [videoModel(), DEFAULT_VIDEO_MODEL, videoKeepLimit()], ["veo-3.0-generate-001", "veo-3.0-generate-001", 30]);
 
   eq("tabs: seven, the last showing everything", [SETTINGS_TABS.length, SETTINGS_TABS.at(-1)!.id], [7, "all"]);
   eq("tabs: a section is filed by its marker, else its heading, else Assistant", [

@@ -193,3 +193,13 @@ JARVIS speaking first, within limits you set. Every item here is opt-out, gentle
 - [x] 158. `npm run doctor` — what is missing and how to fix it
 - [x] 159. `--dev`, `--lan`, `--rebuild`, `--no-open` and `PORT`
 - [x] 160. A quick start, service recipes and troubleshooting in the README
+
+## N. Video
+- [x] 161. Make short videos with speech, effects and ambience (Veo, through your Gemini key)
+- [x] 162. `/video`, a video studio, the palette and the welcome screen
+- [x] 163. Scene, what is said and what is heard written into one prompt; a live-action realism switch
+- [x] 164. Landscape or vertical, 4, 6 or 8 seconds, 720p or 1080p
+- [x] 165. One video at a time, a daily limit and no model access, so it cannot overspend
+- [x] 166. Background jobs with a progress message, stop-waiting, and the model's refusals shown
+- [x] 167. A library of your videos, served with seeking and download
+

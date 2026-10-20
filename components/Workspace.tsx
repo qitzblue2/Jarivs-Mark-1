@@ -9,6 +9,7 @@ import SettingsDialog, { DEFAULT_SETTINGS, type Settings } from "./SettingsDialo
 import VoiceMode from "./VoiceMode";
 import Gallery from "./Gallery";
 import ImageStudio from "./ImageStudio";
+import VideoStudio from "./VideoStudio";
 import UsagePanel from "./UsagePanel";
 import SandboxPanel from "./SandboxPanel";
 import TrashPanel from "./TrashPanel";
@@ -122,6 +123,7 @@ export default function Workspace() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const [videoStudio, setVideoStudio] = useState<{ scene?: string } | null>(null);
   const [studio, setStudio] = useState<{ prompt?: string; autoRun?: boolean } | null>(null);
   const [usageOpen, setUsageOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
@@ -791,6 +793,9 @@ export default function Workspace() {
         return setPaletteOpen(true);
       case "studio":
         return setStudio({});
+      case "video":
+        // Never started for you: a video costs money, so the studio opens with the words and waits.
+        return setVideoStudio(match.args.trim() ? { scene: match.args.trim() } : {});
       case "image": {
         const wanted = match.args.trim();
         // A command you typed and sent is the request: open the studio and draw it.
@@ -1211,6 +1216,7 @@ export default function Workspace() {
       }
       if (id === "pictures") return setGalleryOpen(true);
       if (id === "studio") return setStudio({});
+      if (id === "video") return setVideoStudio({});
       if (id === "saved") return setSavedOpen(true);
       return setShortcutsOpen(true);
     },
@@ -1368,6 +1374,7 @@ export default function Workspace() {
       act("usage", "Open usage", () => setUsageOpen(true), { keywords: "requests tokens limits statistics speed" }),
       act("pictures", "Open pictures", () => setGalleryOpen(true), { keywords: "gallery images" }),
       act("studio", "Draw a picture (image studio)", () => setStudio({}), { hint: "/image", keywords: "image generate make art paint" }),
+      act("video", "Make a video (video studio)", () => setVideoStudio({}), { hint: "/video", keywords: "film clip movie generate sound voice" }),
       act("persona-random", "Random personality for this chat", () => runSlash({ name: "persona", summary: "", kind: "action", args: "random" }), { hint: "/persona", keywords: "character manner voice style" }),
       act("saved", "Open saved messages", () => setSavedOpen(true), { keywords: "starred bookmarks" }),
       act("trash", "Open the trash", () => setTrashOpen(true), { keywords: "deleted restore" }),
@@ -1748,6 +1755,8 @@ export default function Workspace() {
         }}
       />
 
+      <VideoStudio open={videoStudio !== null} onClose={() => setVideoStudio(null)} initialScene={videoStudio?.scene} geminiKey={settings.keys?.gemini} />
+
       <SettingsDialog
         open={settingsOpen}
         settings={settings}
@@ -1758,6 +1767,10 @@ export default function Workspace() {
         onOpenStudio={() => {
           setSettingsOpen(false);
           setStudio({});
+        }}
+        onOpenVideoStudio={() => {
+          setSettingsOpen(false);
+          setVideoStudio({});
         }}
       />
     </div>

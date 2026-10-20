@@ -43,7 +43,8 @@
     "test:choosing": "node test/e2e-choosing.mjs",
     "test:polish": "node test/e2e-polish.mjs",
     "icons": "node scripts/make-icons.mjs",
-    "test:studio": "node test/e2e-studio.mjs"
+    "test:studio": "node test/e2e-studio.mjs",
+    "test:video": "node test/e2e-video.mjs"
   },
   "dependencies": {
     "@ricky0123/vad-web": "^0.0.31",
