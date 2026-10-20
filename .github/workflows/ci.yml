@@ -1,0 +1,39 @@
+# Type check, tests and a production build, on every push and pull request.
+#
+# Deliberately without the voice models and browsers: `--ignore-scripts` skips
+# the postinstall that downloads ~100MB of ONNX files, and none of the checks
+# below need them. The browser suites (test/e2e*.mjs) need a real browser and
+# the mock provider, so they are run by hand — see the README's Testing section.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Type check
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Provider tests
+        run: npm run test:providers
+      - name: Production build
+        run: npm run build
