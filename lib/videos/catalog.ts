@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
-import { NANO_VIDEO_MODELS, type SoundSupport, type VideoModel } from "./models";
+import { NANO_VIDEO_MODELS, splitFreePaid, type SoundSupport, type VideoModel } from "./models";
+
+export { splitFreePaid };
 import { nanoVideoBase } from "./nano";
 
 /**
@@ -126,12 +128,6 @@ export const builtinCatalog = (): VideoModel[] => NANO_VIDEO_MODELS.map((m) => (
 export function parseIncludedIds(json: unknown): Set<string> {
   const data = obj(json).data;
   return new Set(Array.isArray(data) ? data.map((m) => obj(m).id).filter((id): id is string => typeof id === "string") : []);
-}
-
-/** Free ones first, then paid, each by name — the order the studio shows its two sections in. */
-export function splitFreePaid(models: VideoModel[]): { free: VideoModel[]; paid: VideoModel[] } {
-  const by = (a: VideoModel, b: VideoModel) => a.label.localeCompare(b.label);
-  return { free: models.filter((m) => m.free).sort(by), paid: models.filter((m) => !m.free).sort(by) };
 }
 
 // --- fetching, with a short cache -------------------------------------------------------------------

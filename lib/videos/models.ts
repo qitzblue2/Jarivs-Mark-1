@@ -56,3 +56,9 @@ export function resolveNanoModel(requested: string | undefined, models: VideoMod
 export function nearestSeconds(model: VideoModel, wanted: number): number {
   return model.seconds.reduce((best, s) => (Math.abs(s - wanted) < Math.abs(best - wanted) ? s : best), model.seconds[0]);
 }
+
+/** Free ones first, then paid, each by name — the order the studio shows its two sections in. */
+export function splitFreePaid(models: VideoModel[]): { free: VideoModel[]; paid: VideoModel[] } {
+  const by = (a: VideoModel, b: VideoModel) => a.label.localeCompare(b.label);
+  return { free: models.filter((m) => m.free).sort(by), paid: models.filter((m) => !m.free).sort(by) };
+}

@@ -1,8 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { VideoModel } from "@/lib/videos/models";
-import { splitFreePaid } from "@/lib/videos/catalog";
+import { splitFreePaid, type VideoModel } from "@/lib/videos/models";
 
 interface Props {
   models: VideoModel[];
