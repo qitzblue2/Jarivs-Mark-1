@@ -62,13 +62,15 @@ try {
   check("with no Gemini key, video is unavailable and says what to do", nokey.available === false && /NanoGPT key/.test(nokey.note), JSON.stringify(nokey));
   check("and starting one is refused, not attempted", (await post("/api/videos/generate", { scene: "x" })).status === 503);
   const status = await json("/api/videos/generate", { headers: KEY });
-  check("with a NanoGPT key it is NanoGPT, defaulting to Veo 3, with six models listed", status.available === true && status.provider === "nanogpt" && status.model === "veo3-video" && status.models.length === 6 && /NanoGPT/.test(status.note), `${status.provider} ${status.model} ${status.models?.length}`);
+  check("with a NanoGPT key it is NanoGPT, defaulting to Veo 3, with the seven usable models from its live list", status.available === true && status.provider === "nanogpt" && status.model === "veo3-video" && status.models.length === 7 && /NanoGPT/.test(status.note), `${status.provider} ${status.model} ${status.models?.length}`);
   const gem = await json("/api/videos/generate", { headers: GEM });
   check("with only a Gemini key it falls back to Google's Veo, with no model list", gem.available === true && gem.provider === "gemini" && gem.models.length === 0 && gem.model === "veo-3.0-generate-001");
   const both = await json("/api/videos/generate", { headers: { "x-jarvis-keys": JSON.stringify({ nanogpt: "n", gemini: "g" }) } });
   check("with both, NanoGPT wins", both.provider === "nanogpt");
-  const bads = await Promise.all([post("/api/videos/generate", { scene: " " }, KEY), post("/api/videos/generate", { scene: "x", seconds: 7 }, KEY), post("/api/videos/generate", { scene: "x", aspect: "1:1" }, KEY)]);
+  const bads = await Promise.all([post("/api/videos/generate", { scene: " " }, KEY), post("/api/videos/generate", { scene: "x", seconds: 0 }, KEY), post("/api/videos/generate", { scene: "x", aspect: "wide" }, KEY)]);
   check("it refuses an empty scene, a bad length and a bad shape", bads.every((r) => r.status === 400), bads.map((r) => r.status).join());
+  const unknownModel = await post("/api/videos/generate", { scene: "x", model: "not-a-model" }, KEY);
+  check("a model NanoGPT doesn't list is refused, not swapped for another that would cost differently", unknownModel.status === 400 && /doesn't offer/.test((await unknownModel.json()).error));
   check("it won't make up a job that isn't there", (await fetch(`${BASE}/api/videos/jobs/nope`)).status === 404);
   check("a bad video id is refused, not looked up", (await fetch(`${BASE}/api/videos/..%2Fetc`)).status >= 400);
 
@@ -85,18 +87,29 @@ try {
   check("/video opens the studio with the words in it, and does NOT start anything", (await studio.locator("[data-video-scene]").inputValue()) === "a fisherman mends a net" && (await studio.locator("[data-video-progress]").count()) === 0 && (await json("/api/videos/generate", { headers: KEY })).running === null);
   await page.waitForFunction(() => /NanoGPT/.test(document.querySelector("[data-video-status]")?.textContent ?? ""), null, { timeout: 5000 });
   check("it says it is billed to NanoGPT", (await studio.locator("[data-video-status]").innerText()).includes("NanoGPT"));
-  const options = await studio.locator("[data-video-model] option").allInnerTexts();
-  check("the model list is offered, Veo 3 first and selected", options.length === 6 && options[0].startsWith("Veo 3") && (await studio.locator("[data-video-model]").inputValue()) === "veo3-video", options.join(" | "));
-  check("Veo 3 only offers eight seconds, and says it makes its own sound", (await studio.locator('[data-choice="seconds"] [role="radio"]').count()) === 1 && (await studio.locator("[data-video-sound-note]").innerText()).includes("own sound"));
-  check("no quality choice for a model that has none", (await studio.locator('[data-choice="quality"]').count()) === 0);
-  await studio.locator("[data-video-model]").selectOption("kling-video-v2");
+  check("the live list is used, and the picture-only model left out", (await studio.locator("[data-video-model-source]").innerText()).includes("current list") && (await studio.locator('[data-model="animate-only"]').count()) === 0 && (await studio.locator("[data-model]").count()) === 7);
+  const freeIds = await studio.locator('[data-model-section="video-free"] [data-model]').evaluateAll((els) => els.map((e) => e.getAttribute("data-model")));
+  const paidIds = await studio.locator('[data-model-section="video-paid"] [data-model]').evaluateAll((els) => els.map((e) => e.getAttribute("data-model")));
+  check("a zero price and the subscription-only listing put models in the Free section", freeIds.sort().join() === "free-clip,kling-video-v2", freeIds.join());
+  check("every other model is in the Paid section, with prices where given", paidIds.length === 5 && (await studio.locator('[data-model="veo3-video"]').innerText()).includes("$2.50 per generation"), paidIds.join());
+  check("the free section is headed as included in the subscription", (await studio.locator("#video-free").innerText()).includes("included in your subscription"));
+  check("Veo 3 is selected by default, offers eight seconds, and says it makes its own sound", (await studio.locator('[data-model="veo3-video"]').getAttribute("aria-checked")) === "true" && (await studio.locator('[data-choice="seconds"] [role="radio"]').count()) === 1 && (await studio.locator("[data-video-sound-note]").innerText()).includes("own sound"));
+  check("no quality choice for a model that offers none", (await studio.locator('[data-choice="quality"]').count()) === 0);
+  await studio.locator('[data-model="kling-video-v2"]').click();
   check("a silent model switches off the speech and sound boxes and offers 5 or 10 seconds", (await studio.locator("[data-video-speech]").isDisabled()) && (await studio.locator("[data-video-sound]").isDisabled()) && (await studio.locator('[data-choice="seconds"] [role="radio"]').allInnerTexts()).join() === "5 seconds,10 seconds" && (await studio.locator("[data-video-sound-note]").innerText()).includes("silent"));
+  check("a subscription-listed model's box is ticked and locked", (await studio.locator("[data-video-mark-included]").isChecked()) && (await studio.locator("[data-video-mark-included]").isDisabled()));
   await axeBoth("the video studio, silent model");
-  await studio.locator("[data-video-model]").selectOption("seedance-video");
-  check("Seedance offers its own resolutions", (await studio.locator('[data-choice="quality"] [role="radio"]').allInnerTexts()).join() === "480p,1080p");
-  await studio.locator("[data-video-model]").selectOption("veo3-1-video");
-  check("an undocumented-sound model says it may be silent", (await studio.locator("[data-video-sound-note]").innerText()).includes("may come back silent"));
-  await studio.locator("[data-video-model]").selectOption("veo3-video");
+  await studio.locator('[data-model="seedance-video"]').click();
+  check("Seedance offers its own resolutions, and its price tier shows", (await studio.locator('[data-choice="quality"] [role="radio"]').allInnerTexts()).join() === "480p,1080p" && (await studio.locator('[data-model="seedance-video"]').innerText()).includes("from $0.20"));
+  await studio.locator('[data-model="sora-2"]').click();
+  check("a model with no stated sound says it may be silent", (await studio.locator("[data-video-sound-note]").innerText()).includes("may come back silent"));
+  await studio.locator('[data-model="mystery-video"]').click();
+  check("a model the list says nothing about still works, with common defaults", (await studio.locator('[data-choice="seconds"] [role="radio"]').allInnerTexts()).join() === "5 seconds,8 seconds,10 seconds");
+  await studio.locator("[data-video-mark-included]").check();
+  check("marking a paid model as included moves it to the Free section, and it is remembered", (await studio.locator('[data-model-section="video-free"] [data-model="mystery-video"]').count()) === 1 && (await page.evaluate(() => JSON.parse(localStorage.getItem("jarvis.video-included.v1")).includes("mystery-video"))));
+  await studio.locator("[data-video-mark-included]").uncheck();
+  check("and unmarking puts it back", (await studio.locator('[data-model-section="video-paid"] [data-model="mystery-video"]').count()) === 1);
+  await studio.locator('[data-model="veo3-video"]').click();
   await axeBoth("the video studio");
 
   await studio.locator("[data-video-speech]").fill("Good catch today.");
@@ -139,7 +152,7 @@ try {
   check("and the button is usable again", await studio.locator("[data-video-make]").isEnabled());
 
   // --- a silent model is not asked for voices ---------------------------------------------------------
-  await studio.locator("[data-video-model]").selectOption("kling-video-v2");
+  await studio.locator('[data-model="kling-video-v2"]').click();
   await studio.locator("[data-video-scene]").fill("a quiet harbour");
   await studio.locator("[data-video-make]").click();
   await studio.locator("[data-video-player] video").waitFor({ timeout: 30000 });

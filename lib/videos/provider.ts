@@ -1,5 +1,5 @@
 import type { VideoBackend } from "./backend";
-import { NANO_VIDEO_MODELS, pickNanoModel, type VideoModel } from "./models";
+import { resolveNanoModel, type VideoModel } from "./models";
 import { nanoBackend } from "./nano";
 import { geminiBackend, resolveVideoKey, videoModel } from "./veo";
 
@@ -36,24 +36,29 @@ export interface Chosen {
   sound: "yes" | "unknown" | "no";
 }
 
-export function chooseBackend(keys: Keys, requestedModel: string | undefined, env: Record<string, string | undefined> = process.env): Chosen | null {
+/**
+ * The backend for a request. For NanoGPT `models` is the list on offer (see
+ * catalog.ts) and the requested id must be on it — null here with a NanoGPT key
+ * means "that model isn't available", which the caller reports.
+ */
+export function chooseBackend(keys: Keys, requestedModel: string | undefined, models: VideoModel[], env: Record<string, string | undefined> = process.env): Chosen | null {
   const provider = pickProvider(keys, env);
   if (provider === "nanogpt") {
-    const model = pickNanoModel(requestedModel, env);
-    return { backend: nanoBackend(keys.nanogpt!, model), provider, model, sound: model.sound };
+    const model = resolveNanoModel(requestedModel, models, env);
+    return model ? { backend: nanoBackend(keys.nanogpt!, model), provider, model, sound: model.sound } : null;
   }
   if (provider === "gemini") return { backend: geminiBackend(keys.gemini!, videoModel()), provider, model: null, sound: "yes" };
   return null;
 }
 
 /** What the studio is told: who would make the video and which models it can pick. */
-export function describeVideo(keys: Keys, env: Record<string, string | undefined> = process.env) {
+export function describeVideo(keys: Keys, models: VideoModel[], env: Record<string, string | undefined> = process.env) {
   const provider = pickProvider(keys, env);
   return {
     provider,
     available: provider !== null,
-    models: provider === "nanogpt" ? NANO_VIDEO_MODELS : [],
-    model: provider === "nanogpt" ? pickNanoModel(undefined, env).id : provider === "gemini" ? videoModel() : null,
+    models: provider === "nanogpt" ? models : [],
+    model: provider === "nanogpt" ? (resolveNanoModel(undefined, models, env)?.id ?? null) : provider === "gemini" ? videoModel() : null,
   };
 }
 

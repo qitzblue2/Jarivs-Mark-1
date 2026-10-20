@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import { randomUUID } from "node:crypto";
 import { runningJob, startJob } from "@/lib/videos/jobs";
-import { chooseBackend, describeVideo, resolveNanoKey, resolveVideoKey, type Keys } from "@/lib/videos/provider";
+import { getCatalog } from "@/lib/videos/catalog";
+import { chooseBackend, describeVideo, pickProvider, resolveNanoKey, resolveVideoKey, type Keys } from "@/lib/videos/provider";
 import { cleanVideoRequest, composeVideoPrompt, underLimit } from "@/lib/videos/request";
 import { listVideos } from "@/lib/videos/store";
 
@@ -28,9 +29,18 @@ function noteFor(provider: string | null): string {
 
 /** GET /api/videos/generate — whether video can be made, by whom, with which models, and how many are left today. */
 export async function GET(req: NextRequest) {
-  const info = describeVideo(keysFrom(req));
+  const keys = keysFrom(req);
+  const catalog = pickProvider(keys) === "nanogpt" ? await getCatalog(keys.nanogpt!) : null;
+  const info = describeVideo(keys, catalog?.models ?? []);
   const limit = underLimit((await listVideos()).map((v) => v.createdAt));
-  return Response.json({ ...info, used: limit.used, limit: limit.limit, running: runningJob()?.id ?? null, note: noteFor(info.provider) });
+  return Response.json({
+    ...info,
+    catalog: catalog ? { source: catalog.source, subscriptionListing: catalog.subscriptionListing } : null,
+    used: limit.used,
+    limit: limit.limit,
+    running: runningJob()?.id ?? null,
+    note: noteFor(info.provider),
+  });
 }
 
 /**
@@ -48,8 +58,11 @@ export async function POST(req: NextRequest) {
   const parsed = cleanVideoRequest(body);
   if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
 
-  const chosen = chooseBackend(keysFrom(req), parsed.request.model || undefined);
-  if (!chosen) return Response.json({ error: "No NanoGPT or Gemini key is set up, so there is nothing to make video with." }, { status: 503 });
+  const keys = keysFrom(req);
+  if (!pickProvider(keys)) return Response.json({ error: "No NanoGPT or Gemini key is set up, so there is nothing to make video with." }, { status: 503 });
+  const catalog = pickProvider(keys) === "nanogpt" ? await getCatalog(keys.nanogpt!) : null;
+  const chosen = chooseBackend(keys, parsed.request.model || undefined, catalog?.models ?? []);
+  if (!chosen) return Response.json({ error: `NanoGPT doesn't offer a video model called “${parsed.request.model}”. Pick one from the list.` }, { status: 400 });
 
   const running = runningJob();
   if (running) return Response.json({ error: "A video is already being made. Wait for it, or stop it.", job: running }, { status: 429 });

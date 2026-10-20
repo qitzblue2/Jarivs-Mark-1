@@ -110,7 +110,7 @@ export function geminiBackend(key: string, model: string): VideoBackend {
     async start(r, prompt, signal) {
       // Veo through Gemini takes 4, 6 or 8 seconds.
       const seconds = ([4, 6, 8] as const).reduce((best, v) => (Math.abs(v - r.seconds) < Math.abs(best - r.seconds) ? v : best), 8 as VideoSeconds);
-      const handle = await startVeo({ key, model, prompt, aspect: r.aspect, seconds, quality: r.quality === "1080p" && seconds === 8 && r.aspect === "16:9" ? "1080p" : "720p", avoid: r.avoid, signal });
+      const handle = await startVeo({ key, model, prompt, aspect: r.aspect === "9:16" ? "9:16" : "16:9", seconds, quality: r.quality === "1080p" && seconds === 8 && r.aspect === "16:9" ? "1080p" : "720p", avoid: r.avoid, signal });
       return { handle, seconds };
     },
     async poll(handle, signal) {

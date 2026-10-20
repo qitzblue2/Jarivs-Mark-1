@@ -1626,10 +1626,23 @@ and press **Make the video**. It takes a minute or three, then plays in the stud
 pays — the video's cost, as NanoGPT reports it, shows while it is made and in your library. With no NanoGPT key but a Gemini key it falls back to
 Google's Veo (also paid, to your Google account). `JARVIS_VIDEO_PROVIDER=gemini` or `nanogpt` forces one.
 
-**Models (NanoGPT).** Veo 3 (default), Veo 3.1, Veo 3 Fast, Sora 2, Kling 2 and Seedance, each offering the lengths it takes (Veo 3 is a fixed eight
-seconds). **Only Veo 3 is documented by NanoGPT as making sound**; JARVIS asks the Veo and Sora models for audio anyway and tells you in the studio
-that it may come back silent. Kling and Seedance are silent, so the speech and sound boxes switch off for them and their prompt carries no voices.
-`JARVIS_NANOGPT_VIDEO_MODEL` changes the default.
+**Every NanoGPT video model, in two sections.** The studio asks NanoGPT for its **current list of video models** (`/api/v1/video-models`, cached ten
+minutes) and shows all of them — whatever it adds later appears without an update here. They are split into:
+
+- **Free — included in your subscription**: models the list marks as costing nothing extra (a flag it sets, or a price of exactly zero), models
+  NanoGPT's subscription-only listing names, and any you mark yourself.
+- **Paid — billed per video**: everything else, with the price where NanoGPT gives one.
+
+**One thing I could not settle:** NanoGPT's documentation says nothing about which *video* models a subscription includes (only text models), so
+JARVIS can't promise the Free section is complete. If you know a model is covered by your plan, select it and tick *Included in my subscription*; it
+moves to Free and is remembered in this browser. That only sorts the picker — what NanoGPT actually charges is up to NanoGPT, and the cost it reports
+for each video is shown in your library so you can see whether a "free" one really was. Models that can only animate a picture you supply are left
+out, since JARVIS sends a prompt. If the list can't be fetched, a built-in set of six (Veo 3, Veo 3.1, Veo 3 Fast, Sora 2, Kling 2, Seedance) stands in
+and the studio says so.
+
+Each model offers the lengths, shapes and resolutions its own entry lists (common defaults if it lists none). **Sound** is shown from the list's own
+audio flag: *Sound*, *Silent*, or *Sound?* when NanoGPT doesn't say — in which case it may come back silent. Silent models switch the speech and sound
+boxes off and their prompt carries no voices. `JARVIS_NANOGPT_VIDEO_MODEL` changes the default model (Veo 3 otherwise).
 
 - **Voices and noise come from the prompt.** Words in *What is said* are spoken aloud in a natural voice and *What is heard* describes effects and
   ambience; leave them empty and it asks for fitting ambient sound. There is no separate audio dial — Veo mixes the soundtrack itself.

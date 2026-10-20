@@ -18,6 +18,13 @@ export interface VideoModel {
   resolutions?: string[];
   /** Sora names its length and shape differently. */
   family?: "sora";
+  /** True when it costs nothing beyond your subscription — as the list says, or as you marked it. */
+  free?: boolean;
+  /** A line about the price, when the list gave one. */
+  price?: string | null;
+  description?: string;
+  /** Whether this came from NanoGPT's live list or JARVIS's built-in one. */
+  source?: "live" | "builtin";
 }
 
 export const NANO_VIDEO_MODELS: VideoModel[] = [
@@ -33,9 +40,16 @@ export const DEFAULT_NANO_VIDEO_MODEL = "veo3-video";
 
 export const findNanoModel = (id: string): VideoModel | undefined => NANO_VIDEO_MODELS.find((m) => m.id === id);
 
-/** The model to use: the one asked for if we know it, else JARVIS_NANOGPT_VIDEO_MODEL, else Veo 3. */
-export function pickNanoModel(requested: string | undefined, env: Record<string, string | undefined> = process.env): VideoModel {
-  return (requested && findNanoModel(requested)) || (env.JARVIS_NANOGPT_VIDEO_MODEL && findNanoModel(env.JARVIS_NANOGPT_VIDEO_MODEL.trim())) || findNanoModel(DEFAULT_NANO_VIDEO_MODEL)!;
+/**
+ * The model to use out of the models on offer: the one asked for, or null if it
+ * isn't on offer (an unknown id is an error, never a quiet swap to something that
+ * costs differently); with none asked for, JARVIS_NANOGPT_VIDEO_MODEL, then Veo 3,
+ * then the first.
+ */
+export function resolveNanoModel(requested: string | undefined, models: VideoModel[], env: Record<string, string | undefined> = process.env): VideoModel | null {
+  if (requested) return models.find((m) => m.id === requested) ?? null;
+  const preferred = env.JARVIS_NANOGPT_VIDEO_MODEL?.trim();
+  return (preferred && models.find((m) => m.id === preferred)) || models.find((m) => m.id === DEFAULT_NANO_VIDEO_MODEL) || models[0] || null;
 }
 
 /** The nearest length the model takes (the first if it is a tie, so it errs shorter and cheaper). */

@@ -140,7 +140,7 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({ error: { message: `Unexpected Authorization: ${auth}` } }));
   }
 
-  if (NO_AUTH || req.url.startsWith("/search") || req.url.startsWith("/prompt/") || req.url.startsWith("/v1beta/") || req.url.startsWith("/files/") || req.url.startsWith("/api/generate-video") || req.url.startsWith("/api/video/status")) {
+  if (NO_AUTH || req.url.startsWith("/search") || req.url.startsWith("/prompt/") || req.url.startsWith("/v1beta/") || req.url.startsWith("/files/") || req.url.startsWith("/api/generate-video") || req.url.startsWith("/api/v1/video-models") || req.url.startsWith("/api/subscription/v1/video-models") || req.url.startsWith("/api/video/status")) {
     // fall through to the handler below; neither needs auth
   } else if (!auth.startsWith("Bearer ")) {
     res.writeHead(401, { "Content-Type": "application/json" });
@@ -178,6 +178,27 @@ const server = http.createServer((req, res) => {
       res.end(JSON.stringify({ data: [{ b64_json: png.toString("base64") }] }));
     });
     return;
+  }
+
+  // NanoGPT's live video catalog, and the subscription-only listing (which names just one model).
+  if (req.url.startsWith("/api/v1/video-models")) {
+    process.stdout.write(`[mock] video catalog key=${req.headers["x-api-key"] ? "yes" : "no"}\n`);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    const caps = (audio, t2v = true) => ({ video_generation: true, text_to_video: t2v, image_to_video: true, ...(audio === undefined ? {} : { audio_generation: audio }) });
+    return res.end(JSON.stringify({ object: "list", meta: { count: 8 }, data: [
+      { id: "veo3-video", name: "Veo 3", description: "Google Veo 3 with native audio.", capabilities: caps(true), pricing: { currency: "USD", perGeneration: 2.5 }, supported_parameters: { duration: { options: ["8"] }, aspect_ratio: { options: ["16:9", "9:16"] } } },
+      { id: "veo3-1-video", name: "Veo 3.1", capabilities: caps(true), pricing: { currency: "USD", perSecond: 0.4 }, supported_parameters: { duration: { options: [4, 6, 8] }, aspect_ratio: { options: ["16:9", "9:16"] }, resolution: { options: ["720p", "1080p"] } } },
+      { id: "sora-2", name: "Sora 2", capabilities: caps(undefined), pricing: { currency: "USD", perGeneration: 1.2 }, supported_parameters: { duration: { options: [4, 8, 12] } } },
+      { id: "kling-video-v2", name: "Kling 2", capabilities: caps(false), pricing: { currency: "USD", perGeneration: 0.9 }, supported_parameters: { duration: ["5", "10"] } },
+      { id: "seedance-video", name: "Seedance", capabilities: caps(false), pricing: { currency: "USD", resolution: { "480p": 0.2, "1080p": 0.8 } }, supported_parameters: { duration: ["5", "10"], resolution: ["480p", "1080p"] } },
+      { id: "free-clip", name: "Free Clip", description: "A model that costs nothing extra.", capabilities: caps(false), pricing: { currency: "USD", perGeneration: 0 }, supported_parameters: {} },
+      { id: "animate-only", name: "Animate a Picture", capabilities: caps(false, false), pricing: { currency: "USD", perGeneration: 0.3 } },
+      { id: "mystery-video", name: "Mystery", capabilities: {}, pricing: { currency: "USD" } },
+    ] }));
+  }
+  if (req.url.startsWith("/api/subscription/v1/video-models")) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ object: "list", data: [{ id: "kling-video-v2" }] }));
   }
 
   // Stands in for NanoGPT's video API (JARVIS_NANOGPT_VIDEO_URL=http://localhost:8899): submit returns a

@@ -9,11 +9,13 @@
  * from the fields the studio gives you.
  */
 export const VIDEO_ASPECTS = ["16:9", "9:16"] as const;
-export type VideoAspect = (typeof VIDEO_ASPECTS)[number];
+export type VideoAspect = string;
+const ASPECT = /^\d{1,2}:\d{1,2}$/;
+const QUALITY = /^(\d{3,4}p|[248]k)$/i;
 export const VIDEO_SECONDS = [4, 5, 6, 8, 10, 12] as const;
-export type VideoSeconds = (typeof VIDEO_SECONDS)[number];
+export type VideoSeconds = number;
 export const VIDEO_QUALITIES = ["480p", "720p", "1080p"] as const;
-export type VideoQuality = (typeof VIDEO_QUALITIES)[number];
+export type VideoQuality = string;
 
 export const MAX_SCENE = 1200;
 export const MAX_SPEECH = 400;
@@ -41,21 +43,20 @@ export interface VideoRequest {
 export type VideoRequestResult = { ok: true; request: VideoRequest } | { ok: false; error: string };
 
 const oneLine = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
-const isOf = <T extends readonly (string | number)[]>(list: T, v: unknown): v is T[number] => (list as readonly unknown[]).includes(v);
 
 export function cleanVideoRequest(raw: unknown): VideoRequestResult {
   if (!raw || typeof raw !== "object") return { ok: false, error: "Expected a JSON object." };
   const r = raw as Record<string, unknown>;
   const scene = oneLine(r.scene, MAX_SCENE);
   if (!scene) return { ok: false, error: "Describe the scene." };
-  if (r.aspect !== undefined && !isOf(VIDEO_ASPECTS, r.aspect)) return { ok: false, error: "Aspect must be 16:9 or 9:16." };
-  if (r.seconds !== undefined && !isOf(VIDEO_SECONDS, r.seconds)) return { ok: false, error: "Length must be 4, 5, 6, 8, 10 or 12 seconds." };
-  if (r.quality !== undefined && !isOf(VIDEO_QUALITIES, r.quality)) return { ok: false, error: "Quality must be 480p, 720p or 1080p." };
+  if (r.aspect !== undefined && !(typeof r.aspect === "string" && ASPECT.test(r.aspect))) return { ok: false, error: "Shape must look like 16:9." };
+  if (r.seconds !== undefined && !(typeof r.seconds === "number" && Number.isInteger(r.seconds) && r.seconds >= 1 && r.seconds <= 60)) return { ok: false, error: "Length must be a whole number of seconds, 1 to 60." };
+  if (r.quality !== undefined && !(typeof r.quality === "string" && QUALITY.test(r.quality))) return { ok: false, error: "Quality must look like 720p." };
   if (r.realistic !== undefined && typeof r.realistic !== "boolean") return { ok: false, error: "realistic must be true or false." };
   if (r.model !== undefined && (typeof r.model !== "string" || !/^[a-z0-9.\-]{0,60}$/.test(r.model))) return { ok: false, error: "Unknown model." };
-  const seconds = (r.seconds as VideoSeconds | undefined) ?? 8;
-  const aspect = (r.aspect as VideoAspect | undefined) ?? "16:9";
-  const quality = (r.quality as VideoQuality | undefined) ?? "720p";
+  const seconds = (r.seconds as number | undefined) ?? 8;
+  const aspect = (r.aspect as string | undefined) ?? "16:9";
+  const quality = ((r.quality as string | undefined) ?? "720p").toLowerCase();
   return {
     ok: true,
     request: {

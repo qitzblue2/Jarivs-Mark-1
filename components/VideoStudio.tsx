@@ -6,6 +6,8 @@ import { useEscape } from "@/lib/hooks/use-escape";
 import { useDialogFocus } from "@/lib/hooks/use-dialog-focus";
 import { MAX_SCENE, MAX_SOUND, MAX_SPEECH, VIDEO_ASPECTS, VIDEO_QUALITIES, waitLabel, type VideoAspect, type VideoQuality } from "@/lib/videos/request";
 import { nearestSeconds, type VideoModel } from "@/lib/videos/models";
+import { loadIncluded, saveIncluded, toggleIncluded, withIncluded } from "@/lib/videos/included-store";
+import VideoModelPicker from "./VideoModelPicker";
 
 interface Job {
   id: string;
@@ -34,6 +36,7 @@ interface Status {
   available: boolean;
   provider: "nanogpt" | "gemini" | null;
   models: VideoModel[];
+  catalog: { source: "live" | "builtin"; subscriptionListing: boolean } | null;
   model: string;
   used: number;
   limit: number;
@@ -62,6 +65,7 @@ export default function VideoStudio({ open, onClose, initialScene, keys }: Props
   const [aspect, setAspect] = useState<VideoAspect>("16:9");
   const [seconds, setSeconds] = useState<number>(8);
   const [model, setModel] = useState<string>("");
+  const [marked, setMarked] = useState<string[]>([]);
   const [quality, setQuality] = useState<VideoQuality>("720p");
   const [realistic, setRealistic] = useState(true);
   const [status, setStatus] = useState<Status | null>(null);
@@ -89,6 +93,11 @@ export default function VideoStudio({ open, onClose, initialScene, keys }: Props
   useEffect(() => {
     if (!open) return;
     setError(null);
+    try {
+      setMarked(loadIncluded(localStorage));
+    } catch {
+      setMarked([]);
+    }
     if (initialScene) setScene(initialScene);
     void refresh().then((r) => {
       if (r?.status.running) setJob({ id: r.status.running, status: "running", startedAt: Date.now() });
@@ -125,7 +134,7 @@ export default function VideoStudio({ open, onClose, initialScene, keys }: Props
     };
   }, [open, jobId, refresh]);
 
-  const models = status?.models ?? [];
+  const models = withIncluded(status?.models ?? [], marked);
   const current = models.find((m) => m.id === model) ?? models.find((m) => m.id === status?.model);
   const silent = current?.sound === "no";
   const lengths = current ? current.seconds : [4, 6, 8];
@@ -196,21 +205,23 @@ export default function VideoStudio({ open, onClose, initialScene, keys }: Props
           </p>
 
           {models.length > 0 && (
-            <div>
-              <label htmlFor="video-model" className="mb-1 block text-[12px] text-ink-dim">
-                Model
-              </label>
-              <select id="video-model" data-video-model value={current?.id ?? ""} onChange={(e) => chooseModel(e.target.value)} className="w-full rounded-md border border-line bg-base px-2 py-1.5 text-[12.5px] text-ink outline-none focus:border-arc-dim">
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-[11.5px] text-ink-faint" data-video-sound-note>
-                {current?.sound === "yes" ? "Makes its own sound: speech, effects and ambience." : current?.sound === "unknown" ? "NanoGPT doesn't document sound for this model, so it may come back silent. Veo 3 is the one documented to make it." : "This model makes silent video; the speech and sound boxes are ignored."}
-              </p>
-            </div>
+            <VideoModelPicker
+              models={models}
+              value={current?.id ?? ""}
+              onChange={chooseModel}
+              marked={marked}
+              onToggleMarked={(id) => {
+                const next = toggleIncluded(marked, id);
+                setMarked(next);
+                try {
+                  saveIncluded(localStorage, next);
+                } catch {
+                  // Remembering is a convenience.
+                }
+              }}
+              source={status?.catalog?.source ?? null}
+              subscriptionListing={Boolean(status?.catalog?.subscriptionListing)}
+            />
           )}
           <div>
             <label htmlFor="video-scene" className="mb-1 block text-[12px] text-ink-dim">

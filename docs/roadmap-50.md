@@ -204,3 +204,9 @@ JARVIS speaking first, within limits you set. Every item here is opt-out, gentle
 - [x] 167. A library of your videos, served with seeking and download
 - [x] 168. Choose the video model (Veo 3, 3.1, 3 Fast, Sora 2, Kling 2, Seedance), with its lengths and whether it makes sound
 - [x] 169. Show what the provider charged for each video
+- [x] 170. Every video model on NanoGPT, from its live list, not a fixed few
+- [x] 171. Free (included in your subscription) and Paid sections, with prices
+- [x] 172. Mark a model as included in your subscription when the list doesn't say
+- [x] 173. Search the model list; models that need a starting picture are left out
+- [x] 174. A model that isn't on the list is refused rather than swapped for one that costs differently
+

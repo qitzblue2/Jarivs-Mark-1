@@ -70,7 +70,9 @@ import { cleanVideoRequest, composeVideoPrompt, dailyLimit, madeToday, underLimi
 import { isMp4, parseRange, isVideoId, videoKeepLimit } from "../lib/videos/store";
 import { parseNanoStatus, isRunId } from "../lib/videos/nano";
 import { pickProvider, chooseBackend, describeVideo } from "../lib/videos/provider";
-import { NANO_VIDEO_MODELS, pickNanoModel, nearestSeconds, findNanoModel } from "../lib/videos/models";
+import { cleanIncluded, loadIncluded, saveIncluded, toggleIncluded, withIncluded, INCLUDED_KEY } from "../lib/videos/included-store";
+import { optionsOf, summarisePricing, isIncluded, parseCatalog, parseIncludedIds, splitFreePaid, builtinCatalog } from "../lib/videos/catalog";
+import { NANO_VIDEO_MODELS, resolveNanoModel, nearestSeconds, findNanoModel } from "../lib/videos/models";
 import { isOperationName, DEFAULT_VIDEO_MODEL, videoModel } from "../lib/videos/veo";
 import { cleanStudio, loadStudio, saveStudio, STUDIO_KEY } from "../lib/images/studio-store";
 import { runChecks, formatChecks, canStart, mergeEnv, nodeMajor, localUrl, configuredProviders } from "../lib/doctor";
@@ -3659,7 +3661,7 @@ console.log("\n--- batch M: personalities, pictures, start-up ---");
   eq("start: the address follows PORT when it is a number", [localUrl({}), localUrl({ PORT: "4000" }), localUrl({ PORT: "x" })], ["http://localhost:3000", "http://localhost:4000", "http://localhost:3000"]);
 
   eq("video: a scene is required, and defaults are 16:9, 8 seconds, 720p, realistic", cleanVideoRequest({ scene: "  a  fox\n runs " }), { ok: true, request: { model: "", scene: "a fox runs", speech: "", sound: "", avoid: "", aspect: "16:9", seconds: 8, quality: "720p", realistic: true } });
-  eq("video: bad requests say why", [cleanVideoRequest(null), cleanVideoRequest({ scene: " " }), cleanVideoRequest({ scene: "x", aspect: "4:3" }), cleanVideoRequest({ scene: "x", seconds: 7 }), cleanVideoRequest({ scene: "x", quality: "4k" }), cleanVideoRequest({ scene: "x", realistic: "yes" })].map((r) => r.ok), [false, false, false, false, false, false]);
+  eq("video: bad requests say why", [cleanVideoRequest(null), cleanVideoRequest({ scene: " " }), cleanVideoRequest({ scene: "x", aspect: "wide" }), cleanVideoRequest({ scene: "x", seconds: 0 }), cleanVideoRequest({ scene: "x", quality: "ultra" }), cleanVideoRequest({ scene: "x", realistic: "yes" })].map((r) => r.ok), [false, false, false, false, false, false]);
   eq("video: the quality asked for is kept for the provider to judge (480p, 720p, 1080p)", ["480p", "720p", "1080p"].map((q) => (cleanVideoRequest({ scene: "x", quality: q }) as { request: { quality: string } }).request.quality), ["480p", "720p", "1080p"]);
   eq("video: quote marks in speech can't break out of the dialogue line", (cleanVideoRequest({ scene: "x", speech: 'He said "stop" now' }) as { request: { speech: string } }).request.speech, "He said 'stop' now");
   eq("video: lengths are capped", [(cleanVideoRequest({ scene: "x".repeat(5000) }) as { request: { scene: string } }).request.scene.length, (cleanVideoRequest({ scene: "x", speech: "y".repeat(5000) }) as { request: { speech: string } }).request.speech.length, (cleanVideoRequest({ scene: "x", sound: "z".repeat(5000) }) as { request: { sound: string } }).request.sound.length], [1200, 400, 300]);
@@ -3676,6 +3678,33 @@ console.log("\n--- batch M: personalities, pictures, start-up ---");
   eq("video: ids and operation names are checked before they go into a path or URL", [isVideoId("0b0f1d3e-5c5a-4a6e-9a3e-0123456789ab"), isVideoId("../x"), isOperationName("models/veo/operations/abc-123"), isOperationName("../../etc"), isOperationName("a b"), isOperationName(5)], [true, false, true, false, false, false]);
   eq("video: the model is Veo 3 unless set, and keeping defaults to thirty", [videoModel(), DEFAULT_VIDEO_MODEL, videoKeepLimit()], ["veo-3.0-generate-001", "veo-3.0-generate-001", 30]);
 
+  eq("included marks: only plain ids, once each, capped", [cleanIncluded(["a", "a", "b c", 5, "../x", "ok-1"]), cleanIncluded("x"), cleanIncluded(Array.from({ length: 300 }, (_, i) => `m${i}`)).length], [["a", "ok-1"], [], 200]);
+  eq("included marks: toggled on and off, applied without changing the list's own flags", [toggleIncluded(["a"], "b"), toggleIncluded(["a", "b"], "a"), withIncluded([{ id: "a" }, { id: "b", free: false }, { id: "c", free: true }], ["b"]).map((m) => m.free ?? false)], [["a", "b"], ["b"], [false, true, true]]);
+  eq("included marks: saved and read back, and storage that throws is just empty", (() => { const mem = new Map<string, string>(); saveIncluded({ setItem: (k: string, v: string) => void mem.set(k, v) }, ["x", "y"]); return [mem.has(INCLUDED_KEY), loadIncluded({ getItem: (k: string) => mem.get(k) ?? null }), loadIncluded({ getItem: () => { throw new Error("blocked"); } })]; })(), [true, ["x", "y"], []]);
+
+  eq("catalog: a parameter's choices are found in the shapes they might come in", [optionsOf([1, 2]), optionsOf({ options: ["a"] }), optionsOf({ enum: [5, 10] }), optionsOf({ min: 4, max: 8, default: 6 }), optionsOf({ min: 1, max: 1000 }), optionsOf("x"), optionsOf(null)], [[1, 2], ["a"], [5, 10], [4, 6, 8], null, null, null]);
+  eq("catalog: pricing becomes one line from whatever numbers are there", [summarisePricing({ currency: "USD", perGeneration: 0.35 }), summarisePricing({ currency: "USD", per_second: 0.05 }), summarisePricing({ currency: "USD", resolution: { "720p": 0.4, "1080p": 0.9 } }), summarisePricing({ currency: "USD" }), summarisePricing(null)], ["$0.35 per generation", "$0.05 per second", "from $0.40 resolution (720p)", null, null]);
+  eq("catalog: included means a flag the list sets, or a price of exactly zero — and nothing else", [isIncluded({ id: "a", included: true }), isIncluded({ id: "a", pricing: { subscriptionIncluded: true } }), isIncluded({ id: "a", pricing: { perGeneration: 0 } }), isIncluded({ id: "a", pricing: { resolution: { "720p": 0, "1080p": 0 } } }), isIncluded({ id: "a", pricing: { perGeneration: 0.35 } }), isIncluded({ id: "a", pricing: { currency: "USD" } }), isIncluded({ id: "a", free: "yes" }), isIncluded({ id: "a" })], [true, true, true, true, false, false, false, false]);
+  const sample = { object: "list", data: [
+    { id: "veo3-video", name: "Veo 3", capabilities: { text_to_video: true, audio_generation: true }, supported_parameters: { duration: { options: ["8"] }, aspect_ratio: { options: ["16:9", "9:16", "auto"] }, resolution: { options: ["720p", "1080p"] } }, pricing: { currency: "USD", perGeneration: 2.5 } },
+    { id: "free-clip", name: "Free Clip", capabilities: { text_to_video: true, audio_generation: false }, pricing: { currency: "USD", perGeneration: 0 }, supported_parameters: {} },
+    { id: "img-only", name: "Animate", capabilities: { text_to_video: false, image_to_video: true } },
+    { id: "bad id with spaces", name: "x" },
+    { id: "veo3-video", name: "dup" },
+    { id: "mystery" },
+    null, 5, "x",
+  ] };
+  const parsed = parseCatalog(sample);
+  eq("catalog: usable text-to-video entries only, once each, junk ignored", parsed.map((m) => m.id), ["veo3-video", "free-clip", "mystery"]);
+  eq("catalog: what a model offers comes from its own parameters, filtered to real values", [parsed[0].seconds, parsed[0].aspects, parsed[0].resolutions, parsed[0].sound, parsed[0].label, parsed[0].price, parsed[0].free], [[8], ["16:9", "9:16"], ["720p", "1080p"], "yes", "Veo 3", "$2.50 per generation", false]);
+  eq("catalog: a zero price is free, and sound follows the list's own audio flag", [parsed[1].free, parsed[1].sound, parsed[1].seconds], [true, "no", [5, 8, 10]]);
+  eq("catalog: a model with nothing known gets sensible defaults and unknown sound", [parsed[2].sound, parsed[2].aspects, parsed[2].free, parsed[2].price, parsed[2].source], ["unknown", ["16:9", "9:16"], false, null, "live"]);
+  eq("catalog: nothing parseable is an empty list, never a throw", [parseCatalog(null).length, parseCatalog({}).length, parseCatalog({ data: "x" }).length, parseCatalog({ data: [] }).length], [0, 0, 0, 0]);
+  eq("catalog: a subscription-only listing names the included ids", [...parseIncludedIds({ data: [{ id: "a" }, { id: "b" }, {}, null] })].sort(), ["a", "b"]);
+  const split = splitFreePaid([{ ...parsed[0] }, { ...parsed[1] }, { ...parsed[2] }]);
+  eq("catalog: free and paid are split, each by name", [split.free.map((m) => m.id), split.paid.map((m) => m.id)], [["free-clip"], ["mystery", "veo3-video"]]);
+  eq("catalog: the built-in list is all paid until you say otherwise and says where it came from", [builtinCatalog().every((m) => m.free === false), builtinCatalog()[0].source], [true, "builtin"]);
+
   eq("nanogpt video: both documented status shapes are read, in either case", [
     parseNanoStatus({ requestId: "r", data: { status: "COMPLETED", output: { video: { url: "https://x/v.mp4" } }, cost: 0.35 } }),
     parseNanoStatus({ status: "completed", videoUrl: "https://x/v.mp4" }),
@@ -3686,12 +3715,14 @@ console.log("\n--- batch M: personalities, pictures, start-up ---");
   ], [{ state: "done", url: "https://x/v.mp4", cost: 0.35 }, { state: "done", url: "https://x/v.mp4", cost: undefined }, { state: "pending", cost: undefined }, { state: "pending", cost: undefined }, { state: "failed", error: "Try another prompt", cost: undefined }, { state: "cancelled", error: "NanoGPT cancelled the job.", cost: undefined }]);
   eq("nanogpt video: 'completed' with no link is a failure, not an endless wait; junk is still going", [parseNanoStatus({ data: { status: "COMPLETED" } }).state, parseNanoStatus(null).state, parseNanoStatus("x").state, parseNanoStatus({ data: { status: "weird" } }).state], ["failed", "pending", "pending", "pending"]);
   eq("nanogpt video: job ids are checked before they go into a URL", [isRunId("vid_abc-123"), isRunId("a/../b"), isRunId("a b"), isRunId("")], [true, false, false, false]);
-  eq("video models: Veo 3 is the default and the only one documented to have sound", [pickNanoModel(undefined, {}).id, NANO_VIDEO_MODELS.filter((m) => m.sound === "yes").map((m) => m.id)], ["veo3-video", ["veo3-video"]]);
-  eq("video models: a known id is honoured, an unknown one falls back, the env setting is a default", [pickNanoModel("sora-2", {}).id, pickNanoModel("nonsense", {}).id, pickNanoModel(undefined, { JARVIS_NANOGPT_VIDEO_MODEL: "kling-video-v2" }).id, pickNanoModel("veo3-1-video", { JARVIS_NANOGPT_VIDEO_MODEL: "kling-video-v2" }).id], ["sora-2", "veo3-video", "kling-video-v2", "veo3-1-video"]);
+  const live = builtinCatalog();
+  eq("video models: Veo 3 is the default and the only built-in documented to have sound", [resolveNanoModel(undefined, live, {})?.id, NANO_VIDEO_MODELS.filter((m) => m.sound === "yes").map((m) => m.id)], ["veo3-video", ["veo3-video"]]);
+  eq("video models: a listed id is honoured, an unlisted one is NOT swapped for another, the env setting is a default", [resolveNanoModel("sora-2", live, {})?.id, resolveNanoModel("nonsense", live, {}), resolveNanoModel(undefined, live, { JARVIS_NANOGPT_VIDEO_MODEL: "kling-video-v2" })?.id, resolveNanoModel("veo3-1-video", live, { JARVIS_NANOGPT_VIDEO_MODEL: "kling-video-v2" })?.id, resolveNanoModel(undefined, [], {})], ["sora-2", null, "kling-video-v2", "veo3-1-video", null]);
+  eq("video models: with no Veo 3 on offer the first listed is the default", resolveNanoModel(undefined, live.filter((m) => m.id !== "veo3-video"), {})?.id, "veo3-1-video");
   eq("video models: a length is moved to the nearest the model takes, shorter on a tie", [nearestSeconds(findNanoModel("veo3-video")!, 4), nearestSeconds(findNanoModel("sora-2")!, 6), nearestSeconds(findNanoModel("kling-video-v2")!, 8), nearestSeconds(findNanoModel("kling-video-v2")!, 12)], [8, 4, 10, 10]);
   eq("video provider: NanoGPT first, Gemini as the fallback, neither is none, and it can be forced", [pickProvider({ nanogpt: "n", gemini: "g" }, {}), pickProvider({ gemini: "g" }, {}), pickProvider({}, {}), pickProvider({ nanogpt: "n", gemini: "g" }, { JARVIS_VIDEO_PROVIDER: "gemini" }), pickProvider({ nanogpt: "n" }, { JARVIS_VIDEO_PROVIDER: "gemini" })], ["nanogpt", "gemini", null, "gemini", null]);
-  eq("video provider: the backend carries the chosen model and whether it makes sound", [chooseBackend({ nanogpt: "n" }, undefined, {})?.backend.model, chooseBackend({ nanogpt: "n" }, "kling-video-v2", {})?.sound, chooseBackend({ gemini: "g" }, undefined, {})?.backend.id, chooseBackend({}, undefined, {})], ["veo3-video", "no", "gemini", null]);
-  eq("video provider: the studio is told the models only when NanoGPT is the one", [describeVideo({ nanogpt: "n" }, {}).models.length, describeVideo({ gemini: "g" }, {}).models.length, describeVideo({}, {}).available], [NANO_VIDEO_MODELS.length, 0, false]);
+  eq("video provider: the backend carries the chosen model and whether it makes sound; an unlisted model is null", [chooseBackend({ nanogpt: "n" }, undefined, live, {})?.backend.model, chooseBackend({ nanogpt: "n" }, "kling-video-v2", live, {})?.sound, chooseBackend({ gemini: "g" }, undefined, [], {})?.backend.id, chooseBackend({}, undefined, live, {}), chooseBackend({ nanogpt: "n" }, "nope", live, {})], ["veo3-video", "no", "gemini", null, null]);
+  eq("video provider: the studio is told the models only when NanoGPT is the one", [describeVideo({ nanogpt: "n" }, live, {}).models.length, describeVideo({ gemini: "g" }, live, {}).models.length, describeVideo({}, live, {}).available], [live.length, 0, false]);
   eq("video prompt: a silent model is not asked for voices", [composeVideoPrompt({ scene: "A cat", speech: "Hi", sound: "purring", realistic: false }, false), composeVideoPrompt({ scene: "A cat", speech: "Hi", sound: "purring", realistic: false }, true).includes("Dialogue")], ["A cat.", true]);
 
   eq("tabs: seven, the last showing everything", [SETTINGS_TABS.length, SETTINGS_TABS.at(-1)!.id], [7, "all"]);
